@@ -1,6 +1,6 @@
 # AutonomousML for Anime Drawing — In-Between Co-pilot
 
-An artist-assist tool for anime in-betweening ("DLSS for anime"). Given a small number of
+An artist-assist tool for anime in-betweening. Given a small number of
 content-close key drawings, the co-pilot interpolates the missing in-between frames to add
 smoothness and frame-rate, and then runs quality assurance on its own output. The human animator
 keeps the key animation (genga); the co-pilot handles the in-between / clean-up tier (douga) plus
