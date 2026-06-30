@@ -14,6 +14,7 @@ and otherwise it abstains and asks the artist for another key.
 
 ## The problem
 https://github.com/user-attachments/assets/065987e5-e4c7-4644-9915-ec9c5cc10977
+
 *Art Example*
 The model detect the lagre gap in drawing animation
 
