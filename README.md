@@ -13,10 +13,6 @@ and otherwise it abstains and asks the artist for another key.
 
 
 ## The problem
-https://github.com/user-attachments/assets/065987e5-e4c7-4644-9915-ec9c5cc10977
-
-*Art Example*
-The model detect the lagre gap in drawing animation
 
 Anime is not animated on every frame. Drawings are commonly held for two or three frames ("on-2s"
 and "on-3s"), and motion arrives as holds, snaps, and smears rather than smooth displacement. A
@@ -27,6 +23,11 @@ breakdown drawings across distant keys) is out of scope and is treated as a diff
 
 
 ## How it works
+
+https://github.com/user-attachments/assets/065987e5-e4c7-4644-9915-ec9c5cc10977
+
+*Art Example*
+The model detect the lagre gap in drawing animation
 
 The pipeline runs in five stages.
 
