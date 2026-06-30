@@ -24,7 +24,7 @@ breakdown drawings across distant keys) is out of scope and is treated as a diff
 
 ## How it works
 
-https://github.com/user-attachments/assets/065987e5-e4c7-4644-9915-ec9c5cc10977
+https://github.com/user-attachments/assets/e8606dd8-0ee8-479a-a2a4-11fda6193c67
 
 *Art Example*
 The model detect the lagre gap in drawing animation
