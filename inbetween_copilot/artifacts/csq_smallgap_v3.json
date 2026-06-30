@@ -1,0 +1,41 @@
+{
+  "calibrator": {
+    "a": 9.987834293558752,
+    "b": -3.0009713768716875,
+    "u_edges": [
+      0.0,
+      0.3333333333333333,
+      0.6666666666666666,
+      1.0
+    ],
+    "tau_pass": [
+      0.3056754022834366,
+      0.0,
+      0.0
+    ],
+    "tau_flag": [
+      0.6069628581854116,
+      1.0,
+      1.0
+    ],
+    "u_max": 0.6,
+    "alpha_miss": 0.05
+  },
+  "base_auc": {
+    "vlm": 0.9,
+    "softness": 0.9,
+    "sharpness": 0.7
+  },
+  "tau_soft": 0.15,
+  "k": 4,
+  "lam": 0.5,
+  "version": "smallgap_v3",
+  "vlm_mode": "continuous",
+  "sharp_mode": "relative",
+  "meta": {
+    "suite": "suite_smallgap",
+    "n_fit": 73,
+    "n_err": 28,
+    "note": "continuous VLM + content-relative sharpness (soft_worst); \u00a75k+\u00a75m"
+  }
+}

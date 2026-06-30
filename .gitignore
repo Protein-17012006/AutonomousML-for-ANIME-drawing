@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# Secrets / env
+.env
+*.env
+.env.*
+
+# Node / frontend build
+node_modules/
+frontend/node_modules/
+frontend/dist/
+
+# Caches / OS / IDE
+.pytest_cache/
+.mypy_cache/
+.DS_Store
+Thumbs.db
+Desktop.ini
+.vscode/
+.idea/
