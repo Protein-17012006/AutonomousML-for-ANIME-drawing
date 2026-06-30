@@ -13,9 +13,7 @@ and otherwise it abstains and asks the artist for another key.
 
 
 ## The problem
-
-
-https://github.com/user-attachments/assets/cba56bf8-ddd4-441e-9db9-1dc5904c3905
+https://github.com/user-attachments/assets/065987e5-e4c7-4644-9915-ec9c5cc10977
 
 Anime is not animated on every frame. Drawings are commonly held for two or three frames ("on-2s"
 and "on-3s"), and motion arrives as holds, snaps, and smears rather than smooth displacement. A
