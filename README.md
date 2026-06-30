@@ -27,7 +27,7 @@ breakdown drawings across distant keys) is out of scope and is treated as a diff
 https://github.com/user-attachments/assets/e8606dd8-0ee8-479a-a2a4-11fda6193c67
 
 *Art Example*
-The model detect the lagre gap in drawing animation
+The model detect the lagre gap in drawing animation, it will not generate frame if it unsure, invoke artist to do.
 
 The pipeline runs in five stages.
 
