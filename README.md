@@ -54,6 +54,12 @@ The pipeline runs in five stages.
   fix, re-QA, with a hard iteration cap. The escalation ladder is region-refill, then engine-
   escalate, then ask-key. Terminal states are resolved, needs-key, or unresolved.
 
+*Auto smooth frame output Example*
+
+https://github.com/user-attachments/assets/31d25bfc-d19b-4bdb-b104-86e5861ddcbf
+
+The system respect the work and do not distort its intended meaning.
+
 
 ## The agentic loop
 
