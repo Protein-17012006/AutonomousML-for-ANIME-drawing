@@ -1,3 +1,4 @@
+"use client";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { PairEvent, ResultEvent, DemoResult, Explanation, CsqBand } from "./types";
 import { runSession, runDemo, runVideoSession, askQuestion } from "./api";
