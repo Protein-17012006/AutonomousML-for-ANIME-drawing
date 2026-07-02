@@ -99,6 +99,21 @@ export async function runVideoSession(
   await pumpSSE(resp.body, h);
 }
 
+/** Grounded session Q&A — answers ONLY from the retained session facts;
+ *  grounded=false marks the deterministic offline fallback. */
+export async function askQuestion(
+  sid: string,
+  question: string,
+): Promise<{ answer: string; grounded: boolean }> {
+  const resp = await fetch(`/session/${sid}/ask`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question }),
+  });
+  if (!resp.ok) throw new Error(`/ask failed: ${resp.status}`);
+  return (await resp.json()) as { answer: string; grounded: boolean };
+}
+
 /** POST a full cut → side-by-side original-vs-RIFE comparison video. */
 export async function runDemo(files: File[], engines: string, fps: string): Promise<DemoResult> {
   const fd = new FormData();

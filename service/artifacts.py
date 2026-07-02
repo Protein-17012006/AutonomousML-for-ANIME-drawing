@@ -64,6 +64,19 @@ def build_report(result: CopilotResult, out_dir: str) -> str:
             f"| {p.index} | {p.action} | {p.route or '-'} | {qa_s} | {qa_r} |\n"
         )
 
+    # director trace: per corrected pair, the loop's per-round action + reason
+    # (the demo's "watch the agent decide" surface — vault 'DeepSeek Director Wiring')
+    corrected = [p for p in result.pairs if getattr(p, "correction", None) is not None]
+    if corrected:
+        lines.append("\n## Correction loop (director trace)\n")
+        for p in corrected:
+            c = p.correction
+            lines.append(f"- pair {p.index}: {c.status} after {len(c.rounds)} round(s),"
+                         f" keys_used={c.keys_used}\n")
+            for i, r in enumerate(c.rounds):
+                lines.append(f"    - round {i}: {r.action_kind}"
+                             f" — {getattr(r, 'reason', '')}\n")
+
     path = os.path.join(out_dir, "report.md")
     with open(path, "w", encoding="utf-8") as fh:
         fh.writelines(lines)
@@ -217,4 +230,18 @@ def build_pair_frames(result: CopilotResult, out_dir: str) -> "dict[int, str]":
         fn = save_pair_mid(p, out_dir)
         if fn is not None:
             out[p.index] = fn
+    return out
+
+
+def build_key_frames(keys: List[np.ndarray], out_dir: str) -> "dict[int, str]":
+    """Save each decoded KEY frame as ``key_<i>.png`` and return ``{key_index: filename}``.
+    Needed for the drop-a-video flow: there the keys are decoded server-side from the video,
+    so (unlike PNG upload) the client has no object URL for them — without these the review
+    triptych's A/B cells render black. Cheap: keys are small and capped at MAX_KEYS."""
+    out: "dict[int, str]" = {}
+    for i, k in enumerate(keys):
+        arr = k if isinstance(k, np.ndarray) else np.array(k, dtype=np.uint8)
+        fname = f"key_{i}.png"
+        Image.fromarray(arr.astype(np.uint8)).save(os.path.join(out_dir, fname))
+        out[i] = fname
     return out

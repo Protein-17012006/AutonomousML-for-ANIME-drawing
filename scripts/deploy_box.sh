@@ -20,13 +20,21 @@ DEST="${BOX_USER}@${BOX_HOST}"
 
 # what to ship: the service, the vanilla web UI (fallback), the built React SPA
 # (frontend/dist -> ~/copilot_svc/dist, served when COPILOT_WEB_DIR=dist), the core
-# lib (compare.py is new), the box-only comparison script, and the daemon launcher.
+# lib, its RUNTIME imports (inbetween_copilot/signals/* imports benchmark.{lib,smallgap}
+# at import time, and wiring's qa_fn needs vision_common — omitting them left stale
+# copies on the box: the audit's #3 finding, 2026-07-02), and the daemon launcher.
 # NB: build the SPA first (`cd frontend && npm run build`) — frontend/dist must exist.
-PATHS=(service web frontend/dist inbetween_copilot .scratch/fullloop/compare_video.py scripts/box_start_service.sh)
+PATHS=(service web frontend/dist inbetween_copilot benchmark vision_common scripts/box_start_service.sh)
+# box-only comparison script: git-ignored scratch — ship only when present so a
+# fresh clone's deploy doesn't abort under `set -euo pipefail`.
+[ -e .scratch/fullloop/compare_video.py ] && PATHS+=(.scratch/fullloop/compare_video.py)
 
 echo ">> deploying to ${DEST}:${BOX_DIR}"
 if command -v rsync >/dev/null 2>&1; then
+  # suites/ + results/ = local benchmark DATA (5,984 PNGs ≈ 1.3 GB) — the box only
+  # needs the benchmark CODE (lib/, smallgap/, triage/) the pipeline imports.
   rsync -av --exclude='__pycache__' --exclude='*.pyc' \
+        --exclude='suites/' --exclude='results/' \
         "${PATHS[@]}" "${DEST}:${BOX_DIR}/"
 else
   echo "   (rsync not found, falling back to scp -r)"

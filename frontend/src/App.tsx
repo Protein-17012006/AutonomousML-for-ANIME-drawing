@@ -1,7 +1,11 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { PairEvent, ResultEvent, DemoResult, Explanation, CsqBand } from "./types";
-import { runSession, runDemo, runVideoSession } from "./api";
+import { runSession, runDemo, runVideoSession, askQuestion } from "./api";
 import { regionLabel, errTypeLabel, actionLabel, readableReason, qaLabel } from "./labels";
+import { FilePicker, PegBar } from "./components/Inputs";
+import { deriveMessages, type QaTurn, type UserTurn } from "./lib/chatModel";
+import { ChatView } from "./components/chat/ChatView";
+import { ChatComposer } from "./components/chat/ChatComposer";
 
 /* ---------- file accumulation (dedup by name+size, sorted) ---------- */
 function useFileSet() {
@@ -167,186 +171,8 @@ function QAPanel({ p, band, ex }: { p: PairEvent | null; band?: CsqBand | null; 
 }
 
 /* ---------- hidden file input + styled label trigger ---------- */
-function FilePicker({ id, label, onAdd }: { id: string; label: string; onAdd: (files: File[]) => void }) {
-  return (
-    <>
-      <input
-        type="file"
-        id={id}
-        accept="image/png"
-        multiple
-        className="visually-hidden"
-        onChange={(e) => {
-          // Snapshot the files NOW: in Chromium, resetting input.value="" empties the
-          // live FileList, so handing it to a deferred setState updater loses everything
-          // (the load→clear→load bug). A plain array is independent of the input.
-          const picked = Array.from(e.currentTarget.files ?? []);
-          e.currentTarget.value = ""; // allow re-picking the same files (re-fires change)
-          onAdd(picked);
-        }}
-      />
-      <label htmlFor={id} className="btn btn-ghost">{label}</label>
-    </>
-  );
-}
-
-/* ---------- peg-bar brand glyph (the strip every animation sheet clamps onto) ---------- */
-function PegBar() {
-  return (
-    <svg className="pegbar" viewBox="0 0 44 18" aria-hidden="true">
-      <rect className="pb-bar" x="0" y="3" width="44" height="12" rx="3" />
-      <rect className="pb-hole" x="6" y="6" width="7" height="6" rx="3" />
-      <circle className="pb-hole" cx="22" cy="9" r="3.4" />
-      <rect className="pb-hole" x="31" y="6" width="7" height="6" rx="3" />
-      <circle className="pb-ring" cx="22" cy="9" r="3.4" />
-    </svg>
-  );
-}
-
-/* ---------- keyframe dropzone: the peg-bar light-table (drag-drop + cel contact-sheet) ---------- */
-function KeyframeDropzone({ files, urls, onAdd, onRemove, onClear, compact }: {
-  files: File[]; urls: string[]; onAdd: (files: File[]) => void; onRemove: (f: File) => void; onClear: () => void; compact?: boolean;
-}) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [over, setOver] = useState(false);
-  const [open, setOpen] = useState(true);   // expand / collapse the cel contact-sheet
-  useEffect(() => { if (compact) setOpen(false); }, [compact]); // once a run exists, fold the contact-sheet to reclaim top space
-  // drop accepts only PNG cels (the click path already filters via accept="image/png")
-  const acceptPng = (list: FileList | null) =>
-    onAdd(Array.from(list ?? []).filter((f) => f.type === "image/png" || f.name.toLowerCase().endsWith(".png")));
-  return (
-    <div className="dropzone-wrap">
-      <div
-        className={`dropzone${over ? " is-over" : ""}`}
-        role="button"
-        tabIndex={0}
-        onClick={() => inputRef.current?.click()}
-        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); inputRef.current?.click(); } }}
-        onDragOver={(e) => { e.preventDefault(); setOver(true); }}
-        onDragLeave={() => setOver(false)}
-        onDrop={(e) => { e.preventDefault(); setOver(false); acceptPng(e.dataTransfer.files); }}
-      >
-        <input
-          ref={inputRef}
-          type="file"
-          accept="image/png"
-          multiple
-          className="visually-hidden"
-          onChange={(e) => {
-            // snapshot before resetting value (the load→clear→load bug; see FilePicker)
-            const picked = Array.from(e.currentTarget.files ?? []);
-            e.currentTarget.value = "";
-            onAdd(picked);
-          }}
-        />
-        <PegBar />
-        <span className="dropzone-cap">
-          {files.length === 0 ? "Drop PNG keyframes — or click to load" : `${files.length} keyframes · drop or click to add more`}
-        </span>
-        <span className="dropzone-sub">PNG · 2+ keys to run</span>
-      </div>
-      {files.length > 0 && (
-        <>
-          <div className="celstrip-head">
-            <button type="button" className="celstrip-toggle" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-              <span className="celstrip-caret">{open ? "▾" : "▸"}</span> {files.length} keyframes
-            </button>
-            <button type="button" className="cel-clear" onClick={onClear}>Clear all</button>
-          </div>
-          {open && (
-            <div className="celstrip">
-              {files.map((f, i) => (
-                <figure className="cel" key={f.name + f.size}>
-                  <div className="cel-frame">
-                    <img src={urls[i]} alt={f.name} draggable={false} />
-                    <span className="cel-pegs" aria-hidden="true" />
-                    <button type="button" className="cel-x" title={`remove ${f.name}`}
-                      onClick={(e) => { e.stopPropagation(); onRemove(f); }}>×</button>
-                  </div>
-                  <figcaption>{f.name}</figcaption>
-                </figure>
-              ))}
-            </div>
-          )}
-        </>
-      )}
-    </div>
-  );
-}
-
-/* ---------- command bar ---------- */
-interface ConsoleProps {
-  files: File[];
-  fileUrls: string[];
-  onAdd: (files: File[]) => void;
-  onRemove: (f: File) => void;
-  onClear: () => void;
-  engines: string;
-  setEngines: (s: string) => void;
-  fps: string;
-  setFps: (s: string) => void;
-  onRun: () => void;
-  running: boolean;
-  compact: boolean;
-  videoFile: File | null;
-  onVideo: (f: File | null) => void;
-  stride: string;
-  setStride: (s: string) => void;
-  onRunVideo: () => void;
-}
-function Console(p: ConsoleProps) {
-  return (
-    <header className="console">
-      <div className="brand">
-        <PegBar />
-        <div>
-          <h1>In-Between Co-pilot</h1>
-          <p className="tier">中割り douga · 作監 on-model QA</p>
-        </div>
-      </div>
-      {!p.compact && (
-        <p className="thesis">
-          Keyframes in · clean in-betweens out · the uncertain ones flagged for your eyes.
-        </p>
-      )}
-      <div className="controls" role="group" aria-label="Run controls">
-        <label className="field">
-          engine
-          <select value={p.engines} onChange={(e) => p.setEngines(e.target.value)}>
-            <option value="box">Co-pilot (GPU)</option>
-            <option value="stub">Demo (no GPU)</option>
-          </select>
-        </label>
-        <label className="field">
-          shoot rate
-          <input type="number" min={1} max={60} step={1} value={p.fps} onChange={(e) => p.setFps(e.target.value)} />
-        </label>
-        <label className="field">
-          or video
-          <input type="file" accept="video/mp4,video/*"
-            onChange={(e) => { const f = e.currentTarget.files?.[0] ?? null; e.currentTarget.value = ""; p.onVideo(f); }} />
-        </label>
-        {p.videoFile && (
-          <label className="field">
-            stride
-            <input type="number" min={1} max={12} step={1} value={p.stride}
-              onChange={(e) => p.setStride(e.target.value)} />
-          </label>
-        )}
-        {p.videoFile ? (
-          <button className="btn btn-primary" disabled={p.running} onClick={p.onRunVideo}>
-            {p.running ? "Running…" : `Run video (${p.videoFile.name})`}
-          </button>
-        ) : (
-          <button className="btn btn-primary" disabled={p.files.length < 2 || p.running} onClick={p.onRun}>
-            {p.running ? "Running…" : "Run"}
-          </button>
-        )}
-      </div>
-      <KeyframeDropzone files={p.files} urls={p.fileUrls} onAdd={p.onAdd} onRemove={p.onRemove} onClear={p.onClear} compact={p.compact} />
-    </header>
-  );
-}
+/* FilePicker / PegBar / KeyframeDropzone / shortName moved to components/Inputs.tsx;
+   the old Console header is superseded by the chat composer (chat-first surface). */
 
 /* ---------- per-pair line-test (flip key_A → in-between → key_B) ---------- */
 type Frame = { url: string; label: string };
@@ -721,7 +547,7 @@ function downloadReview(log: PairEvent[], verdicts: Record<number, "accept" | "r
   setTimeout(() => URL.revokeObjectURL(url), 1500);
 }
 
-function ReviewWorkbench({ log, result, running, keyUrls, verdicts, onVerdict, onRefill, compareSlot, fps }: {
+function ReviewWorkbench({ log, result, running, keyUrls, verdicts, onVerdict, onRefill, compareSlot, fps, initialFocus }: {
   log: PairEvent[];
   result: ResultEvent | null;
   running: boolean;
@@ -731,9 +557,12 @@ function ReviewWorkbench({ log, result, running, keyUrls, verdicts, onVerdict, o
   onRefill: (index: number, file: File) => void;
   compareSlot: React.ReactNode;
   fps: number;
+  initialFocus?: number | null;   // chat "Review this pair" deep-link
 }) {
   const [filter, setFilter] = useState<Filter>("all");
-  const [focused, setFocused] = useState<number | null>(null);
+  const [focused, setFocused] = useState<number | null>(initialFocus ?? null);
+  // re-entering the board from a different chat bubble refocuses that pair
+  useEffect(() => { if (initialFocus != null) setFocused(initialFocus); }, [initialFocus]);
   const [exported, setExported] = useState(false);              // Export ⤓ → clean-cel ✓ morph
   const [glider, setGlider] = useState({ left: 0, width: 0 });  // sliding "current-cel" triage marker
   const [reconOpen, setReconOpen] = useState(false);            // the reconstructed-cut band (collapsed until invoked — payoff shouldn't steal the triage fold)
@@ -742,6 +571,7 @@ function ReviewWorkbench({ log, result, running, keyUrls, verdicts, onVerdict, o
   const tabsRef = useRef<HTMLDivElement>(null);
   const explanations = result?.explanations;
   const mids = result?.pair_mids;
+  const samp = result?.sampling;   // drop-a-video decimation summary (null for PNG upload)
   const video = result?.artifacts?.video;
 
   const filled = log.filter((p) => p.action !== "needs_key");
@@ -987,6 +817,15 @@ function ReviewWorkbench({ log, result, running, keyUrls, verdicts, onVerdict, o
         </main>
       ) : (
       <>
+      {samp && (
+        /* drop-a-video transparency: how the clip was decimated into keys, and a warning when
+           the stride was auto-coarsened (the reconstruction samples the source, not every frame). */
+        <div className={`sampling-note${samp.stride > samp.requested_stride ? " warn" : ""}`}>
+          {samp.stride > samp.requested_stride
+            ? `⚠ Long clip — auto-coarsened to 1 key every ${samp.stride} frames (kept ${samp.kept} of ${samp.source_frames}). This samples the cut, not every frame; trim to a single short cut for a faithful reconstruction.`
+            : `Decimated: kept ${samp.kept} keys of ${samp.source_frames} frames (1 every ${samp.stride}).`}
+        </div>
+      )}
       {video && (
         /* the reconstructed cut = the payoff, a full-width band above the columns (collapsible) */
         <div className={`recon-band${reconOpen ? "" : " is-collapsed"}`}>
@@ -1266,9 +1105,26 @@ export default function App() {
   const [demoBanner, setDemoBanner] = useState<string | null>(null);
   const [demoResult, setDemoResult] = useState<DemoResult | null>(null);
 
+  // chat-first surface state (vault 'Chat-First Copilot Surface')
+  const [view, setView] = useState<"chat" | "board">("chat");
+  const [boardFocus, setBoardFocus] = useState<number | null>(null);
+  const [upload, setUpload] = useState<UserTurn | null>(null);
+  const [qaTurns, setQaTurns] = useState<QaTurn[]>([]);
+
   // object URLs for the uploaded keys (key A/B of each pair = keyUrls[i], keyUrls[i+1]).
   const keyUrls = useMemo(() => keys.files.map((f) => URL.createObjectURL(f)), [keys.files]);
   useEffect(() => () => keyUrls.forEach((u) => URL.revokeObjectURL(u)), [keyUrls]);
+
+  // Effective key images for the review triptych. PNG upload → client object URLs. Drop-a-video
+  // has no client files (keys are decoded server-side), so fall back to the server-served
+  // key_urls from the result — otherwise the A/B cells render black.
+  const effKeyUrls = useMemo(() => {
+    if (keyUrls.length) return keyUrls;
+    const sk = result?.key_urls;
+    if (!sk) return keyUrls;
+    const n = Object.keys(sk).length;
+    return Array.from({ length: n }, (_, i) => sk[String(i)] ?? "");
+  }, [keyUrls, result]);
 
   // Clear resets the whole review session (keys + log + results + verdicts + banner),
   // not just the loaded keyframes.
@@ -1278,6 +1134,9 @@ export default function App() {
     setResult(null);
     setVerdicts({});
     setBanner(null);
+    setUpload(null);
+    setQaTurns([]);
+    setView("chat");
   };
 
   const run = async () => {
@@ -1285,6 +1144,11 @@ export default function App() {
     setLog([]);
     setResult(null);
     setVerdicts({});
+    setQaTurns([]);
+    setUpload({
+      label: `${keys.files.length} keyframes · ${engines === "box" ? "Co-pilot (GPU)" : "Demo"} · ${fps} fps`,
+      thumbs: keyUrls.slice(0, 6),
+    });
     setRunning(true);
     try {
       await runSession(keys.files, engines, fps, {
@@ -1305,6 +1169,11 @@ export default function App() {
     setLog([]);
     setResult(null);
     setVerdicts({});
+    setQaTurns([]);
+    setUpload({
+      label: `${videoFile.name} · stride ${stride} · ${engines === "box" ? "Co-pilot (GPU)" : "Demo"}`,
+      thumbs: [],
+    });
     setRunning(true);
     try {
       await runVideoSession(videoFile, stride, fps, engines, {
@@ -1372,48 +1241,85 @@ export default function App() {
     setDemoBanner(null);
   };
 
+  // grounded session Q&A → POST /session/{sid}/ask (sid via the same artifact-URL
+  // trick refillKey uses); the pending turn renders as a typing indicator.
+  const onAsk = async (q: string) => {
+    const ref = result?.artifacts?.montage || result?.artifacts?.video;
+    const sid = ref ? ref.split("/")[2] : null;
+    if (!sid) return;
+    const n = qaTurns.length;
+    setQaTurns((prev) => [...prev, { q, answer: null }]);
+    try {
+      const r = await askQuestion(sid, q);
+      setQaTurns((prev) => prev.map((t, i) => (i === n ? { ...t, answer: r.answer, grounded: r.grounded } : t)));
+    } catch {
+      setQaTurns((prev) => prev.map((t, i) =>
+        (i === n ? { ...t, answer: "Couldn't reach the assistant — is the service running? Try again.", grounded: false } : t)));
+    }
+  };
+
+  const msgs = useMemo(
+    () => deriveMessages({ upload, log, result, running, banner, qa: qaTurns }),
+    [upload, log, result, running, banner, qaTurns],
+  );
+  const openBoard = (focus: number | null) => { setBoardFocus(focus); setView("board"); };
+
   return (
     <div className="app">
-      <Console
-        files={keys.files}
-        fileUrls={keyUrls}
-        onAdd={keys.add}
-        onRemove={keys.remove}
-        onClear={() => { clearAll(); setVideoFile(null); }}
-        engines={engines}
-        setEngines={setEngines}
-        fps={fps}
-        setFps={setFps}
-        onRun={run}
-        running={running}
-        compact={running || log.length > 0}
-        videoFile={videoFile}
-        onVideo={setVideoFile}
-        stride={stride}
-        setStride={setStride}
-        onRunVideo={runVideo}
-      />
-      <ReviewWorkbench
-        log={log}
-        result={result}
-        running={running}
-        keyUrls={keyUrls}
-        verdicts={verdicts}
-        onVerdict={setVerdict}
-        onRefill={refillKey}
-        fps={Number(fps) || 24}
-        compareSlot={
-          <Compare
-            files={demo.files}
-            onAdd={demo.add}
-            onClear={clearDemo}
-            onBuild={buildDemo}
-            building={demoBuilding}
-            banner={demoBanner}
-            result={demoResult}
+      {view === "chat" ? (
+        <div className="chat-page">
+          <header className="chat-brand">
+            <PegBar />
+            <div>
+              <h1>In-Between Co-pilot</h1>
+              <p className="tier">中割り douga · 作監 on-model QA</p>
+            </div>
+          </header>
+          {!upload && log.length === 0 && !result && <MultiplaneHero />}
+          <ChatView msgs={msgs} keyUrls={effKeyUrls} band={result?.csq}
+            onOpenBoard={openBoard} onRefill={refillKey} onExport={downloadBundle} />
+          <ChatComposer
+            files={keys.files} fileUrls={keyUrls}
+            onAdd={keys.add} onRemove={keys.remove}
+            onClear={() => { clearAll(); setVideoFile(null); }}
+            engines={engines} setEngines={setEngines}
+            fps={fps} setFps={setFps}
+            videoFile={videoFile} onVideo={setVideoFile}
+            stride={stride} setStride={setStride}
+            onRun={run} onRunVideo={runVideo} running={running}
+            compact={running || log.length > 0}
+            askEnabled={!!result?.artifacts} onAsk={onAsk}
           />
-        }
-      />
+        </div>
+      ) : (
+        <>
+          <div className="board-bar">
+            <button type="button" className="btn btn-ghost" onClick={() => setView("chat")}>← Back to chat</button>
+          </div>
+          <ReviewWorkbench
+            log={log}
+            result={result}
+            running={running}
+            keyUrls={effKeyUrls}
+            verdicts={verdicts}
+            onVerdict={setVerdict}
+            onRefill={refillKey}
+            fps={Number(fps) || 24}
+            initialFocus={boardFocus}
+            compareSlot={
+              <Compare
+                files={demo.files}
+                onAdd={demo.add}
+                onClear={clearDemo}
+                onBuild={buildDemo}
+                building={demoBuilding}
+                banner={demoBanner}
+                result={demoResult}
+              />
+            }
+          />
+        </>
+      )}
       {banner && <Toast key={banner} message={banner} onClose={() => setBanner(null)} />}
     </div>
   );

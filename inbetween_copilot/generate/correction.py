@@ -17,6 +17,7 @@ class CorrectionRound:
     region: object          # Region | None
     verdict: object         # QAVerdict (pre-action)
     u_delta: float = 0.0
+    reason: str = ""        # decide()'s provenance-prefixed reason (director:/fixed:/override:)
 
 
 @dataclass
@@ -43,7 +44,8 @@ def correct_inbetween(frames, a, b, *, perceive_fn, localize_fn, decide_fn,
             return CorrectionResult("resolved", cur, rounds, keys_used, v)
         region = localize_fn(cur)
         action = decide_fn(v, region, rounds)
-        rounds.append(CorrectionRound(action.kind, action.region, v))
+        rounds.append(CorrectionRound(action.kind, action.region, v,
+                                      reason=getattr(action, "reason", "")))
         prev_u = float(getattr(v, "u", 0.0))
         if action.kind == "region_refill":
             cur = refill_fn(cur, a, b, action.region)

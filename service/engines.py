@@ -57,6 +57,11 @@ def box_engines(cfg: SessionCfg) -> dict:
     os.environ.setdefault("VISION_BASE_URL_CHECK", "http://100.71.161.102:8001/v1")
     os.environ.setdefault("VISION_MODEL_CHECK", "qwen3vl-anime")
     os.environ.setdefault("VISION_MAX_PIXELS_CHECK", "320")
+    # stale-serve guard, now LIVE at engine-build time (audit 2026-07-02: it was only
+    # reachable from a dead CLI stub). Aborts loudly if a caller exported a mismatched
+    # max_pixels (train=320 vs serve gotcha, memory anime-finetune-32b-feasible).
+    from inbetween_copilot.pipeline.wiring import _assert_max_pixels_320
+    _assert_max_pixels_320()
 
     # --- lazy RIFE import (box-only; fails loudly off-box) ---
     sys.path.insert(0, "/home/long/Practical-RIFE")
@@ -103,6 +108,10 @@ def box_engines(cfg: SessionCfg) -> dict:
     )
 
     _vlm_warned = []   # one-shot "VLM unavailable" notice (degraded-QA mode)
+    # mutable degradation flag surfaced to the client (audit 2026-07-02 finding #6:
+    # VLM down used to stream all-green with no client-visible signal). The worker
+    # reads it after the run -> ResultEvent.qa_degraded.
+    vlm_status = {"degraded": False}
 
     def _post_vlm(prompt, frames):
         """Shared POST helper: encode frames and POST prompt to the VLM endpoint.
@@ -130,6 +139,7 @@ def box_engines(cfg: SessionCfg) -> dict:
             m = re.search(r"\{.*\}", txt, re.S)
             return json.loads(m.group(0)) if m else {}
         except Exception as e:
+            vlm_status["degraded"] = True
             if not _vlm_warned:
                 print(f"[box_engines] VLM at {VLM_URL} unavailable ({e!r}); QA degrades "
                       f"to softness/gate. Start it on the box with: serve.sh 320 "
@@ -165,10 +175,17 @@ def box_engines(cfg: SessionCfg) -> dict:
     # is not feasible in this slice (see copilot_correct.py escalate note).
     anisora_gen = lambda a, m, b, references=None: [a, m, b]
 
-    # --- reason_fn (DeepSeek director): pass None -> falls back to decide_fixed ---
-    # Full wiring is non-trivial (requires DEEPSEEK_API_KEY + HTTP round-trip).
-    # Deferred to a later slice; the director loop still works via decide_fixed.
-    reason_fn = None
+    # --- reason_fn (DeepSeek director) — the agentic brain on the LIVE path ---
+    # make_reason_fn() reads DEEPSEEK_API_KEY/_MODEL/_BASE_URL from the ambient env
+    # (deploy_box.sh does NOT sync .env — export the key in the shell that runs
+    # box_start_service.sh). No key -> None -> decide_fixed (today's behaviour);
+    # endpoint failure -> {} -> decide() falls back per round. Never crashes a run.
+    from service.director_llm import make_reason_fn
+    reason_fn = make_reason_fn()
+    if reason_fn is None:
+        print("[box_engines] DEEPSEEK_API_KEY not set — director runs the fixed "
+              "ladder (decide_fixed), not the DeepSeek brain.",
+              file=sys.stderr, flush=True)
 
     from inbetween_copilot.pipeline.wiring import build_real_callables
     callables = build_real_callables(
@@ -183,6 +200,7 @@ def box_engines(cfg: SessionCfg) -> dict:
     )
     callables["vlm_struct_fn"] = vlm_struct_fn
     callables["rife_engine"] = rife_engine   # raw [a, mid, b] for the decimate-vs-GT demo
+    callables["vlm_status"] = vlm_status     # degraded-QA flag -> ResultEvent.qa_degraded
     # surface the calibrated abstain band so the UI dial can draw the measured pass/abstain/flag
     # zones (per-u-bin thresholds on p_error) — the trust instrument, not just a bare %.
     cal = art.calibrator

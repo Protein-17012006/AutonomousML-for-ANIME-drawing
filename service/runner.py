@@ -5,7 +5,7 @@ from inbetween_copilot.pipeline.copilot import run_copilot, CopilotResult
 
 
 # Keys the service layer adds to the engines dict that run_copilot does not accept.
-_SERVICE_ONLY_KEYS = {"vlm_struct_fn", "rife_engine", "csq_calibrator"}
+_SERVICE_ONLY_KEYS = {"vlm_struct_fn", "rife_engine", "csq_calibrator", "vlm_status"}
 
 
 def run_session(keys, engines: dict, on_pair=None) -> CopilotResult:

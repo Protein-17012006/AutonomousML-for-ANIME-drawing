@@ -12,6 +12,12 @@ export interface PairEvent {
   verdict_prob?: number | null;   // P(error), calibrated — drives the confidence meter + abstain band
   uncertainty?: number | null;    // CSQ uncertainty u — selects the abstain-band threshold bin
   mid_url?: string | null;   // in-between PNG url, streamed live with each pair
+  // correction-loop trace (director decisions) — mirrors PairEvent.correction in schemas.py
+  correction?: {
+    status: string;
+    keys_used: number;
+    rounds: { action: string; reason: string }[];
+  } | null;
 }
 
 // calibrated abstain band for the confidence dial: per-u-bin thresholds on p_error
@@ -31,13 +37,22 @@ export interface Explanation {
 
 export interface ResultEvent {
   n_autopass: number;
+  n_corrected: number;
   flagged: number[];
   abstained: number[];
   keys_requested_total: number;
-  artifacts?: { montage: string; video: string };
+  artifacts?: { montage: string; video: string; report?: string };
   explanations?: Record<string, Explanation>;
   pair_mids?: Record<string, string>;   // pair index -> in-between PNG url (for the line-test)
+  key_urls?: Record<string, string>;    // key index -> key PNG url (drop-a-video flow: keys are server-side)
+  sampling?: {                          // drop-a-video decimation summary (null for PNG upload)
+    source_frames: number;
+    requested_stride: number;
+    stride: number;                     // > requested_stride when the clip was auto-fit (coarser)
+    kept: number;
+  } | null;
   csq?: CsqBand | null;                 // calibrated abstain band for the dial (box engines only)
+  qa_degraded?: boolean;                // true when the served VLM was unreachable during the run
 }
 
 export interface DemoResult {

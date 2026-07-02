@@ -12,22 +12,12 @@ import os
 from vision_common import vision_json
 
 from benchmark.lib.manifest.motion_manifest import MotionManifest
+# prompt literal moved to the dependency-free prompts.py (audit 2026-07-02): the
+# pipeline's signals facade re-exports it, and importing it from HERE dragged
+# vision_common into the pure package.
+from benchmark.lib.detector.prompts import _MOTION_PROMPT  # noqa: F401 (re-export)
 
 _FRAME_EXTS = (".png", ".jpg", ".jpeg", ".webp")
-
-_MOTION_PROMPT = """\
-These are consecutive frames of one short animation clip, in order. Judge ONLY
-the motion across them.
-
-Some clips are clean: smooth, coherent anime motion. Some contain a motion error
-from a generative interpolator — a limb that warps or melts, the character's
-identity or colors drifting between frames, a motion arc that breaks or reverses
-illogically, flicker/popping, or an impossible morph.
-
-Intentional anime stylization (smears, speed lines, squash-and-stretch) is NOT an
-error. Only flag a genuine breakdown in motion coherence.
-
-Return JSON: {"has_motion_error": true or false, "explanation": "<one sentence>"}"""
 
 
 # Anchor-conditioned (IVC) framing — borrowed from Index-AniSora's Image-Video

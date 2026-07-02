@@ -14,6 +14,11 @@ DIR="$HOME/copilot_svc"
 UVICORN="$(ls "$HOME"/cogvideo-venv/bin/uvicorn 2>/dev/null || command -v uvicorn)"
 [ -z "$UVICORN" ] && { echo "FATAL: uvicorn not found (venv missing?)"; exit 1; }
 
+# DeepSeek director/ask key: source the box-local env file when present so EVERY
+# restart path (incl. deploy_box.sh --restart) keeps the LLM live — without it the
+# loop silently degrades to the decide_fixed ladder (2026-07-02 wiring).
+[ -f "$HOME/.copilot_deepseek_env" ] && . "$HOME/.copilot_deepseek_env"
+
 PID="$(ss -ltnp 2>/dev/null | grep ":$PORT" | grep -oP 'pid=\K[0-9]+' | head -1)"
 if [ -n "$PID" ]; then echo "killing old server pid $PID on :$PORT"; kill "$PID"; sleep 2; fi
 

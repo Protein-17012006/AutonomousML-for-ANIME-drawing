@@ -9,7 +9,6 @@ gen_fn      = AniSora reference-conditioned A->M->B (box script)
 """
 from __future__ import annotations
 
-import argparse
 import dataclasses
 import os
 import sys
@@ -18,13 +17,10 @@ from inbetween_copilot.signals.motion import gap_score
 from inbetween_copilot.signals.regime import classify, scene_cut
 from inbetween_copilot.signals.softness import interp_softness
 from inbetween_copilot.signals.prompt import _MOTION_PROMPT   # the exact validated detector prompt
-from inbetween_copilot.pipeline.copilot import run_copilot, CopilotCfg
-from inbetween_copilot.reporting.report import summarize
 from inbetween_copilot.reporting.charspec import (CharacterSpec, condition_qa_prompt,
                                         reference_frames_for_gen)
-from inbetween_copilot.qa.perception import perceive, perceive_calibrated, PERCEPTION_PROMPT
+from inbetween_copilot.qa.perception import perceive, perceive_calibrated
 from inbetween_copilot.qa.gate import frame_qa_from_verdict
-from inbetween_copilot.qa.csq.artifact import load_artifact
 from inbetween_copilot.qa.csq.features import standard_channel_fns
 from inbetween_copilot.qa.csq.stillness import (motion_concentration, TAU_STILL,
                                              window_source_motion, TAU_SRC_MOTION)
@@ -140,26 +136,13 @@ def build_real_callables(spec: "CharacterSpec | None", *, tau_hold: float, tau_s
 
 
 def _assert_max_pixels_320():
+    """Guard against the #1 operational trap: a served VLM launched with a stale
+    max_pixels (train/serve mismatch). Called from service.engines.box_engines at
+    engine-build time (the dead CLI stub that used to call it was removed in the
+    2026-07-02 audit — the guard was unreachable in production)."""
     mp = os.environ.get("VISION_MAX_PIXELS_CHECK")
     if mp is None:
         print("[WARN] VISION_MAX_PIXELS_CHECK not set — cannot verify served max_pixels==320 (stale-copy gotcha)",
               file=sys.stderr)
     elif mp != "320":
         raise SystemExit(f"[ABORT] served max_pixels={mp!r}, expected 320 (stale-copy gotcha)")
-
-
-def main() -> int:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--keys-dir", required=True, help="dir of ordered artist key PNGs")
-    ap.add_argument("--spec", default=None, help="path to character_spec.json (optional)")
-    ap.add_argument("--tau-hold", type=float, default=0.01)
-    ap.add_argument("--tau-snap", type=float, default=0.20)
-    args = ap.parse_args()
-    _assert_max_pixels_320()
-    # NOTE: load_frames + the real rife_engine/anisora_gen are imported from the
-    # box adapters (.scratch/copilot/) at run time; wire them here.
-    raise SystemExit("wire rife_engine/anisora_gen from .scratch/copilot, then run")
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

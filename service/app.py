@@ -23,13 +23,15 @@ import numpy as np
 from PIL import Image
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
+from pydantic import BaseModel
 
-from service.artifacts import build_montage, build_report, build_video, build_pair_frames, save_pair_mid
+from service.artifacts import build_montage, build_report, build_video, build_pair_frames, save_pair_mid, build_key_frames
 from service.demo import build_demo_videos
 from service.engines import box_engines, stub_engines
 from service.explain import explain_pairs, region_box
 from service.runner import run_session, recompute_result
 from service.schemas import ErrorEvent, PairEvent, ResultEvent, SessionCfg, sse
+from service.session_store import BoundedSessionStore
 
 app = FastAPI(title="In-Between Co-pilot Service")
 
@@ -47,16 +49,25 @@ async def _no_cache_html(request, call_next):
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     return response
 
-# in-process session store: sid -> temp dir path
-_sessions: dict[int, str] = {}
+# in-process session store: sid -> temp dir path. BOUNDED (audit 2026-07-02): full-res
+# numpy keys/frames were retained forever on the long-lived box uvicorn — a slow leak.
+# On overflow the oldest session is evicted (temp dir rmtree'd, draw-key state dropped).
 # retained run state for the draw-key loop (POST /key): sid -> {keys, eng, cfg, result, rev}
 _state: dict[int, dict] = {}
+_sessions = BoundedSessionStore(
+    cap=int(os.environ.get("COPILOT_MAX_SESSIONS", "8")), state=_state)
 _sid_counter = itertools.count(1)
 
 # max key frames a decimated video may yield before we refuse the run (env-tunable).
 # A finished cut at stride 2 can be thousands of keys; bound it so a dropped video
 # can't pin the box for hours / exhaust memory.
 MAX_KEYS = int(os.environ.get("COPILOT_MAX_KEYS", "100"))
+# Auto-fit only coarsens the stride up to this factor of the user's stride. A clip that still
+# overflows MAX_KEYS at stride*FACTOR is genuinely too long for ONE cut: rather than silently
+# decimate it to a sparse, unfaithful set (gaps too large to interpolate → mostly needs-key),
+# we fail loudly with the exact stride to use / advice to trim. Keeps "drop a short cut → it
+# just runs" while refusing to misrepresent a long montage.
+AUTOFIT_MAX_FACTOR = int(os.environ.get("COPILOT_AUTOFIT_MAX_FACTOR", "4"))
 
 
 def _load_keys(uploads: List[UploadFile]) -> List[np.ndarray]:
@@ -70,10 +81,14 @@ def _load_keys(uploads: List[UploadFile]) -> List[np.ndarray]:
     return keys
 
 
-def _load_frames_from_video(upload: UploadFile, stride: int) -> List[np.ndarray]:
-    """Decode a dropped video and keep every `stride`-th frame as a key. Returns the
-    same shape `_load_keys` does: list[HxWx3 uint8 RGB]. cv2 is imported lazily so the
-    PNG /session path never depends on opencv. Raises HTTPException on bad input."""
+def _load_frames_from_video(upload: UploadFile, stride: int) -> "tuple[List[np.ndarray], int, int]":
+    """Decode a dropped video and keep every `stride`-th frame as a key. A slightly-long clip
+    is AUTO-FIT (the stride is coarsened up to `stride * AUTOFIT_MAX_FACTOR`) so a short cut
+    that is a bit over the cap just runs. A clip still over MAX_KEYS at that ceiling is too long
+    for one cut → it fails loudly with the exact stride to use (we refuse to silently decimate
+    it to a sparse, unfaithful set). Returns `(keys, effective_stride, source_frame_count)`.
+    cv2 is imported lazily so the PNG /session path never depends on opencv. Raises
+    HTTPException on a non-video, an undecodable clip, a too-long clip, or < 2 keys."""
     ctype = (upload.content_type or "").lower()
     name = (upload.filename or "").lower()
     # The browser sets video/mp4 from File.type, but curl / programmatic clients often send
@@ -104,20 +119,31 @@ def _load_frames_from_video(upload: UploadFile, stride: int) -> List[np.ndarray]
         cap = cv2.VideoCapture(tmp_path)
         if not cap.isOpened():
             raise HTTPException(status_code=422, detail="couldn't decode this video — is it an H.264 .mp4?")
+        src_fps = cap.get(cv2.CAP_PROP_FPS) or 24.0
+        max_stride = stride * AUTOFIT_MAX_FACTOR
         keys: List[np.ndarray] = []
+        eff_stride = stride          # light auto-coarsening below, capped at max_stride
         idx = 0
+        overflow = False             # too long even at the ceiling — keep counting, then error
         while True:
             ret, frame = cap.read()
             if not ret:
                 break
-            if idx % stride == 0:
+            if not overflow and idx % eff_stride == 0:
                 rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 keys.append(np.asarray(rgb, dtype=np.uint8))
                 if len(keys) > MAX_KEYS:
-                    raise HTTPException(
-                        status_code=422,
-                        detail=f"this clip decimates to more than {MAX_KEYS} keys — trim it shorter or raise the stride",
-                    )
+                    if eff_stride * 2 <= max_stride:
+                        # light auto-fit: coarsen one notch. Double the stride and drop every
+                        # 2nd kept frame; the survivors stay on the NEW (doubled) stride grid,
+                        # so `idx % eff_stride` stays consistent. Memory stays <= MAX_KEYS+1.
+                        eff_stride *= 2
+                        del keys[1::2]
+                    else:
+                        # past the auto-fit ceiling: stop collecting, free the buffer, and just
+                        # keep counting frames so we can report the exact stride needed.
+                        overflow = True
+                        keys = []
             idx += 1
     finally:
         if cap is not None:
@@ -127,17 +153,34 @@ def _load_frames_from_video(upload: UploadFile, stride: int) -> List[np.ndarray]
         except OSError:
             pass
 
+    if overflow:
+        min_stride = max(stride + 1, (idx + MAX_KEYS - 1) // MAX_KEYS)   # ceil(idx / MAX_KEYS)
+        secs = idx / src_fps if src_fps else 0
+        raise HTTPException(
+            status_code=422,
+            detail=(f"this clip is {idx} frames (~{secs:.0f}s) — too long to keep as keys. "
+                    f"Auto-fit only coarsens up to stride {max_stride} (cap {MAX_KEYS} keys), and "
+                    f"sparser keys would have gaps too large to in-between faithfully. Trim it to a "
+                    f"single short cut, or raise STRIDE to >= {min_stride}."),
+        )
     if len(keys) < 2:
         raise HTTPException(
             status_code=422,
-            detail=f"need at least 2 keyframes after decimation; got {len(keys)} (stride={stride}, frames={idx})",
+            detail=f"need at least 2 keyframes after decimation; got {len(keys)} (stride={eff_stride}, frames={idx})",
         )
-    return keys
+    if eff_stride != stride:
+        # surfaced in uvicorn.log — the clip was lightly auto-decimated to fit the MAX_KEYS ceiling
+        print(f"[session/video] auto-fit stride {stride} -> {eff_stride} "
+              f"({idx} frames -> {len(keys)} keys, cap {MAX_KEYS})", flush=True)
+    return keys, eff_stride, idx
 
 
-def _stream_session(key_arrays: List[np.ndarray], engines: str, fps: int) -> StreamingResponse:
+def _stream_session(key_arrays: List[np.ndarray], engines: str, fps: int,
+                    sampling: dict = None) -> StreamingResponse:
     """Run the co-pilot over `key_arrays` and stream the SSE decision-log + result.
-    This is the shared body behind BOTH POST /session and POST /session/video."""
+    This is the shared body behind BOTH POST /session and POST /session/video.
+    `sampling` (video flow only) surfaces how the clip was decimated, so the UI can show
+    "kept K of N frames (every S-th)" and flag a coarse auto-fit."""
     cfg = SessionCfg(engines=engines, fps=fps)
     if engines == "stub":
         eng = stub_engines(cfg)
@@ -186,14 +229,19 @@ def _stream_session(key_arrays: List[np.ndarray], engines: str, fps: int) -> Str
                 build_report(result, session_dir)
                 build_video(result, session_dir, fps=cfg.fps)
                 pair_files = build_pair_frames(result, session_dir)
+                # Serve the key frames too — the drop-a-video flow has no client-side key
+                # images (they're decoded server-side), so without these the review A/B cells
+                # render black. The PNG-upload UI ignores these (it has client object URLs).
+                key_files = build_key_frames(key_arrays, session_dir)
                 _state[sid] = {"keys": key_arrays, "eng": eng, "cfg": cfg, "result": result, "rev": 0}
                 pair_mids = {str(i): f"/session/{sid}/{fn}" for i, fn in pair_files.items()}
+                key_urls = {str(i): f"/session/{sid}/{fn}" for i, fn in key_files.items()}
                 artifact_urls = {
                     "montage": f"/session/{sid}/montage.png",
                     "report":  f"/session/{sid}/report.md",
                     "video":   f"/session/{sid}/reconstructed.mp4",
                 }
-                q.put(("result", (result, artifact_urls, explanations, pair_mids)))
+                q.put(("result", (result, artifact_urls, explanations, pair_mids, key_urls)))
             except Exception as exc:
                 q.put(("error", exc))
             finally:
@@ -211,11 +259,15 @@ def _stream_session(key_arrays: List[np.ndarray], engines: str, fps: int) -> Str
                 pair_obj, mid_url = payload
                 yield sse("pair", PairEvent.from_pair(pair_obj, mid_url=mid_url))
             elif kind == "result":
-                result_obj, urls, explanations, pair_mids = payload
+                result_obj, urls, explanations, pair_mids, key_urls = payload
                 yield sse("result", ResultEvent.from_result(result_obj, urls,
                                                             explanations=explanations,
                                                             pair_mids=pair_mids,
-                                                            csq=eng.get("csq_calibrator")))
+                                                            key_urls=key_urls,
+                                                            sampling=sampling,
+                                                            csq=eng.get("csq_calibrator"),
+                                                            qa_degraded=bool(
+                                                                eng.get("vlm_status", {}).get("degraded"))))
             elif kind == "error":
                 yield sse("error", ErrorEvent(message=str(payload)))
                 break
@@ -245,8 +297,14 @@ async def post_session_video(
 ):
     """Drop-a-video session: decode the upload, keep every `stride`-th frame as the
     artist's keys, then run the SAME co-pilot session as POST /session."""
-    key_arrays = _load_frames_from_video(video, stride)
-    return _stream_session(key_arrays, engines, fps)
+    key_arrays, eff_stride, source_frames = _load_frames_from_video(video, stride)
+    sampling = {
+        "source_frames": source_frames,
+        "requested_stride": stride,
+        "stride": eff_stride,          # > requested when the clip was lightly auto-fit
+        "kept": len(key_arrays),
+    }
+    return _stream_session(key_arrays, engines, fps, sampling=sampling)
 
 
 @app.post("/demo")
@@ -285,6 +343,23 @@ def post_demo(
         "src": len(full[0::2]),
         "gt": len(full[1::2]),
     }
+
+
+class AskReq(BaseModel):
+    question: str
+
+
+@app.post("/session/{sid}/ask")
+def post_ask(sid: int, req: AskReq):
+    """Grounded Q&A about a finished session (vault 'Chat-First Copilot Surface' §3).
+    Answers ONLY from the retained session facts; degrades to a deterministic
+    summary when DeepSeek is unconfigured/unreachable — never 500."""
+    st = _state.get(sid)
+    if st is None:
+        raise HTTPException(status_code=404, detail="Unknown session (or no result yet)")
+    from service.ask import answer_question
+    from service.director_llm import make_ask_fn
+    return answer_question(st, req.question, make_ask_fn())
 
 
 @app.get("/session/{sid}/{name}")
