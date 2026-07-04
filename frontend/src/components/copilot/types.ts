@@ -47,10 +47,13 @@ export interface ResultEvent {
   pair_mids?: Record<string, string>;   // pair index -> in-between PNG url (for the line-test)
   key_urls?: Record<string, string>;    // key index -> key PNG url (drop-a-video flow: keys are server-side)
   sampling?: {                          // drop-a-video decimation summary (null for PNG upload)
-    source_frames: number;
-    requested_stride: number;
-    stride: number;                     // > requested_stride when the clip was auto-fit (coarser)
-    kept: number;
+    source_frames?: number;
+    requested_stride?: number;
+    stride?: number;                    // > requested_stride when the clip was auto-fit (coarser)
+    kept?: number;
+    planted?: string;                   // planted-error DEMO session: case id (label it!)
+    planted_type?: string;              //   the seeded error class (ghost/morph/drift/…)
+    planted_src?: string;               //   suite/clip the bad mid came from
   } | null;
   csq?: CsqBand | null;                 // calibrated abstain band for the dial (box engines only)
   qa_degraded?: boolean;                // true when the served VLM was unreachable during the run

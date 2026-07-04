@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { PairEvent, ResultEvent, DemoResult, Explanation, CsqBand } from "./types";
-import { runSession, runDemo, runVideoSession, askQuestion } from "./api";
+import { runSession, runDemo, runVideoSession, runPlantedSession, fetchPlantedCases, askQuestion, type PlantedCase } from "./api";
 import { regionLabel, errTypeLabel, actionLabel, readableReason, qaLabel } from "./labels";
 import { FilePicker, PegBar } from "./components/Inputs";
 import { deriveMessages, type QaTurn, type UserTurn } from "./lib/chatModel";
@@ -818,11 +818,18 @@ function ReviewWorkbench({ log, result, running, keyUrls, verdicts, onVerdict, o
         </main>
       ) : (
       <>
-      {samp && (
+      {samp?.planted && (
+        /* honest label: this session's in-between was PLANTED from a frozen suite — the QA
+           verdict is real, the error was seeded (the live gate yields no natural flags). */
+        <div className="sampling-note warn">
+          {`🧪 PLANTED DEMO — lỗi "${samp.planted_type}" cấy từ ${samp.planted_src}; verdict/annotation là pipeline QA thật.`}
+        </div>
+      )}
+      {samp && samp.kept != null && (
         /* drop-a-video transparency: how the clip was decimated into keys, and a warning when
            the stride was auto-coarsened (the reconstruction samples the source, not every frame). */
-        <div className={`sampling-note${samp.stride > samp.requested_stride ? " warn" : ""}`}>
-          {samp.stride > samp.requested_stride
+        <div className={`sampling-note${(samp.stride ?? 0) > (samp.requested_stride ?? 0) ? " warn" : ""}`}>
+          {(samp.stride ?? 0) > (samp.requested_stride ?? 0)
             ? `⚠ Long clip — auto-coarsened to 1 key every ${samp.stride} frames (kept ${samp.kept} of ${samp.source_frames}). This samples the cut, not every frame; trim to a single short cut for a faithful reconstruction.`
             : `Decimated: kept ${samp.kept} keys of ${samp.source_frames} frames (1 every ${samp.stride}).`}
         </div>
@@ -1085,6 +1092,9 @@ export default function App() {
   const demo = useFileSet();
   const [engines, setEngines] = useState("box");
   const [fps, setFps] = useState("24");
+  // Planted-error demo cases (labeled): loaded once; empty when the server predates the feature.
+  const [plantedCases, setPlantedCases] = useState<PlantedCase[]>([]);
+  useEffect(() => { fetchPlantedCases().then(setPlantedCases).catch(() => {}); }, []);
 
   const [running, setRunning] = useState(false);
   const [banner, setBanner] = useState<string | null>(null);
@@ -1160,6 +1170,31 @@ export default function App() {
     } catch (err) {
       console.error("run session failed:", err);
       setBanner("Couldn't reach the co-pilot — is the service running? Press Run to retry.");
+    }
+    setRunning(false);
+  };
+
+  // Planted-error DEMO run: the server plants a stored bad in-between from a frozen suite
+  // and the real QA/annotate path judges it. Clearly labeled — the live gate produces no
+  // natural flags (that refusal is the product story; this shows the flag surface anyway).
+  const runPlanted = async (caseId: string) => {
+    const c = plantedCases.find((x) => x.id === caseId);
+    setBanner(null);
+    setLog([]);
+    setResult(null);
+    setVerdicts({});
+    setQaTurns([]);
+    setUpload({ label: `🧪 PLANTED DEMO · ${c?.title ?? caseId} — lỗi được cấy chủ đích để trình diễn QA`, thumbs: [] });
+    setRunning(true);
+    try {
+      await runPlantedSession(caseId, engines, fps, {
+        onPair: (p) => setLog((prev) => [...prev, p]),
+        onResult: (r) => setResult(r),
+        onError: (m) => setBanner(m),
+      });
+    } catch (err) {
+      console.error("planted session failed:", err);
+      setBanner("Couldn't reach the co-pilot — is the service running?");
     }
     setRunning(false);
   };
@@ -1290,6 +1325,7 @@ export default function App() {
             onRun={run} onRunVideo={runVideo} running={running}
             compact={running || log.length > 0}
             askEnabled={!!result?.artifacts} onAsk={onAsk}
+            plantedCases={plantedCases} onRunPlanted={runPlanted}
           />
         </div>
       ) : (
