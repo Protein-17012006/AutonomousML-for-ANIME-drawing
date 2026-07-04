@@ -99,6 +99,35 @@ export async function runVideoSession(
   await pumpSSE(resp.body, h);
 }
 
+/** Planted-error demo cases (labeled): the server plants a stored bad in-between from a
+ *  frozen suite and the REAL QA/annotate path judges it — exists because the live gate
+ *  yields no natural flags. */
+export type PlantedCase = { id: string; title: string; planted_type: string };
+
+export async function fetchPlantedCases(): Promise<PlantedCase[]> {
+  const resp = await fetch("/session/planted/cases");
+  if (!resp.ok) return [];
+  return ((await resp.json()) as { cases: PlantedCase[] }).cases ?? [];
+}
+
+export async function runPlantedSession(
+  caseId: string,
+  engines: string,
+  fps: string,
+  h: SessionHandlers,
+): Promise<void> {
+  const fd = new FormData();
+  fd.append("case", caseId);
+  fd.append("engines", engines);
+  fd.append("fps", fps || "24");
+  const resp = await fetch("/session/planted", { method: "POST", body: fd });
+  if (!resp.ok || !resp.body) {
+    h.onError(`POST /session/planted failed: ${resp.status}`);
+    return;
+  }
+  await pumpSSE(resp.body, h);
+}
+
 /** Grounded session Q&A — answers ONLY from the retained session facts;
  *  grounded=false marks the deterministic offline fallback. */
 export async function askQuestion(

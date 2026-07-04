@@ -23,6 +23,8 @@ export function ChatComposer(p: {
   compact: boolean;      // a session exists → fold the dropzone
   askEnabled: boolean;   // result retained server-side → grounded Q&A available
   onAsk: (q: string) => void;
+  plantedCases: { id: string; title: string }[];   // labeled planted-error demo cases
+  onRunPlanted: (id: string) => void;
 }) {
   const [q, setQ] = useState("");
   const [gearOpen, setGearOpen] = useState(false);
@@ -58,6 +60,20 @@ export function ChatComposer(p: {
                 stride
                 <input type="number" min={1} max={12} step={1} value={p.stride}
                   onChange={(e) => p.setStride(e.target.value)} />
+              </label>
+            )}
+            {p.plantedCases.length > 0 && (
+              /* labeled planted-error demo: seeds a stored bad in-between so the flag →
+                 red-ring annotate surface can be shown (the live gate never flags naturally) */
+              <label className="field">
+                🧪 planted demo
+                <select value="" disabled={p.running}
+                  onChange={(e) => { const id = e.target.value; if (id) p.onRunPlanted(id); }}>
+                  <option value="">— chạy lỗi cấy —</option>
+                  {p.plantedCases.map((c) => (
+                    <option key={c.id} value={c.id}>{c.title}</option>
+                  ))}
+                </select>
               </label>
             )}
           </span>
