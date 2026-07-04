@@ -33,6 +33,7 @@ export interface Explanation {
   region: string;
   explanation: string;
   box?: number[];   // fractional [x, y, w, h] (0..1) of the defect region, for the overlay
+  annotated_url?: string;   // server-burned circle+label PNG (preferred over the CSS overlay)
 }
 
 export interface ResultEvent {

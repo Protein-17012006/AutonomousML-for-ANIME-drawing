@@ -1,4 +1,5 @@
-// Flagged-pair bubble: triptych + red region-box overlay + QA facts + director trace.
+// Flagged-pair bubble: triptych + red region-box overlay (fallback) + QA facts + director trace.
+// Prefers server-burned annotated frame (annotated_url) when available; falls back to raw mid + CSS overlay.
 // The overlay uses the EXISTING server-computed fractional box (service/app.py region_box)
 // — grid-coarse (3×3 VLM region), honestly not a pixel mask (design §0.5).
 import type { CsqBand, Explanation, PairEvent } from "../../types";
@@ -29,8 +30,10 @@ export function FlagBubble({ pair, ex, keyUrls, band: _band, onReview }: {
       <div className="trip">
         {a ? <img src={a} alt={`key ${pair.index}`} draggable={false} /> : <span className="trip-hole" />}
         <span className="trip-mid">
-          {pair.mid_url ? <img src={pair.mid_url} alt="in-between" draggable={false} /> : <span className="trip-hole" />}
-          {box && box.length === 4 && (
+          {(ex?.annotated_url || pair.mid_url) ? (
+            <img src={ex?.annotated_url ?? pair.mid_url!} alt="in-between (flagged)" draggable={false} />
+          ) : <span className="trip-hole" />}
+          {!ex?.annotated_url && box && box.length === 4 && (
             <span className="region-box" style={{
               left: `${box[0] * 100}%`, top: `${box[1] * 100}%`,
               width: `${box[2] * 100}%`, height: `${box[3] * 100}%`,
