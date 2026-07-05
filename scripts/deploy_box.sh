@@ -18,13 +18,15 @@ BOX_DIR="${BOX_DIR:-~/copilot_svc}"
 PORT="${PORT:-8000}"
 DEST="${BOX_USER}@${BOX_HOST}"
 
-# what to ship: the service, the vanilla web UI (fallback), the built React SPA
-# (frontend/dist -> ~/copilot_svc/dist, served when COPILOT_WEB_DIR=dist), the core
-# lib, its RUNTIME imports (inbetween_copilot/signals/* imports benchmark.{lib,smallgap}
-# at import time, and wiring's qa_fn needs vision_common — omitting them left stale
-# copies on the box: the audit's #3 finding, 2026-07-02), and the daemon launcher.
-# NB: build the SPA first (`cd frontend && npm run build`) — frontend/dist must exist.
-PATHS=(service web frontend/dist inbetween_copilot benchmark vision_common scripts/box_start_service.sh)
+# what to ship: the service, the vanilla web UI (fallback), the core lib, its RUNTIME
+# imports (inbetween_copilot/signals/* imports benchmark.{lib,smallgap} at import time,
+# and wiring's qa_fn needs vision_common — omitting them left stale copies on the box:
+# the audit's #3 finding, 2026-07-02), and the daemon launcher.
+# The SERVED frontend is the TEAM's canonical Next.js static export (in the export repo),
+# deployed separately to ~/copilot_svc/dist and served via COPILOT_WEB_DIR=dist. This
+# script deliberately ships NO frontend build, so it can never clobber that Next export
+# (the old frontend/dist -> dist sync did exactly that). Frontend deploy is out of scope here.
+PATHS=(service web inbetween_copilot benchmark vision_common scripts/box_start_service.sh)
 # box-only comparison script: git-ignored scratch — ship only when present so a
 # fresh clone's deploy doesn't abort under `set -euo pipefail`.
 [ -e .scratch/fullloop/compare_video.py ] && PATHS+=(.scratch/fullloop/compare_video.py)
@@ -40,28 +42,6 @@ else
   echo "   (rsync not found, falling back to scp -r)"
   scp -r "${PATHS[@]}" "${DEST}:${BOX_DIR}/"
 fi
-
-# Prune stale hashed SPA assets on the box. Each `npm run build` emits a new
-# index-<hash>.{css,js}; neither scp (no --delete) nor a no-`--delete` rsync removes
-# the old ones, so ~/copilot_svc/dist/assets accumulates every prior build. Keep only
-# the files the freshly-synced dist/index.html actually references. Guarded: if no refs
-# parse out (unexpected index.html), it skips rather than deleting anything.
-echo ">> pruning stale SPA assets on the box (keep only what index.html references)"
-ssh "${DEST}" 'bash -s' "${BOX_DIR}" <<'PRUNE'
-set -eu
-boxdir="$1"
-d="$boxdir/dist/assets"
-[ -d "$d" ] || { echo "   (no dist/assets yet — skip prune)"; exit 0; }
-cd "$d"
-keep=$(grep -oE 'index-[A-Za-z0-9_-]+\.(css|js)' ../index.html | sort -u)
-[ -n "$keep" ] || { echo "   ABORT prune: no asset refs in index.html — kept everything"; exit 0; }
-n=0
-for f in index-*.css index-*.js; do
-  [ -e "$f" ] || continue
-  echo "$keep" | grep -qx "$f" || { rm -f "$f"; n=$((n+1)); }
-done
-echo "   pruned $n stale asset(s); kept $(echo "$keep" | wc -l): $(echo "$keep" | tr '\n' ' ')"
-PRUNE
 
 if [[ "${1:-}" == "--restart" ]]; then
   echo ">> restarting service on the box (port ${PORT}) via box_start_service.sh"

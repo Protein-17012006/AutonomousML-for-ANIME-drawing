@@ -28,6 +28,8 @@ from inbetween_copilot.generate.localize import localize_held_soft, hold_fixable
 from inbetween_copilot.generate.director import decide, decide_fixed
 from inbetween_copilot.generate.correct import composite_region, hold_copy
 from inbetween_copilot.generate.correction import correct_inbetween
+from inbetween_copilot.triage.factory import make_triage_fn
+from inbetween_copilot.triage.widegap import keys_from_gap
 
 
 def build_real_callables(spec: "CharacterSpec | None", *, tau_hold: float, tau_snap: float,
@@ -128,10 +130,20 @@ def build_real_callables(spec: "CharacterSpec | None", *, tau_hold: float, tau_s
             decide_fn=decide_fn, refill_fn=refill_fn, escalate_fn=escalate_fn,
             askkey_fn=(askkey_fn or (lambda a, b: None)), split_fill_fn=split_fill_fn)
 
+    # wide-gap diagnosis (ADR-0015): signals-based class + template brief (no DeepSeek
+    # dependency here -- box_engines overrides triage_fn with an LLM-brief-bearing
+    # version via ask_fn=make_ask_fn()). keys_needed_fn drives the plan's actual
+    # keys_to_request/keys_requested count with the SAME calibrated buckets triage.
+    # keys_suggested uses, so the two no longer diverge (Task 10 fixes the
+    # keys_requested-vs-keys_suggested split noted at Task 8).
+    triage_fn = make_triage_fn(tau_hold=tau_hold, tau_snap=tau_snap, ask_fn=None)
+    keys_needed_fn = lambda g: keys_from_gap(g)
+
     return {"gap_fn": gap_score, "regime_fn": regime_fn, "interp_fn": interp_fn,
             "qa_fn": qa_fn, "softness_fn": softness_fn, "gen_fn": gen_fn,
             "breakdown_supply": breakdown_supply, "corrector": corrector,
             "qa3_fn": (qa3_fn if csq_artifact is not None else None),
+            "triage_fn": triage_fn, "keys_needed_fn": keys_needed_fn,
             "qa_window": True}
 
 

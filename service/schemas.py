@@ -33,6 +33,9 @@ class PairEvent(BaseModel):
     # director's visible decisions (vault 'DeepSeek Director Wiring'). None when
     # the pair never entered the loop.
     correction: Optional[dict] = None
+    # wide-gap diagnosis for gate-refused pairs (ADR-0015):
+    # {cls, keys_suggested, confidence, evidence, brief}. None for filled pairs.
+    triage: Optional[dict] = None
 
     @classmethod
     def from_pair(cls, pair, mid_url: Optional[str] = None) -> "PairEvent":
@@ -63,6 +66,7 @@ class PairEvent(BaseModel):
             uncertainty=u,
             mid_url=mid_url,
             correction=correction,
+            triage=getattr(pair, "triage", None),
         )
 
 

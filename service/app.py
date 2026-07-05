@@ -29,6 +29,8 @@ from service.artifacts import build_montage, build_report, build_video, build_pa
 from service.demo import build_demo_videos
 from service.engines import box_engines, stub_engines
 from service.explain import explain_pairs, region_box
+from service.annotate import annotate_explained_pairs
+from service.publisher import publish_session
 from service.runner import run_session, recompute_result
 from service.schemas import ErrorEvent, PairEvent, ResultEvent, SessionCfg, sse
 from service.session_store import BoundedSessionStore
@@ -68,6 +70,27 @@ MAX_KEYS = int(os.environ.get("COPILOT_MAX_KEYS", "100"))
 # we fail loudly with the exact stride to use / advice to trim. Keeps "drop a short cut → it
 # just runs" while refusing to misrepresent a long montage.
 AUTOFIT_MAX_FACTOR = int(os.environ.get("COPILOT_AUTOFIT_MAX_FACTOR", "4"))
+
+# SSE keepalive: CloudFront's origin read timeout (60s) is an IDLE timeout — it only
+# fires when no bytes flow. A slow first pair (RIFE+VLM warm-up) can exceed it, so the
+# drain loop emits an SSE *comment* line every KEEPALIVE_SECS of queue silence.
+# Comments (`: ...`) are ignored by every SSE parser, including our frontend's.
+KEEPALIVE_SECS = float(os.environ.get("COPILOT_SSE_KEEPALIVE", "15"))
+
+
+def _drain_events(q: "queue.Queue", keepalive: "float | None" = None):
+    """Yield (kind, payload) items from `q` until the None sentinel; on `keepalive`
+    seconds of idleness yield ("ping", None) instead of blocking forever."""
+    ka = KEEPALIVE_SECS if keepalive is None else keepalive
+    while True:
+        try:
+            item = q.get(timeout=ka)
+        except queue.Empty:
+            yield ("ping", None)
+            continue
+        if item is None:
+            return
+        yield item
 
 
 def _load_keys(uploads: List[UploadFile]) -> List[np.ndarray]:
@@ -176,11 +199,12 @@ def _load_frames_from_video(upload: UploadFile, stride: int) -> "tuple[List[np.n
 
 
 def _stream_session(key_arrays: List[np.ndarray], engines: str, fps: int,
-                    sampling: dict = None) -> StreamingResponse:
+                    sampling: dict = None, eng_override: dict = None) -> StreamingResponse:
     """Run the co-pilot over `key_arrays` and stream the SSE decision-log + result.
-    This is the shared body behind BOTH POST /session and POST /session/video.
+    This is the shared body behind POST /session, /session/video and /session/planted.
     `sampling` (video flow only) surfaces how the clip was decimated, so the UI can show
-    "kept K of N frames (every S-th)" and flag a coarse auto-fit."""
+    "kept K of N frames (every S-th)" and flag a coarse auto-fit. `eng_override`
+    (planted-demo flow only) replaces named engine callables after the build."""
     cfg = SessionCfg(engines=engines, fps=fps)
     if engines == "stub":
         eng = stub_engines(cfg)
@@ -188,6 +212,8 @@ def _stream_session(key_arrays: List[np.ndarray], engines: str, fps: int,
         eng = box_engines(cfg)
     else:
         raise HTTPException(status_code=400, detail=f"Unknown engines: {engines!r}")
+    if eng_override:
+        eng = {**eng, **eng_override}
 
     sid = next(_sid_counter)
     session_dir = tempfile.mkdtemp(prefix=f"copilot_session_{sid}_")
@@ -225,6 +251,9 @@ def _stream_session(key_arrays: List[np.ndarray], engines: str, fps: int,
                 else:
                     regions = {}
 
+                for i, fn in annotate_explained_pairs(result, explanations, session_dir).items():
+                    explanations[i]["annotated_url"] = f"/session/{sid}/{fn}"
+
                 build_montage(result, key_arrays, session_dir, regions=regions or None)
                 build_report(result, session_dir)
                 build_video(result, session_dir, fps=cfg.fps)
@@ -242,6 +271,12 @@ def _stream_session(key_arrays: List[np.ndarray], engines: str, fps: int,
                     "video":   f"/session/{sid}/reconstructed.mp4",
                 }
                 q.put(("result", (result, artifact_urls, explanations, pair_mids, key_urls)))
+                # AWS persistence (design §2 Luồng 3): after the client already has the
+                # result event. Env-gated + fail-soft — a dead AWS never hurts the session.
+                pub = publish_session(sid, session_dir, result)
+                if pub.get("published"):
+                    print(f"[publisher] session {sid} published pid={pub['pid']} "
+                          f"({len(pub['s3_keys'])} objects)", flush=True)
             except Exception as exc:
                 q.put(("error", exc))
             finally:
@@ -250,12 +285,10 @@ def _stream_session(key_arrays: List[np.ndarray], engines: str, fps: int,
         t = threading.Thread(target=_worker, daemon=True)
         t.start()
 
-        while True:
-            item = q.get()
-            if item is None:
-                break
-            kind, payload = item
-            if kind == "pair":
+        for kind, payload in _drain_events(q):
+            if kind == "ping":
+                yield ": ping\n\n"
+            elif kind == "pair":
                 pair_obj, mid_url = payload
                 yield sse("pair", PairEvent.from_pair(pair_obj, mid_url=mid_url))
             elif kind == "result":
@@ -305,6 +338,30 @@ async def post_session_video(
         "kept": len(key_arrays),
     }
     return _stream_session(key_arrays, engines, fps, sampling=sampling)
+
+
+@app.get("/session/planted/cases")
+def get_planted_cases():
+    """Case list for the UI's planted-demo picker (labeled demo — see service/planted.py)."""
+    from service.planted import list_cases
+    return {"cases": list_cases()}
+
+
+@app.post("/session/planted")
+def post_session_planted(case: str = Form(...), engines: str = Form("box"), fps: int = Form(24)):
+    """PLANTED-ERROR demo session: a stored bad in-between from a frozen suite is planted
+    as the pair's fill, then the REAL QA/perception/annotate path judges it. Exists because
+    the live path yields no natural flags (the gate refuses ghost-prone pairs — probed
+    n=9+n=40); every event carries `planted` metadata so the UI labels it honestly."""
+    from service.planted import load_case, planted_overrides
+    try:
+        keys, mid, meta = load_case(case)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"unknown planted case {case!r}")
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    return _stream_session(keys, engines, fps, sampling=meta,
+                           eng_override=planted_overrides(mid))
 
 
 @app.post("/demo")
@@ -444,6 +501,8 @@ async def post_key(sid: int, index: int = Form(...), key: UploadFile = File(...)
     else:
         regions = {}
 
+    ann_files = annotate_explained_pairs(new_result, explanations, session_dir)
+
     build_montage(new_result, new_keys, session_dir, regions=regions or None)
     build_report(new_result, session_dir)
     build_video(new_result, session_dir, fps=cfg.fps)
@@ -452,6 +511,8 @@ async def post_key(sid: int, index: int = Form(...), key: UploadFile = File(...)
     st["keys"], st["result"] = new_keys, new_result
     st["rev"] = st.get("rev", 0) + 1
     bust = f"?r={st['rev']}"     # files are overwritten -> bust the browser cache by URL
+    for i, fn in ann_files.items():
+        explanations[i]["annotated_url"] = f"/session/{sid}/{fn}{bust}"
     pair_mids = {str(i): f"/session/{sid}/{fn}{bust}" for i, fn in pair_files.items()}
     artifact_urls = {
         "montage": f"/session/{sid}/montage.png{bust}",
@@ -474,8 +535,10 @@ async def post_key(sid: int, index: int = Form(...), key: UploadFile = File(...)
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 
 # Default = the vanilla web/ (always present → tests + dev fallback). Set
-# COPILOT_WEB_DIR (relative to the repo root, or absolute) to serve the built
-# React SPA instead — the box launches with COPILOT_WEB_DIR=dist.
+# COPILOT_WEB_DIR (relative to the repo root, or absolute) to serve a built
+# frontend instead — the box launches with COPILOT_WEB_DIR=dist, where dist is the
+# TEAM's canonical Next.js static export (in the export repo, deployed separately;
+# this repo no longer carries a frontend build).
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _WEB_DIR = os.environ.get("COPILOT_WEB_DIR") or "web"
 if not os.path.isabs(_WEB_DIR):

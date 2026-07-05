@@ -40,6 +40,7 @@ class PairResult:
     qa: FrameQA | None
     keys_requested: int
     correction: object = None  # CorrectionResult | None
+    triage: object = None      # dict payload for gate-refused pairs (ADR-0015) | None
 
 
 @dataclass
@@ -58,13 +59,14 @@ class CopilotResult:
 
 def run_copilot(keys, *, gap_fn, regime_fn, interp_fn, qa_fn, softness_fn,
                 gen_fn=None, breakdown_supply=None, corrector=None, qa3_fn=None,
+                triage_fn=None, keys_needed_fn=None,
                 on_pair=None, qa_window=False,
                 cfg: CopilotCfg = CopilotCfg()) -> CopilotResult:
     if len(keys) < 2:
         raise ValueError("run_copilot needs >= 2 keys")
     gaps = [gap_fn(keys[i], keys[i + 1]) for i in range(len(keys) - 1)]
     regimes = [regime_fn(keys[i], keys[i + 1]) for i in range(len(keys) - 1)]
-    plan = build_key_plan(gaps, regimes, tau_gate=cfg.tau_gate)
+    plan = build_key_plan(gaps, regimes, tau_gate=cfg.tau_gate, keys_needed_fn=keys_needed_fn)
 
     # --- PASS 1: interpolate / generate every pair; defer QA so neighbour mids
     # are available for the centered window. prelim is in plan order. ---
@@ -96,8 +98,12 @@ def run_copilot(keys, *, gap_fn, regime_fn, interp_fn, qa_fn, softness_fn,
     n_corrected = 0
     for pp, action, route, frames in prelim:
         if action == "needs_key":
+            a, b = keys[pp.index], keys[pp.index + 1]
+            tri = triage_fn(a, b, pp) if triage_fn is not None else None
+            n_keys = (tri["keys_suggested"] if isinstance(tri, dict)
+                      and "keys_suggested" in tri else pp.keys_to_request)
             pairs.append(PairResult(pp.index, "needs_key", None, None, None,
-                                    pp.keys_to_request))
+                                    n_keys, triage=tri))
             if on_pair is not None:
                 on_pair(pairs[-1])
             continue

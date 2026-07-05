@@ -7,7 +7,25 @@ from __future__ import annotations
 
 import numpy as np
 
+# re-export so `from service.engines import make_triage_fn` keeps working (the factory
+# itself lives in inbetween_copilot/ so Task 10's pipeline/wiring.py can wire it too,
+# without an upward import into service/). Cheap: factory.py's own imports are lazy.
+from inbetween_copilot.triage.factory import make_triage_fn  # noqa: F401
+from inbetween_copilot.triage.widegap import keys_from_gap
 from service.schemas import SessionCfg
+
+
+def _stub_triage_fn(a, b, pp):
+    """Deterministic triage for stub sessions: numpy-only, no network."""
+    import dataclasses
+
+    from inbetween_copilot.triage.brief import template_brief
+    from inbetween_copilot.triage.widegap import classify_gap
+
+    t = classify_gap(np.atleast_3d(np.asarray(a, np.uint8)),
+                     np.atleast_3d(np.asarray(b, np.uint8)),
+                     gap=pp.gap, regime=pp.regime, has_cut=False)
+    return {**dataclasses.asdict(t), "brief": template_brief(t)}
 
 
 def stub_engines(cfg: SessionCfg) -> dict:
@@ -28,6 +46,10 @@ def stub_engines(cfg: SessionCfg) -> dict:
         breakdown_supply=None,
         corrector=None,
         qa3_fn=None,
+        triage_fn=_stub_triage_fn,
+        # calibrated key budget (Task 10) — same keys_from_gap buckets triage.keys_suggested
+        # uses, so stub keys_requested no longer diverges from the triage diagnosis.
+        keys_needed_fn=lambda g: keys_from_gap(g),
         vlm_struct_fn=lambda frames: {
             "has_motion_error": False,
             "error_type": "none",
@@ -180,7 +202,7 @@ def box_engines(cfg: SessionCfg) -> dict:
     # (deploy_box.sh does NOT sync .env — export the key in the shell that runs
     # box_start_service.sh). No key -> None -> decide_fixed (today's behaviour);
     # endpoint failure -> {} -> decide() falls back per round. Never crashes a run.
-    from service.director_llm import make_reason_fn
+    from service.director_llm import make_ask_fn, make_reason_fn
     reason_fn = make_reason_fn()
     if reason_fn is None:
         print("[box_engines] DEEPSEEK_API_KEY not set — director runs the fixed "
@@ -201,6 +223,10 @@ def box_engines(cfg: SessionCfg) -> dict:
     callables["vlm_struct_fn"] = vlm_struct_fn
     callables["rife_engine"] = rife_engine   # raw [a, mid, b] for the decimate-vs-GT demo
     callables["vlm_status"] = vlm_status     # degraded-QA flag -> ResultEvent.qa_degraded
+    # wide-gap diagnosis (ADR-0015) with an LLM-written brief when DEEPSEEK_API_KEY is
+    # set; make_ask_fn() -> None with no key degrades triage_fn to template-only.
+    callables["triage_fn"] = make_triage_fn(tau_hold=BOX_TAU_HOLD, tau_snap=BOX_TAU_SNAP,
+                                            ask_fn=make_ask_fn())
     # surface the calibrated abstain band so the UI dial can draw the measured pass/abstain/flag
     # zones (per-u-bin thresholds on p_error) — the trust instrument, not just a bare %.
     cal = art.calibrator

@@ -80,3 +80,44 @@ def flicker_verdict(clip_dir: str, **kw) -> dict:
         frames.update(detect_spikes(series, **kw))
     fr = sorted(frames)
     return {"has_flicker": bool(fr), "flicker_frames": fr}
+
+
+def spike_strength(series, *, floor: float = 2.0, w: int = 2) -> float:
+    """Max |value - local-median| / scale over the series — a RANKING score for
+    flicker candidates (detect_spikes' criterion, continuous). 0.0 if n < 3."""
+    n = len(series)
+    if n < 3:
+        return 0.0
+    adj = [abs(series[i + 1] - series[i]) for i in range(n - 1)]
+    scale = max(_median(adj), floor)
+    best = 0.0
+    for i in range(n):
+        window = [series[j] for j in range(i - w, i + w + 1)
+                  if 0 <= j < n and j != i]
+        if len(window) >= 2:
+            best = max(best, abs(series[i] - _median(window)) / scale)
+    return best
+
+
+def drift_score(clip_dir: str) -> float:
+    """RANKING score for identity_drift candidates: how far the worst middle
+    frame sits from its NEAREST endpoint key (64x64 gray cosine distance).
+    Gradual wander scores high; a clip whose middles track either key scores ~0."""
+    import numpy as np
+    from PIL import Image
+
+    paths = _frame_paths(clip_dir)
+    if len(paths) < 3:
+        return 0.0
+
+    def vec(p):
+        a = np.asarray(Image.open(p).convert("L").resize((64, 64)), np.float32).ravel()
+        n = np.linalg.norm(a)
+        return a / n if n else a
+
+    first, last = vec(paths[0]), vec(paths[-1])
+    worst = 0.0
+    for p in paths[1:-1]:
+        v = vec(p)
+        worst = max(worst, 1.0 - max(float(v @ first), float(v @ last)))
+    return worst
