@@ -89,10 +89,17 @@ export async function runVideoSession(
   const resp = await fetch("/session/video", { method: "POST", body: fd });
   if (!resp.ok || !resp.body) {
     let detail = `POST /session/video failed: ${resp.status}`;
-    try {
-      const j = (await resp.json()) as { detail?: string };
-      if (j?.detail) detail = j.detail;
-    } catch { /* body wasn't JSON */ }
+    if (resp.status === 413) {
+      // The reverse proxy (nginx client_max_body_size) rejects an oversized upload at the
+      // edge before it reaches the API, and its 413 body is HTML — so surface a human
+      // message instead of the raw "413". The cap is ~200 MB (a short cut, not a full episode).
+      detail = "Video too large to upload (max ~200 MB). Trim it to a short cut (a few seconds to ~2 min) and try again.";
+    } else {
+      try {
+        const j = (await resp.json()) as { detail?: string };
+        if (j?.detail) detail = j.detail;
+      } catch { /* body wasn't JSON */ }
+    }
     h.onError(detail);
     return;
   }
