@@ -468,13 +468,6 @@ export function ReviewWorkbench({
         </main>
       ) : (
         <>
-          {samp?.planted && (
-            /* honest label: this session's in-between was PLANTED from a frozen suite — the QA
-           verdict is real, the error was seeded (the live gate yields no natural flags). */
-            <div className="sampling-note warn">
-              {`🧪 PLANTED DEMO — injected error "${samp.planted_type}" from ${samp.planted_src}; verdict/annotation is produced by the real QA pipeline.`}
-            </div>
-          )}
           {samp && samp.kept != null && (
             /* drop-a-video transparency: how the clip was decimated into keys, and a warning when
            the stride was auto-coarsened (the reconstruction samples the source, not every frame). */

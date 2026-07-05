@@ -54,13 +54,15 @@ async function pumpSSE(body: ReadableStream<Uint8Array>, h: SessionHandlers): Pr
 export async function runSession(
   files: File[],
   engines: string,
-  fps: string,
+  cadence: string,
+  smoothness: string,
   h: SessionHandlers,
 ): Promise<void> {
   const fd = new FormData();
   for (const f of files) fd.append("keys", f);
   fd.append("engines", engines);
-  fd.append("fps", fps || "24");
+  fd.append("cadence", cadence || "12");
+  fd.append("smoothness", smoothness || "2");
 
   const resp = await fetch("/session", { method: "POST", body: fd });
   if (!resp.ok || !resp.body) {
@@ -76,7 +78,8 @@ export async function runSession(
 export async function runVideoSession(
   video: File,
   stride: string,
-  fps: string,
+  cadence: string,
+  smoothness: string,
   engines: string,
   h: SessionHandlers,
 ): Promise<void> {
@@ -84,7 +87,10 @@ export async function runVideoSession(
   fd.append("video", video);
   fd.append("stride", stride || "2");
   fd.append("engines", engines);
-  fd.append("fps", fps || "24");
+  // cadence is derived server-side from the decoded video's native rate — the UI value
+  // is still posted (best-effort hint) but the server is free to override it.
+  fd.append("cadence", cadence || "12");
+  fd.append("smoothness", smoothness || "2");
 
   const resp = await fetch("/session/video", { method: "POST", body: fd });
   if (!resp.ok || !resp.body) {
@@ -120,13 +126,15 @@ export async function fetchPlantedCases(): Promise<PlantedCase[]> {
 export async function runPlantedSession(
   caseId: string,
   engines: string,
-  fps: string,
+  cadence: string,
+  smoothness: string,
   h: SessionHandlers,
 ): Promise<void> {
   const fd = new FormData();
   fd.append("case", caseId);
   fd.append("engines", engines);
-  fd.append("fps", fps || "24");
+  fd.append("cadence", cadence || "12");
+  fd.append("smoothness", smoothness || "2");
   const resp = await fetch("/session/planted", { method: "POST", body: fd });
   if (!resp.ok || !resp.body) {
     h.onError(`POST /session/planted failed: ${resp.status}`);

@@ -1,6 +1,14 @@
 // Final agent message: session stats + artifacts + board handoff + exports.
 import type { ResultEvent } from "../../types";
 
+/* cadence_fps → "shoot on Ns" label; falls back to a plain "Nfps" for an unrecognized rate */
+function cadenceLabel(cadenceFps?: number): string {
+  if (cadenceFps === 24) return "on-1s";
+  if (cadenceFps === 12) return "on-2s";
+  if (cadenceFps === 8) return "on-3s";
+  return cadenceFps != null ? `${cadenceFps}fps` : "";
+}
+
 export function ResultCard({ result, keyUrls, onOpenBoard, onExport }: {
   result: ResultEvent;
   keyUrls: string[];
@@ -8,6 +16,7 @@ export function ResultCard({ result, keyUrls, onOpenBoard, onExport }: {
   onExport: (result: ResultEvent) => void;
 }) {
   const art = result.artifacts;
+  const samp = result.sampling;
   // export-the-flagged-keys affordance (design §0.1): the artist fixes in their own
   // tool, so hand them the endpoint keys of every flagged pair.
   const flaggedKeys = Array.from(
@@ -21,6 +30,16 @@ export function ResultCard({ result, keyUrls, onOpenBoard, onExport }: {
         ⚑ {result.flagged.length} flagged · 🤔 {result.abstained.length} unsure ·
         🔑 {result.keys_requested_total} keys requested
       </p>
+      {samp?.output_fps != null && (
+        // sampling badge — what cadence × smoothness the box actually delivered this run
+        // (cadence/smoothness echo the request; the server is the source of truth here).
+        <p className="result-sampling" title="cadence × smoothness → delivered playback rate">
+          {samp.smoothness != null && <>×{samp.smoothness} · </>}
+          {samp.cadence_fps != null && <>{cadenceLabel(samp.cadence_fps)} → </>}
+          {samp.output_fps}fps
+          {samp.duration != null && <> · {samp.duration}s</>}
+        </p>
+      )}
       {art && (
         <p className="result-links">
           <a href={art.montage} target="_blank" rel="noreferrer">montage</a>
