@@ -45,6 +45,7 @@ export function KeyframeDropzone({ files, urls, onAdd, onRemove, onClear, compac
   const inputRef = useRef<HTMLInputElement>(null);
   const [over, setOver] = useState(false);
   const [open, setOpen] = useState(true);   // expand / collapse the cel contact-sheet
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: fold the contact-sheet once a run exists (open stays user-toggleable)
   useEffect(() => { if (compact) setOpen(false); }, [compact]); // once a run exists, fold the contact-sheet to reclaim top space
   // drop accepts only PNG cels (the click path already filters via accept="image/png")
   const acceptPng = (list: FileList | null) =>

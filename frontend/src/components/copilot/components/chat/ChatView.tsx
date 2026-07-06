@@ -1,15 +1,14 @@
 // Chat transcript — renders the derived ChatMsg list (vault 'Chat-First Copilot Surface' §1-2).
 import { useEffect, useRef } from "react";
-import type { CsqBand, ResultEvent } from "../../types";
+import type { ResultEvent } from "../../types";
 import type { ChatMsg } from "../../lib/chatModel";
 import { FlagBubble } from "./FlagBubble";
 import { KeyAskBubble } from "./KeyAskBubble";
 import { ResultCard } from "./ResultCard";
 
-export function ChatView({ msgs, keyUrls, band, onOpenBoard, onRefill, onExport }: {
+export function ChatView({ msgs, keyUrls, onOpenBoard, onRefill, onExport }: {
   msgs: ChatMsg[];
   keyUrls: string[];
-  band?: CsqBand | null;
   onOpenBoard: (focus: number | null) => void;
   onRefill: (index: number, file: File) => Promise<void>;
   onExport: (result: ResultEvent) => void;
@@ -51,7 +50,7 @@ export function ChatView({ msgs, keyUrls, band, onOpenBoard, onRefill, onExport 
               </div>
             );
           case "flag":
-            return <FlagBubble key={m.id} pair={m.pair} ex={m.ex} keyUrls={keyUrls} band={band}
+            return <FlagBubble key={m.id} pair={m.pair} ex={m.ex} keyUrls={keyUrls}
                                onReview={() => onOpenBoard(m.pair.index)} />;
           case "ask-key":
             return <KeyAskBubble key={m.id} pair={m.pair} resolved={m.resolved} onRefill={onRefill} />;
