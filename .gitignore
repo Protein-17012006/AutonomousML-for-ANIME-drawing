@@ -26,3 +26,6 @@ Thumbs.db
 Desktop.ini
 .vscode/
 .idea/
+
+# Obsidian vault — separate git repo, kept local
+Vault/
