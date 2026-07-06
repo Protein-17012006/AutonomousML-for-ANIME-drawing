@@ -92,7 +92,6 @@ export function ChatComposer(p: {
             >
               <option value="1">Off</option>
               <option value="2">Standard</option>
-              <option value="4" disabled>Extra (soon)</option>
             </select>
           </label>
           {/* STRIDE SELECTION (VIDEO ONLY) */}
