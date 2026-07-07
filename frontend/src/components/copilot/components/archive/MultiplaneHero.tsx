@@ -6,7 +6,7 @@
 // pointer; a single rotation on the preserve-3d stage gives REAL parallax because each plane sits
 // at a different Z. Pointer-only and reduced-motion-safe (the rig rests, the cel stops redrawing).
 // Extracted from CopilotApp.tsx.
-import { useTilt } from "../lib/useTilt";
+import { useTilt } from "../../lib/useTilt";
 
 /* one cel of the line-test, drawn as a self-contained frame on its own glass plane. The figure holds
    the pose for this key (arm down = A, up = B); the in-between cel draws the arm at mid-sweep in
@@ -30,7 +30,12 @@ function CelArt({ kind }: { kind: "a" | "mid" | "b" }) {
         <path d="M80 37 Q 69 27 58 22" />
       </g>
       {/* the in-between cel = the anime tell: a faint ao motion SMEAR across the swept arc */}
-      {kind === "mid" && <path className="mp-smear" d="M80 37 L58 56 A 28 28 0 0 1 50 39 A 28 28 0 0 1 58 22 Z" />}
+      {kind === "mid" && (
+        <path
+          className="mp-smear"
+          d="M80 37 L58 56 A 28 28 0 0 1 50 39 A 28 28 0 0 1 58 22 Z"
+        />
+      )}
       {kind === "a" && <path className="mp-arm-key" d="M80 37 Q 69 49 58 56" />}
       {kind === "b" && <path className="mp-arm-key" d="M80 37 Q 69 27 58 22" />}
       {kind === "mid" && (
@@ -47,7 +52,9 @@ export function MultiplaneHero() {
     <div className="mplane">
       <div className="mplane-rig" ref={ref}>
         <div className="mplane-stage">
-          <span className="mplane-kanji" aria-hidden="true">中</span>
+          <span className="mplane-kanji" aria-hidden="true">
+            中
+          </span>
           <div className="mplane-floor" aria-hidden="true" />
           <figure className="mp-cel mp-cel-a">
             <CelArt kind="a" />
@@ -57,7 +64,9 @@ export function MultiplaneHero() {
           <figure className="mp-cel mp-cel-mid">
             <CelArt kind="mid" />
             <span className="mp-pegs" aria-hidden="true" />
-            <figcaption className="mp-tag mp-tag-ao">in-between · 中割</figcaption>
+            <figcaption className="mp-tag mp-tag-ao">
+              in-between · 中割
+            </figcaption>
           </figure>
           <figure className="mp-cel mp-cel-b">
             <CelArt kind="b" />
@@ -69,9 +78,14 @@ export function MultiplaneHero() {
       <div className="mplane-copy">
         <p className="mplane-eyebrow">multiplane line-test</p>
         <h2 className="mplane-thesis">
-          It draws the in-between it can <em>stand behind</em> — and asks for your key when it can&rsquo;t.
+          It draws the in-between it can <em>stand behind</em> — and asks for
+          your key when it can&rsquo;t.
         </h2>
-        <p className="mplane-sub">Load two or more keyframes above, then Run. The co-pilot fills the douga, flags what it&rsquo;s unsure of, and hands the gaps back to you.</p>
+        <p className="mplane-sub">
+          Load two or more keyframes above, then Run. The co-pilot fills the
+          douga, flags what it&rsquo;s unsure of, and hands the gaps back to
+          you.
+        </p>
       </div>
     </div>
   );

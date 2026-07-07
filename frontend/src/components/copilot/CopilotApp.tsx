@@ -4,17 +4,25 @@
 // (this file used to be a ~1360-line monolith holding all of them).
 import { useEffect, useMemo, useState } from "react";
 import type { PairEvent, ResultEvent, DemoResult } from "./types";
-import { runSession, runDemo, runVideoSession, runPlantedSession, fetchPlantedCases, askQuestion, type PlantedCase } from "./api";
-import { PegBar } from "./components/Inputs";
+import {
+  runSession,
+  runDemo,
+  runVideoSession,
+  runPlantedSession,
+  fetchPlantedCases,
+  askQuestion,
+  type PlantedCase,
+} from "./api";
+import { BrandIcon } from "@/components/common/BrandIcon";
 import { deriveMessages, type QaTurn, type UserTurn } from "./lib/chatModel";
 import { useFileSet } from "./lib/useFileSet";
 import { downloadBundle } from "./lib/exportSession";
 import { ChatView } from "./components/chat/ChatView";
 import { ChatComposer } from "./components/chat/ChatComposer";
-import { MultiplaneHero } from "./components/MultiplaneHero";
-import { ReviewWorkbench } from "./components/ReviewWorkbench";
-import { Compare } from "./components/Compare";
-import { Toast } from "./components/Toast";
+import { ChatWelcome } from "./components/chat/ChatWelcome";
+import { ReviewWorkbench } from "./components/review/ReviewWorkbench";
+import { Compare } from "./components/review/Compare";
+import { Toast } from "./components/review/Toast";
 
 export default function App() {
   const keys = useFileSet();
@@ -23,17 +31,24 @@ export default function App() {
   const [fps, setFps] = useState("24");
   // Planted-error demo cases (labeled): loaded once; empty when the server predates the feature.
   const [plantedCases, setPlantedCases] = useState<PlantedCase[]>([]);
-  useEffect(() => { fetchPlantedCases().then(setPlantedCases).catch(() => {}); }, []);
+  useEffect(() => {
+    fetchPlantedCases()
+      .then(setPlantedCases)
+      .catch(() => {});
+  }, []);
 
   const [running, setRunning] = useState(false);
   const [banner, setBanner] = useState<string | null>(null);
   const [log, setLog] = useState<PairEvent[]>([]);
   const [result, setResult] = useState<ResultEvent | null>(null);
-  const [verdicts, setVerdicts] = useState<Record<number, "accept" | "reject">>({});
+  const [verdicts, setVerdicts] = useState<Record<number, "accept" | "reject">>(
+    {},
+  );
   const setVerdict = (idx: number, v: "accept" | "reject") =>
     setVerdicts((prev) => {
       const n = { ...prev };
-      if (n[idx] === v) delete n[idx]; // toggle off
+      if (n[idx] === v)
+        delete n[idx]; // toggle off
       else n[idx] = v;
       return n;
     });
@@ -52,8 +67,14 @@ export default function App() {
   const [qaTurns, setQaTurns] = useState<QaTurn[]>([]);
 
   // object URLs for the uploaded keys (key A/B of each pair = keyUrls[i], keyUrls[i+1]).
-  const keyUrls = useMemo(() => keys.files.map((f) => URL.createObjectURL(f)), [keys.files]);
-  useEffect(() => () => keyUrls.forEach((u) => URL.revokeObjectURL(u)), [keyUrls]);
+  const keyUrls = useMemo(
+    () => keys.files.map((f) => URL.createObjectURL(f)),
+    [keys.files],
+  );
+  useEffect(
+    () => () => keyUrls.forEach((u) => URL.revokeObjectURL(u)),
+    [keyUrls],
+  );
 
   // Effective key images for the review triptych. PNG upload → client object URLs. Drop-a-video
   // has no client files (keys are decoded server-side), so fall back to the server-served
@@ -98,7 +119,9 @@ export default function App() {
       });
     } catch (err) {
       console.error("run session failed:", err);
-      setBanner("Couldn't reach the co-pilot — is the service running? Press Run to retry.");
+      setBanner(
+        "Couldn't reach the co-pilot — is the service running? Press Run to retry.",
+      );
     }
     setRunning(false);
   };
@@ -113,7 +136,10 @@ export default function App() {
     setResult(null);
     setVerdicts({});
     setQaTurns([]);
-    setUpload({ label: `🧪 PLANTED DEMO · ${c?.title ?? caseId} — lỗi được cấy chủ đích để trình diễn QA`, thumbs: [] });
+    setUpload({
+      label: `🧪 PLANTED DEMO · ${c?.title ?? caseId} — lỗi được cấy chủ đích để trình diễn QA`,
+      thumbs: [],
+    });
     setRunning(true);
     try {
       await runPlantedSession(caseId, engines, fps, {
@@ -148,7 +174,9 @@ export default function App() {
       });
     } catch (err) {
       console.error("run video session failed:", err);
-      setBanner("Couldn't reach the co-pilot — is the service running? Press Run to retry.");
+      setBanner(
+        "Couldn't reach the co-pilot — is the service running? Press Run to retry.",
+      );
     }
     setRunning(false);
   };
@@ -158,13 +186,21 @@ export default function App() {
   const refillKey = async (index: number, file: File) => {
     const ref = result?.artifacts?.montage || result?.artifacts?.video;
     if (!ref) return;
-    const sid = ref.split("/")[2];          // /session/{sid}/montage.png[?r=n]
+    const sid = ref.split("/")[2]; // /session/{sid}/montage.png[?r=n]
     const fd = new FormData();
     fd.append("index", String(index));
     fd.append("key", file);
     try {
-      const resp = await fetch(`/session/${sid}/key`, { method: "POST", body: fd });
-      if (!resp.ok) { setBanner(`Add-key failed (server ${resp.status}) — re-run, or try a smaller PNG.`); return; }
+      const resp = await fetch(`/session/${sid}/key`, {
+        method: "POST",
+        body: fd,
+      });
+      if (!resp.ok) {
+        setBanner(
+          `Add-key failed (server ${resp.status}) — re-run, or try a smaller PNG.`,
+        );
+        return;
+      }
       const d = await resp.json();
       keys.insertAt(index + 1, file);
       // a key inserted into gap `index` splits it and shifts every LATER pair by +1 — REMAP the
@@ -173,8 +209,9 @@ export default function App() {
         const next: Record<number, "accept" | "reject"> = {};
         for (const [k, v] of Object.entries(prev)) {
           const j = Number(k);
-          if (j < index) next[j] = v;             // before the gap → unchanged
-          else if (j > index) next[j + 1] = v;    // after the gap → shifted +1 (j === index was the needs_key gap, no verdict)
+          if (j < index)
+            next[j] = v; // before the gap → unchanged
+          else if (j > index) next[j + 1] = v; // after the gap → shifted +1 (j === index was the needs_key gap, no verdict)
         }
         return next;
       });
@@ -216,10 +253,24 @@ export default function App() {
     setQaTurns((prev) => [...prev, { q, answer: null }]);
     try {
       const r = await askQuestion(sid, q);
-      setQaTurns((prev) => prev.map((t, i) => (i === n ? { ...t, answer: r.answer, grounded: r.grounded } : t)));
+      setQaTurns((prev) =>
+        prev.map((t, i) =>
+          i === n ? { ...t, answer: r.answer, grounded: r.grounded } : t,
+        ),
+      );
     } catch {
-      setQaTurns((prev) => prev.map((t, i) =>
-        (i === n ? { ...t, answer: "Couldn't reach the assistant — is the service running? Try again.", grounded: false } : t)));
+      setQaTurns((prev) =>
+        prev.map((t, i) =>
+          i === n
+            ? {
+                ...t,
+                answer:
+                  "Couldn't reach the assistant — is the service running? Try again.",
+                grounded: false,
+              }
+            : t,
+        ),
+      );
     }
   };
 
@@ -227,40 +278,69 @@ export default function App() {
     () => deriveMessages({ upload, log, result, running, banner, qa: qaTurns }),
     [upload, log, result, running, banner, qaTurns],
   );
-  const openBoard = (focus: number | null) => { setBoardFocus(focus); setView("board"); };
+  const openBoard = (focus: number | null) => {
+    setBoardFocus(focus);
+    setView("board");
+  };
 
   return (
     <div className="app">
       {view === "chat" ? (
         <div className="chat-page">
           <header className="chat-brand">
-            <PegBar />
+            <BrandIcon />
             <div>
               <h1>In-Between Co-pilot</h1>
-              <p className="tier">中割り douga · 作監 on-model QA</p>
+              <p className="font-mono text-xs text-ash">
+                Genga to douga · smooth motion, preserved style
+              </p>
             </div>
           </header>
-          {!upload && log.length === 0 && !result && <MultiplaneHero />}
-          <ChatView msgs={msgs} keyUrls={effKeyUrls}
-            onOpenBoard={openBoard} onRefill={refillKey} onExport={downloadBundle} />
+          {!upload && log.length === 0 && !result && <ChatWelcome />}
+          <ChatView
+            msgs={msgs}
+            keyUrls={effKeyUrls}
+            onOpenBoard={openBoard}
+            onRefill={refillKey}
+            onExport={downloadBundle}
+          />
           <ChatComposer
-            files={keys.files} fileUrls={keyUrls}
-            onAdd={keys.add} onRemove={keys.remove}
-            onClear={() => { clearAll(); setVideoFile(null); }}
-            engines={engines} setEngines={setEngines}
-            fps={fps} setFps={setFps}
-            videoFile={videoFile} onVideo={setVideoFile}
-            stride={stride} setStride={setStride}
-            onRun={run} onRunVideo={runVideo} running={running}
+            files={keys.files}
+            fileUrls={keyUrls}
+            onAdd={keys.add}
+            onRemove={keys.remove}
+            onClear={() => {
+              clearAll();
+              setVideoFile(null);
+            }}
+            engines={engines}
+            setEngines={setEngines}
+            fps={fps}
+            setFps={setFps}
+            videoFile={videoFile}
+            onVideo={setVideoFile}
+            stride={stride}
+            setStride={setStride}
+            onRun={run}
+            onRunVideo={runVideo}
+            running={running}
             compact={running || log.length > 0}
-            askEnabled={!!result?.artifacts} onAsk={onAsk}
-            plantedCases={plantedCases} onRunPlanted={runPlanted}
+            askEnabled={!!result?.artifacts}
+            onAsk={onAsk}
+            plantedCases={plantedCases}
+            onRunPlanted={runPlanted}
           />
         </div>
       ) : (
         <>
           <div className="board-bar">
-            <button type="button" className="btn btn-ghost" onClick={() => setView("chat")}>← Back to chat</button>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => setView("chat")}
+            >
+              ← Back to chat
+            </button>
           </div>
           <ReviewWorkbench
             log={log}
@@ -286,7 +366,9 @@ export default function App() {
           />
         </>
       )}
-      {banner && <Toast key={banner} message={banner} onClose={() => setBanner(null)} />}
+      {banner && (
+        <Toast key={banner} message={banner} onClose={() => setBanner(null)} />
+      )}
     </div>
   );
 }
