@@ -29,3 +29,7 @@ Desktop.ini
 
 # Obsidian vault — separate git repo, kept local
 Vault/
+
+
+# Coding agents - Claude
+.claude/
