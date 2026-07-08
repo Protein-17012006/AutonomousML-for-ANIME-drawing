@@ -46,8 +46,8 @@ export function CompareWipe({ orig, rife }: { orig: string; rife: string }) {
     >
       <video ref={aRef} className="cmpwipe-a" src={orig} autoPlay muted loop playsInline />
       <video ref={bRef} className="cmpwipe-b" src={rife} autoPlay muted loop playsInline />
-      <span className="cmpwipe-tag cmpwipe-tag-l">SOURCE 原画</span>
-      <span className="cmpwipe-tag cmpwipe-tag-r">RIFE 中割</span>
+      <span className="cmpwipe-tag cmpwipe-tag-l">SOURCE KEYFRAMES</span>
+      <span className="cmpwipe-tag cmpwipe-tag-r">RIFE Interpolation</span>
       <div
         className="cmpwipe-divider"
         role="slider"

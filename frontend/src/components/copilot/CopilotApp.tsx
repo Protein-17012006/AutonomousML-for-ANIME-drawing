@@ -23,6 +23,9 @@ import { ChatWelcome } from "./components/chat/ChatWelcome";
 import { ReviewWorkbench } from "./components/review/ReviewWorkbench";
 import { Compare } from "./components/review/Compare";
 import { Toast } from "./components/review/Toast";
+import { SidebarProvider } from "@/components/ui/sidebar";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { AppSidebar } from "@/components/common/AppSidebar";
 
 export default function App() {
   const keys = useFileSet();
@@ -312,8 +315,12 @@ export default function App() {
   const hasSession = !!upload || log.length > 0 || !!result;
 
   return (
-    <div className="app">
-      {view === "chat" ? (
+    <TooltipProvider>
+      {/* App shell — left sidebar rail + the main content column (.app). */}
+      <SidebarProvider className="copilot-shell">
+        <AppSidebar />
+        <div className="app">
+          {view === "chat" ? (
         <div className="chat-page">
           <ChatHeader />
           {/* Middle region — welcome XOR transcript, never both (see hasSession). */}
@@ -395,9 +402,11 @@ export default function App() {
           />
         </>
       )}
-      {banner && (
-        <Toast key={banner} message={banner} onClose={() => setBanner(null)} />
-      )}
-    </div>
+          {banner && (
+            <Toast key={banner} message={banner} onClose={() => setBanner(null)} />
+          )}
+        </div>
+      </SidebarProvider>
+    </TooltipProvider>
   );
 }

@@ -20,9 +20,31 @@ body {
 }
 .app {
   height: 100%;
+  flex: 1; /* main content column — fills the shell row beside the sidebar rail */
+  min-width: 0;
   display: flex;
   flex-direction: column;
   min-height: 0;
+}
+/* App shell — SidebarProvider is the flex row holding the sidebar rail + the .app main column.
+   Pin it to the viewport so .app's height:100% resolves (board internal scroll keeps working);
+   the ≤920px block below releases it to page-scroll like the rest of the height chain. */
+.copilot-shell {
+  height: 100vh;
+  height: 100dvh;
+}
+/* Retint the shadcn Sidebar to the copilot ink palette. Set on <body> (not just .copilot-shell)
+   so it also reaches the Radix-portaled mobile Sheet drawer, which mounts as a body child.
+   Route-scoped (copilot.css only loads on /copilot); theme-reactive via the --color-* ink tokens. */
+body {
+  --sidebar: var(--color-sumi-2);
+  --sidebar-foreground: var(--color-washi);
+  --sidebar-border: var(--color-line);
+  --sidebar-accent: var(--color-sumi-3);
+  --sidebar-accent-foreground: var(--color-washi);
+  --sidebar-ring: var(--color-ao);
+  --sidebar-primary: var(--color-ao);
+  --sidebar-primary-foreground: var(--color-on-ao);
 }
 .console {
   flex: none;
@@ -774,7 +796,7 @@ h1 {
   color: var(--color-ash);
   font-style: normal;
 }
-/*  */
+/* FrameCard.tsx */
 .frameset {
   --lift-tone: var(--color-ao);
   margin: 0;
@@ -785,11 +807,7 @@ h1 {
   animation: frame-in 0.26s cubic-bezier(0.2, 0.7, 0.2, 1) both;
   animation-delay: calc(var(--i, 0) * 30ms);
 }
-/* On hover the reviewed in-between lifts (focus) and the two keys dim/recede — a FLAT 2-D effect,
-   NOT a 3-D preserve-3d rig. BUGFIX (2026-06-28): the old `transform-style: preserve-3d` trip had an
-   opaque `background`, so a key pushed to `translateZ(-12px)` rendered BEHIND that background and the
-   side keys VANISHED on hover. 2-D scale + z-index lifts the middle without any 3-D occlusion. The full
-   multiplane 3-D stays on the landing hero (where there's no opaque sibling background to hide behind). */
+
 .frametrip {
   transition: transform 0.32s cubic-bezier(0.2, 0.7, 0.2, 1);
 }
@@ -800,14 +818,13 @@ h1 {
     box-shadow 0.32s,
     filter 0.32s;
 }
-/* the two keys dim + shrink slightly so the reviewed in-between owns the eye (no translateZ → no vanish) */
+
 .frameset:hover .frametrip > :nth-child(1),
 .frameset:hover .frametrip > :nth-child(3) {
   transform: scale(0.97);
   filter: brightness(0.72);
 }
-/* the reviewed in-between lifts forward (2-D scale, raised via z-index so it overlaps OVER the keys)
-   + a verdict-tinted glow that says pass/abstain/flag */
+
 .frameset:hover .frametrip > :nth-child(2) {
   transform: scale(1.05);
   z-index: 1;
@@ -839,8 +856,7 @@ h1 {
   border-left-color: var(--color-akaire);
   --lift-tone: var(--color-akaire);
 }
-/* within the akaire family, distinguish "draw here" (dashed = an empty cel to fill) from
-   "off-model" (solid = a flagged drawing): same red, different texture, different meaning */
+
 .frameset.needs_key {
   border-left-style: dashed;
 }
@@ -860,7 +876,7 @@ h1 {
   letter-spacing: 0.03em;
   padding: 9px 14px;
 }
-/* play the trip as a big line-test (motion as the hero, on demand) */
+
 .trip-play {
   margin-left: auto;
   font-family: var(--font-mono);
@@ -902,7 +918,7 @@ h1 {
   font-family: var(--font-mono);
   font-size: 11px;
 }
-/* needs-key middle cell: an akaire "draw here" prompt where the in-between would go */
+
 .fcell-draw {
   display: flex;
   align-items: center;
@@ -919,7 +935,7 @@ h1 {
   background: color-mix(in oklab, var(--color-akaire) 12%, var(--color-screen));
   border: 1px dashed color-mix(in oklab, var(--color-akaire) 55%, transparent);
 }
-/* B2: akaire box over the defect region of the in-between (fractional coords from the server) */
+
 .fcell-wrap {
   position: relative;
   min-width: 0;
@@ -937,7 +953,7 @@ h1 {
   background: color-mix(in oklab, var(--color-akaire) 12%, transparent);
   pointer-events: none;
 }
-/* 作監 margin tag: names the defect right at its region, pinned just above the box's top-left */
+
 .region-tag {
   position: absolute;
   left: -2px;
@@ -1767,7 +1783,7 @@ h1 {
   line-height: 1.5;
 }
 
-/* ===== compare / demo ===== */
+/* Compare.tsx */
 .compare {
   border-top: 1px solid var(--color-line);
   margin-top: 8px;
@@ -1836,7 +1852,7 @@ h1 {
   border-radius: 4px;
 }
 
-/* ===== before/after wipe — drag GỐC↔RIFE through the SAME frame (clip-path inset) ===== */
+/* CompareWipe.tsx */
 .cmpwipe {
   position: relative;
   aspect-ratio: 16 / 9;
@@ -1880,7 +1896,7 @@ h1 {
   right: 8px;
   color: var(--color-ash);
 }
-/* the divider = a 非-photo-blue pencil rule with a peg-bar grip */
+
 .cmpwipe-divider {
   position: absolute;
   top: 0;
@@ -1930,7 +1946,7 @@ h1 {
   }
   .thesis {
     font-size: 12px;
-  } /* keep the plain-language promise on small screens (was display:none) */
+  } 
   html,
   body,
   #root {
@@ -1943,6 +1959,11 @@ h1 {
   .app {
     height: auto;
     overflow-x: hidden;
+  }
+  /* release the shell too — the sidebar is a Sheet overlay here, so the row has one child */
+  .copilot-shell {
+    height: auto;
+    min-height: 100dvh;
   }
   .dual {
     grid-template-columns: minmax(0, 1fr);
@@ -2505,8 +2526,7 @@ h1 {
   }
 }
 
-/* ===== run-error toast — a 3px-akaire correction stamp with a draining ao time-pencil ===== */
-/* SYSTEM alert skin (see .banner) — neutral graphite + a ⚠ akaire-ink mark, NOT the akaire QA red */
+/* Toast.tsx */
 .toast {
   position: fixed;
   right: 18px;

@@ -24,7 +24,7 @@ export function Compare(p: CompareProps) {
         className="compare-head"
         onClick={() => setOpen((o) => !o)}
       >
-        <span className="eyebrow">比較 compare</span>
+        <span className="eyebrow">Frame Comparison</span>
         <span className="compare-title">See it on a real cut</span>
         <span className="compare-toggle">{open ? "hide" : "show"}</span>
       </button>
