@@ -6,12 +6,11 @@ clip is generator output the teacher labeled clean or error.
 """
 from __future__ import annotations
 
-import dataclasses
-import json
-import os
 from dataclasses import dataclass, field
 
-from benchmark.lib.manifest.manifest import FrozenManifestError
+from benchmark.lib.manifest.frozen import (FrozenManifestError,
+                                           load_dataclass_manifest,
+                                           save_dataclass_manifest)
 
 __all__ = ["MotionManifest", "FrozenManifestError",
            "save_motion_manifest", "load_motion_manifest",
@@ -31,29 +30,11 @@ class MotionManifest:
 
 
 def save_motion_manifest(manifest: MotionManifest, path: str) -> str:
-    if os.path.exists(path):
-        try:
-            existing_frozen = load_motion_manifest(path).frozen
-        except RuntimeError:
-            existing_frozen = False  # corrupt manifest: overwriting is fine
-        if existing_frozen:
-            raise FrozenManifestError(
-                f"motion manifest at {path!r} is frozen — refusing to overwrite. "
-                "A frozen suite is the benchmark's ground truth.")
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(dataclasses.asdict(manifest), f, indent=2)
-    return path
+    return save_dataclass_manifest(manifest, path, kind="motion manifest")
 
 
 def load_motion_manifest(path: str) -> MotionManifest:
-    try:
-        with open(path, encoding="utf-8") as f:
-            raw = json.load(f)
-    except (OSError, json.JSONDecodeError) as e:
-        raise RuntimeError(f"cannot load motion manifest {path!r}: {e}") from e
-    known = {f.name for f in dataclasses.fields(MotionManifest)}
-    return MotionManifest(**{k: v for k, v in raw.items() if k in known})
+    return load_dataclass_manifest(MotionManifest, path, kind="motion manifest")
 
 
 def build_motion_manifest(clips: list[dict], *, source: str, generator: str,

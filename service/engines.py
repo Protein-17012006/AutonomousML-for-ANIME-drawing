@@ -12,6 +12,7 @@ import numpy as np
 # without an upward import into service/). Cheap: factory.py's own imports are lazy.
 from inbetween_copilot.triage.factory import make_triage_fn  # noqa: F401
 from inbetween_copilot.triage.widegap import keys_from_gap
+from service.engine_bundle import EngineBundle
 from service.schemas import SessionCfg
 
 
@@ -28,12 +29,12 @@ def _stub_triage_fn(a, b, pp):
     return {**dataclasses.asdict(t), "brief": template_brief(t)}
 
 
-def stub_engines(cfg: SessionCfg) -> dict:
+def stub_engines(cfg: SessionCfg) -> EngineBundle:
     # gap_fn divides by 100.0 so that unit-spaced keys (e.g. 0,1,2) produce
     # gap = 0.01 < TAU_GATE (0.017) -> FILL; a large jump (e.g. 2->50) gives
     # gap = 0.48 > TAU_GATE -> needs_key.  /50 would give 0.02 > TAU_GATE
     # (all pairs gated out, n_autopass=0), which defeats the test intent.
-    return dict(
+    return EngineBundle(
         gap_fn=lambda a, b: float(np.mean(np.abs(np.asarray(b, float) - np.asarray(a, float)))) / 100.0,
         regime_fn=lambda a, b: "small",
         interp_fn=lambda route, a, b: [a, (a + b) // 2, b],
@@ -56,6 +57,11 @@ def stub_engines(cfg: SessionCfg) -> dict:
             "region": "none",
             "explanation": "stub: clean",
         },
+        # explicit stub defaults (P1): the same fields box fills — no more silent
+        # stub/box key divergence (csq_calibrator=None, vlm_status={}, qa_window=False).
+        csq_calibrator=None,
+        vlm_status={},
+        qa_window=False,
     )
 
 
@@ -68,7 +74,7 @@ BOX_TAU_HOLD = 0.01
 BOX_TAU_SNAP = 0.18
 
 
-def box_engines(cfg: SessionCfg) -> dict:
+def box_engines(cfg: SessionCfg) -> EngineBundle:
     """Real RIFE + served-VLM wiring. ALL box imports are lazy (inside this function).
     Raises ImportError/ModuleNotFoundError/OSError if not on the inference box.
     """
@@ -112,63 +118,15 @@ def box_engines(cfg: SessionCfg) -> dict:
         mid_np = (mid[0] * 255).byte().cpu().numpy().transpose(1, 2, 0)[:h, :w]
         return [a, mid_np, b]
 
-    # --- served VLM fn ---
-    import json, base64, re, urllib.request, cv2
+    # --- served VLM fns (transport = service/box_vlm.py adapter; prompts live
+    # beside the validated perception prompts in inbetween_copilot/qa/perception) ---
+    from inbetween_copilot.qa.perception import BINARY_PROMPT as _BINARY_PROMPT
     from inbetween_copilot.qa.perception import PERCEPTION_PROMPT as _STRUCT_PROMPT
+    from service.box_vlm import make_post_vlm
 
     VLM_URL = os.environ["VISION_BASE_URL_CHECK"].rstrip("/") + "/chat/completions"
     VLM_MODEL = os.environ["VISION_MODEL_CHECK"]
-    _BINARY_PROMPT = (
-        "These are consecutive frames of one short animation clip, in order. Judge ONLY the motion.\n"
-        "Some clips contain a motion error from a generative interpolator - a limb that warps/melts, "
-        "identity/colour drift, a motion arc that breaks, flicker/pop, or an impossible morph. "
-        "Intentional anime stylization (smears, speed lines, squash-stretch) is NOT an error.\n"
-        'Return JSON: {"has_motion_error": true|false, '
-        '"verdict_prob": <float 0-1 confidence of error>, '
-        '"error_type": "ghost|blur|flicker|morph|identity_drift|scene_break|none", '
-        '"region": "tl|tc|tr|ml|mc|mr|bl|bc|br|whole|none", "explanation": "<one sentence>"}'
-    )
-
-    _vlm_warned = []   # one-shot "VLM unavailable" notice (degraded-QA mode)
-    # mutable degradation flag surfaced to the client (audit 2026-07-02 finding #6:
-    # VLM down used to stream all-green with no client-visible signal). The worker
-    # reads it after the run -> ResultEvent.qa_degraded.
-    vlm_status = {"degraded": False}
-
-    def _post_vlm(prompt, frames):
-        """Shared POST helper: encode frames and POST prompt to the VLM endpoint.
-
-        FAIL-SAFE: if the served VLM is unreachable or errors (e.g. Errno 111
-        Connection refused when serve.sh isn't running), return {} so QA degrades to
-        the softness/gate signals — both perceive() and the CSQ channels treat {} as a
-        benign no-error verdict — instead of crashing the whole run. The director loop,
-        the gate, RIFE fill, and softness QA all still work without the VLM."""
-        content = [{"type": "text", "text": prompt}]
-        for fr in frames:
-            _, buf = cv2.imencode(".png", cv2.cvtColor(fr, cv2.COLOR_RGB2BGR))
-            content.append({"type": "image_url", "image_url":
-                            {"url": "data:image/png;base64," + base64.b64encode(buf).decode()}})
-        body = json.dumps({
-            "model": VLM_MODEL, "max_tokens": 300, "temperature": 0,
-            "messages": [{"role": "user", "content": content}]
-        }).encode()
-        req = urllib.request.Request(
-            VLM_URL, data=body, headers={"Content-Type": "application/json"}
-        )
-        try:
-            txt = json.loads(urllib.request.urlopen(req, timeout=180).read()
-                             )["choices"][0]["message"]["content"]
-            m = re.search(r"\{.*\}", txt, re.S)
-            return json.loads(m.group(0)) if m else {}
-        except Exception as e:
-            vlm_status["degraded"] = True
-            if not _vlm_warned:
-                print(f"[box_engines] VLM at {VLM_URL} unavailable ({e!r}); QA degrades "
-                      f"to softness/gate. Start it on the box with: serve.sh 320 "
-                      f"~/anime-ft-data/motion/runs/motion_lora16_on2s_v2",
-                      file=sys.stderr, flush=True)
-                _vlm_warned.append(True)
-            return {}
+    _post_vlm, vlm_status = make_post_vlm(VLM_URL, VLM_MODEL)
 
     def vlm_fn(frames):
         """frames: list of uint8 HxWx3 ndarray. Returns {"has_motion_error": bool, "verdict_prob": float}."""
@@ -210,6 +168,8 @@ def box_engines(cfg: SessionCfg) -> dict:
               file=sys.stderr, flush=True)
 
     from inbetween_copilot.pipeline.wiring import build_real_callables
+    # ask_fn: wide-gap diagnosis (ADR-0015) gets an LLM-written brief when
+    # DEEPSEEK_API_KEY is set; make_ask_fn() -> None degrades to template-only.
     callables = build_real_callables(
         None,
         tau_hold=BOX_TAU_HOLD,
@@ -219,19 +179,29 @@ def box_engines(cfg: SessionCfg) -> dict:
         vlm_fn=vlm_fn,
         csq_artifact=art,
         reason_fn=reason_fn,
+        ask_fn=make_ask_fn(),
     )
-    callables["vlm_struct_fn"] = vlm_struct_fn
-    callables["rife_engine"] = rife_engine   # raw [a, mid, b] for the decimate-vs-GT demo
-    callables["vlm_status"] = vlm_status     # degraded-QA flag -> ResultEvent.qa_degraded
-    # wide-gap diagnosis (ADR-0015) with an LLM-written brief when DEEPSEEK_API_KEY is
-    # set; make_ask_fn() -> None with no key degrades triage_fn to template-only.
-    callables["triage_fn"] = make_triage_fn(tau_hold=BOX_TAU_HOLD, tau_snap=BOX_TAU_SNAP,
-                                            ask_fn=make_ask_fn())
     # surface the calibrated abstain band so the UI dial can draw the measured pass/abstain/flag
     # zones (per-u-bin thresholds on p_error) — the trust instrument, not just a bare %.
     cal = art.calibrator
-    callables["csq_calibrator"] = {
-        "tau_pass": list(cal.tau_pass), "tau_flag": list(cal.tau_flag),
-        "u_edges": list(cal.u_edges), "u_max": cal.u_max,
-    }
-    return callables
+    return EngineBundle(
+        **callables,
+        vlm_struct_fn=vlm_struct_fn,
+        rife_engine=rife_engine,    # raw [a, mid, b] for the decimate-vs-GT demo
+        vlm_status=vlm_status,      # degraded-QA flag -> ResultEvent.qa_degraded
+        csq_calibrator={
+            "tau_pass": list(cal.tau_pass), "tau_flag": list(cal.tau_flag),
+            "u_edges": list(cal.u_edges), "u_max": cal.u_max,
+        },
+    )
+
+
+def resolve(name: str, cfg: SessionCfg) -> EngineBundle:
+    """Map the request's `engines` field to an EngineBundle. The single place the
+    stub|box choice is decoded (was duplicated in the session + demo routes)."""
+    from fastapi import HTTPException   # lazy: importing service.engines never requires fastapi
+    if name == "stub":
+        return stub_engines(cfg)
+    if name == "box":
+        return box_engines(cfg)
+    raise HTTPException(status_code=400, detail=f"Unknown engines: {name!r}")

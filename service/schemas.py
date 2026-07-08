@@ -1,14 +1,16 @@
 """SSE event schemas for the in-between co-pilot service."""
 from __future__ import annotations
 
+import os
 import re
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
-# the calibrated QA reason is formatted "csq:{decision} p={p_error:.2f} u={u:.2f}"
-# (inbetween_copilot/qa/gate.py); pull the numbers out so the UI can show a
-# confidence meter instead of the raw string. None when the reason isn't a csq verdict.
+# FALLBACK ONLY (P2+D 2026-07-08): FrameQA now carries typed p_error/u fields and
+# from_pair prefers them; this regex over the reason string ("csq:… p=… u=…") only
+# serves pairs persisted before the typed fields existed. Delete once no stored
+# session predates 2026-07-08.
 _PU_RE = re.compile(r"p=([0-9.]+).*?u=([0-9.]+)")
 
 
@@ -16,7 +18,19 @@ class SessionCfg(BaseModel):
     tau_gate: float = 0.017
     tau_soft: float = 0.15
     engines: str = "stub"
-    fps: int = 24       # reconstructed-video playback rate (source is ~24fps full-rate)
+    cadence_fps: int = 12      # nominal rate of the artist's keys (on-1s 24 / on-2s 12 / on-3s 8)
+    smoothness: int = 2        # display depth: 1 Off / 2 Standard / 4 Extra
+    fps: Optional[int] = None  # reconstructed-video playback rate; derived = cadence_fps*smoothness unless passed
+
+    @model_validator(mode="after")
+    def _derive_fps(self):
+        if self.smoothness not in (1, 2, 4):
+            raise ValueError(f"smoothness must be 1, 2, or 4 (got {self.smoothness})")
+        if self.smoothness == 4 and not os.environ.get("COPILOT_SMOOTHNESS_X4"):
+            raise ValueError("smoothness=4 (Extra) is gated; set COPILOT_SMOOTHNESS_X4 after the CSQ probe passes")
+        if self.fps is None:
+            object.__setattr__(self, "fps", self.cadence_fps * self.smoothness)
+        return self
 
 
 class PairEvent(BaseModel):
@@ -41,8 +55,10 @@ class PairEvent(BaseModel):
     def from_pair(cls, pair, mid_url: Optional[str] = None) -> "PairEvent":
         qa_status = pair.qa.status if pair.qa is not None else None
         reason = pair.qa.reason if pair.qa is not None else None
-        p_err = u = None
-        if reason:
+        # typed fields first; regex over the note only as legacy fallback
+        p_err = getattr(pair.qa, "p_error", None) if pair.qa is not None else None
+        u = getattr(pair.qa, "u", None) if pair.qa is not None else None
+        if p_err is None and reason:
             m = _PU_RE.search(reason)
             if m:
                 p_err, u = float(m.group(1)), float(m.group(2))

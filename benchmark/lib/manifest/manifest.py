@@ -6,14 +6,14 @@ suite; rebuilding after freezing would invalidate every recorded number.
 """
 from __future__ import annotations
 
-import dataclasses
-import json
-import os
 from dataclasses import dataclass, field
 
-
-class FrozenManifestError(RuntimeError):
-    """save_manifest refused to overwrite a frozen manifest."""
+# FrozenManifestError moved to frozen.py (P4 2026-07-08); re-exported here so
+# every existing `from benchmark.lib.manifest.manifest import FrozenManifestError`
+# keeps working.
+from benchmark.lib.manifest.frozen import (FrozenManifestError,  # noqa: F401
+                                           load_dataclass_manifest,
+                                           save_dataclass_manifest)
 
 
 @dataclass
@@ -28,26 +28,8 @@ class Manifest:
 
 
 def save_manifest(manifest: Manifest, path: str) -> str:
-    if os.path.exists(path):
-        try:
-            existing_frozen = load_manifest(path).frozen
-        except RuntimeError:
-            existing_frozen = False  # corrupt manifest: overwriting is fine
-        if existing_frozen:
-            raise FrozenManifestError(
-                f"manifest at {path!r} is frozen — refusing to overwrite. "
-                "A frozen suite is the benchmark's ground truth.")
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(dataclasses.asdict(manifest), f, indent=2)
-    return path
+    return save_dataclass_manifest(manifest, path, kind="manifest")
 
 
 def load_manifest(path: str) -> Manifest:
-    try:
-        with open(path, encoding="utf-8") as f:
-            raw = json.load(f)
-    except (OSError, json.JSONDecodeError) as e:
-        raise RuntimeError(f"cannot load manifest {path!r}: {e}") from e
-    known = {f.name for f in dataclasses.fields(Manifest)}
-    return Manifest(**{k: v for k, v in raw.items() if k in known})
+    return load_dataclass_manifest(Manifest, path, kind="manifest")

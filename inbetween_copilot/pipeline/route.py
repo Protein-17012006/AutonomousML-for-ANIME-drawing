@@ -6,10 +6,12 @@ these morph a drawing that should not move.
 """
 from __future__ import annotations
 
-_ROUTES = {"hold": "hold", "small": "rife", "snap": "snap_preserve"}
+from inbetween_copilot.pipeline.states import Route
+
+_ROUTES = {"hold": Route.HOLD, "small": Route.RIFE, "snap": Route.SNAP_PRESERVE}
 
 
-def choose_route(regime: str) -> str:
+def choose_route(regime: str) -> Route:
     try:
         return _ROUTES[regime]
     except KeyError:

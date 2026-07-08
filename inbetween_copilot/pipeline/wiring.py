@@ -35,7 +35,8 @@ from inbetween_copilot.triage.widegap import keys_from_gap
 def build_real_callables(spec: "CharacterSpec | None", *, tau_hold: float, tau_snap: float,
                          rife_engine, anisora_gen, breakdown_supply=None,
                          vlm_fn=None, reason_fn=None, askkey_fn=None,
-                         use_director: bool = True, csq_artifact=None) -> dict:
+                         use_director: bool = True, csq_artifact=None,
+                         ask_fn=None) -> dict:
     def regime_fn(a, b):
         return classify([gap_score(a, b)], tau_hold=tau_hold, tau_snap=tau_snap,
                         has_cut=scene_cut(a, b))
@@ -130,13 +131,13 @@ def build_real_callables(spec: "CharacterSpec | None", *, tau_hold: float, tau_s
             decide_fn=decide_fn, refill_fn=refill_fn, escalate_fn=escalate_fn,
             askkey_fn=(askkey_fn or (lambda a, b: None)), split_fill_fn=split_fill_fn)
 
-    # wide-gap diagnosis (ADR-0015): signals-based class + template brief (no DeepSeek
-    # dependency here -- box_engines overrides triage_fn with an LLM-brief-bearing
-    # version via ask_fn=make_ask_fn()). keys_needed_fn drives the plan's actual
+    # wide-gap diagnosis (ADR-0015): signals-based class + template brief; box_engines
+    # passes ask_fn=make_ask_fn() for the LLM-written brief (was: built twice — once
+    # here with ask_fn=None, then overridden). keys_needed_fn drives the plan's actual
     # keys_to_request/keys_requested count with the SAME calibrated buckets triage.
     # keys_suggested uses, so the two no longer diverge (Task 10 fixes the
     # keys_requested-vs-keys_suggested split noted at Task 8).
-    triage_fn = make_triage_fn(tau_hold=tau_hold, tau_snap=tau_snap, ask_fn=None)
+    triage_fn = make_triage_fn(tau_hold=tau_hold, tau_snap=tau_snap, ask_fn=ask_fn)
     keys_needed_fn = lambda g: keys_from_gap(g)
 
     return {"gap_fn": gap_score, "regime_fn": regime_fn, "interp_fn": interp_fn,

@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from inbetween_copilot.pipeline.states import CorrectionStatus
+
 
 @dataclass
 class CorrectionRound:
@@ -22,7 +24,7 @@ class CorrectionRound:
 
 @dataclass
 class CorrectionResult:
-    status: str             # "resolved" | "needs_key" | "unresolved"
+    status: str             # CorrectionStatus value ("resolved" | "needs_key" | "unresolved")
     frames: list
     rounds: list
     keys_used: int
@@ -41,7 +43,7 @@ def correct_inbetween(frames, a, b, *, perceive_fn, localize_fn, decide_fn,
         if prev_u is not None and rounds:
             rounds[-1].u_delta = float(getattr(v, "u", 0.0)) - prev_u
         if not v.has_error:
-            return CorrectionResult("resolved", cur, rounds, keys_used, v)
+            return CorrectionResult(CorrectionStatus.RESOLVED, cur, rounds, keys_used, v)
         region = localize_fn(cur)
         action = decide_fn(v, region, rounds)
         rounds.append(CorrectionRound(action.kind, action.region, v,
@@ -54,11 +56,11 @@ def correct_inbetween(frames, a, b, *, perceive_fn, localize_fn, decide_fn,
         else:  # ask_key
             m = askkey_fn(a, b)
             if m is None:
-                return CorrectionResult("needs_key", cur, rounds, keys_used, v)
+                return CorrectionResult(CorrectionStatus.NEEDS_KEY, cur, rounds, keys_used, v)
             keys_used += 1
             cur = split_fill_fn(a, m, b)
     v = perceive_fn(cur)
     if prev_u is not None and rounds:
         rounds[-1].u_delta = float(getattr(v, "u", 0.0)) - prev_u
-    status = "resolved" if not v.has_error else "unresolved"
+    status = CorrectionStatus.RESOLVED if not v.has_error else CorrectionStatus.UNRESOLVED
     return CorrectionResult(status, cur, rounds, keys_used, v)

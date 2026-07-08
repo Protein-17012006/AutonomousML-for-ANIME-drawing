@@ -33,8 +33,8 @@ def score_motion(verdicts_by_clip: dict[str, dict],
                 true_neg += 1
     n_error = caught + missed
     n_clean = false + true_neg
-    recall = caught / n_error if n_error else 0.0
-    precision = caught / (caught + false) if (caught + false) else 0.0
+    from benchmark.lib.scoring.metrics import precision_recall
+    precision, recall, _ = precision_recall(caught, false, missed)
     return {"caught": caught, "missed": missed, "false": false,
             "true_neg": true_neg, "abstain": abstain,
             "n_error": n_error, "n_clean": n_clean,
