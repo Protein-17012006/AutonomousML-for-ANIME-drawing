@@ -33,8 +33,9 @@ const ibmPlexMono = IBM_Plex_Mono({
 });
 
 const metadata: Metadata = {
-  title: "Anime Frame Interface",
-  description: "Interactive workspace for managing generated outputs.",
+  title: "In-Between Co-pilot",
+  description:
+    "An artist-assist co-pilot that generates and verifies the in-between frames between your key drawings.",
 };
 
 interface RootLayoutProps {
@@ -45,7 +46,7 @@ export default function RootLayout({ children }: Readonly<RootLayoutProps>) {
   return (
     <html
       lang="en"
-      className={cn("font-sans", geist.variable,  spaceGrotesk.variable,
+      className={cn("font-sans scroll-smooth", geist.variable,  spaceGrotesk.variable,
         ibmPlexSans.variable,
         ibmPlexMono.variable)}
       suppressHydrationWarning
