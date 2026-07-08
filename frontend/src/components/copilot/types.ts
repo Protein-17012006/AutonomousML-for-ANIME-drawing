@@ -2,6 +2,9 @@
 
 export type QA = "pass" | "abstain" | "flag";
 
+// composer input mode: staged keyframes (→ /session) vs a single video clip (→ /session/video)
+export type InputMode = "frames" | "video";
+
 export interface PairEvent {
   index: number;
   action: string;            // "needs_key" | "filled" | "fill" | ...

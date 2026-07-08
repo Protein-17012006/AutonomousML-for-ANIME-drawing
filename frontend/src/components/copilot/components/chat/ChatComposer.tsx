@@ -2,9 +2,9 @@
 // drop keys/video (= send a session), tweak args behind ⚙, ask follow-ups in text.
 import { useState } from "react";
 import { KeyframeDropzone } from "../input/KeyframeDropzone";
-import { shortName } from "../../lib/shortName";
 import { Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import type { InputMode } from "../../types";
 
 export function ChatComposer(p: {
   files: File[];
@@ -12,6 +12,7 @@ export function ChatComposer(p: {
   onAdd: (files: File[]) => void;
   onRemove: (f: File) => void;
   onClear: () => void;
+  onClearFrames: () => void; // frames-only clear (mode switch) — does NOT reset the session
   engines: string;
   setEngines: (s: string) => void;
   fps: string;
@@ -31,6 +32,14 @@ export function ChatComposer(p: {
 }) {
   const [q, setQ] = useState("");
   const [gearOpen, setGearOpen] = useState(false);
+  const [mode, setMode] = useState<InputMode>("frames");
+  // switching input mode stages exactly one path: drop whatever the other mode had loaded
+  const changeMode = (next: InputMode) => {
+    if (next === mode) return;
+    if (next === "video") p.onClearFrames();
+    else p.onVideo(null);
+    setMode(next);
+  };
   const sendQ = () => {
     const t = q.trim();
     if (!t) return;
@@ -38,8 +47,8 @@ export function ChatComposer(p: {
     setQ("");
   };
   return (
-    <div className="chat-composer">
-      {/* KEYFRAME DROP ZONE */}
+    <div className="flex flex-none flex-col gap-2 sticky bottom-0 border-t border-line bg-sumi pt-2.5 pb-3.5">
+      {/* KEYFRAME / VIDEO DROP ZONE — the mode selector lives in its header */}
       <KeyframeDropzone
         files={p.files}
         urls={p.fileUrls}
@@ -47,102 +56,93 @@ export function ChatComposer(p: {
         onRemove={p.onRemove}
         onClear={p.onClear}
         compact={p.compact}
+        mode={mode}
+        onModeChange={changeMode}
+        videoFile={p.videoFile}
+        onVideo={p.onVideo}
       />
-      <div className="composer-row">
+      {/* IF: SETTING IS ENABLED — in-flow panel: below the dropzone, above the input row */}
+      {gearOpen && (
+        <div
+          id="composer-settings-panel"
+          className="flex w-full flex-wrap items-center gap-2 rounded-lg border border-line bg-sumi-2 p-3"
+        >
+          {/* ENGINE SELECTION */}
+          <label className="field">
+            engine
+            <select
+              value={p.engines}
+              onChange={(e) => p.setEngines(e.target.value)}
+            >
+              <option value="box">Co-pilot (GPU)</option>
+              <option value="stub">Demo (no GPU)</option>
+            </select>
+          </label>
+          {/* FPS SELECTION */}
+          <label className="field">
+            shoot rate
+            <input
+              type="number"
+              min={1}
+              max={60}
+              step={1}
+              value={p.fps}
+              onChange={(e) => p.setFps(e.target.value)}
+            />
+          </label>
+          {/* STRIDE SELECTION (VIDEO ONLY) */}
+          {mode === "video" && (
+            <label className="field">
+              stride
+              <input
+                type="number"
+                min={1}
+                max={12}
+                step={1}
+                value={p.stride}
+                onChange={(e) => p.setStride(e.target.value)}
+              />
+            </label>
+          )}
+          {/* PLANTED CASE TO TEST QA AGENT */}
+          {p.plantedCases.length > 0 && (
+            <label className="field">
+              🧪 planted demo
+              <select
+                value=""
+                disabled={p.running}
+                onChange={(e) => {
+                  const id = e.target.value;
+                  if (id) p.onRunPlanted(id);
+                }}
+              >
+                <option value="">Select a QA demo options</option>
+                {p.plantedCases.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+        </div>
+      )}
+      <div className="flex flex-wrap items-center gap-2">
         {/* SETTING BUTTON */}
         <Button
           size={"icon"}
           type="button"
-          className="btn btn-ghost gear"
+          className="btn btn-ghost"
           aria-expanded={gearOpen}
+          aria-controls="composer-settings-panel"
           onClick={() => setGearOpen((o) => !o)}
           title="run settings"
         >
           <Settings />
         </Button>
-        {/* IF: SETTING IS ENABLED */}
-        {gearOpen && (
-          <div className="composer-settings">
-            {/* ENGINE SELECTION */}
-            <label className="field">
-              engine
-              <select
-                value={p.engines}
-                onChange={(e) => p.setEngines(e.target.value)}
-              >
-                <option value="box">Co-pilot (GPU)</option>
-                <option value="stub">Demo (no GPU)</option>
-              </select>
-            </label>
-            {/* FPS SELECTION */}
-            <label className="field">
-              shoot rate
-              <input
-                type="number"
-                min={1}
-                max={60}
-                step={1}
-                value={p.fps}
-                onChange={(e) => p.setFps(e.target.value)}
-              />
-            </label>
-            {/* STRIDE SELECTION (VIDEO) */}
-            {p.videoFile && (
-              <label className="field">
-                stride
-                <input
-                  type="number"
-                  min={1}
-                  max={12}
-                  step={1}
-                  value={p.stride}
-                  onChange={(e) => p.setStride(e.target.value)}
-                />
-              </label>
-            )}
-            {/* PLANTED CASE TO TEST QA AGENT */}
-            {p.plantedCases.length > 0 && (
-              <label className="field">
-                🧪 planted demo
-                <select
-                  value=""
-                  disabled={p.running}
-                  onChange={(e) => {
-                    const id = e.target.value;
-                    if (id) p.onRunPlanted(id);
-                  }}
-                >
-                  <option value="">Select a QA demo options</option>
-                  {p.plantedCases.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.title}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-          </div>
-        )}
-        {/* VIDEO INPUT */}
-        <label
-          className="btn btn-ghost composer-video"
-          title={p.videoFile?.name ?? "or drop a whole video"}
-        >
-          {p.videoFile ? shortName(p.videoFile.name) : "🎬 video…"}
-          <input
-            type="file"
-            accept="video/mp4,video/*"
-            className="visually-hidden"
-            onChange={(e) => {
-              const f = e.currentTarget.files?.[0] ?? null;
-              e.currentTarget.value = "";
-              p.onVideo(f);
-            }}
-          />
-        </label>
         {/* USER PROMPT INPUT */}
         <input
-          className="ask-input"
+          className="flex-1 min-w-[180px] rounded-full border border-line bg-sumi-3 px-3.5 py-[9px] font-body text-[0.86rem] text-washi focus:outline-2 focus:outline-offset-1 focus:outline-ao disabled:opacity-[0.55]"
           type="text"
           value={q}
           placeholder={
@@ -162,21 +162,19 @@ export function ChatComposer(p: {
           <button type="button" className="btn btn-primary" onClick={sendQ}>
             Ask
           </button>
-        ) : // ELSE IF: VIDEO FILE PRESENTS
-        p.videoFile ? (
-          // BUTTON: RUNNING... (PROCESS IS RUNNING) || RUN VIDEO
+        ) : mode === "video" ? (
+          // BUTTON: RUNNING… (PROCESS IS RUNNING) || RUN VIDEO
           <button
             type="button"
             className="btn btn-primary"
-            disabled={p.running}
+            disabled={!p.videoFile || p.running}
             onClick={p.onRunVideo}
-            title={p.videoFile.name}
+            title={p.videoFile?.name}
           >
             {p.running ? "Running…" : "Run video"}
           </button>
         ) : (
-          // ELSE: VIDEO FILE NOT PRESENTS (FRAMES)
-          // BUTTON: RUNNING... (PROCESS IS RUNNING) || RUN
+          // ELSE: FRAMES MODE — RUN (needs 2+ keys)
           <button
             type="button"
             className="btn btn-primary"

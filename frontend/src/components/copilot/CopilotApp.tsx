@@ -313,6 +313,7 @@ export default function App() {
               clearAll();
               setVideoFile(null);
             }}
+            onClearFrames={keys.clear}
             engines={engines}
             setEngines={setEngines}
             fps={fps}

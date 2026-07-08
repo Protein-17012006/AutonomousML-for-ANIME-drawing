@@ -394,7 +394,8 @@ h1 {
   border-radius: 4px;
   overflow: hidden;
 }
-.cel-frame img {
+.cel-frame img,
+.cel-frame video {
   display: block;
   width: 100%;
   aspect-ratio: 16 / 9;
@@ -2850,48 +2851,9 @@ h1 {
   color: var(--color-ash);
   margin: 4px 0 0;
 }
-/* ChatComposer.tsx */
-.chat-composer {
-  flex: none;
-  border-top: 1px solid var(--color-line);
-  background: var(--color-sumi);
-  padding: 10px 0 14px;
-  position: sticky;
-  bottom: 0;
-}
-.composer-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 8px;
-  flex-wrap: wrap;
-}
-.composer-settings {
-  display: inline-flex;
-  gap: 8px;
-  align-items: center;
-}
-.composer-video {
-  white-space: nowrap;
-}
-.ask-input {
-  flex: 1;
-  min-width: 180px;
-  background: var(--color-sumi-3);
-  border: 1px solid var(--color-line);
-  border-radius: 999px;
-  color: var(--color-washi);
-  padding: 9px 14px;
-  font-family: var(--font-body);
-  font-size: 0.86rem;
-}
-.ask-input:focus {
-  outline: 2px solid var(--color-ao);
-  outline-offset: 1px;
-}
-.ask-input:disabled {
-  opacity: 0.55;
-}
+/* ChatComposer.tsx — styled with Tailwind utilities in the component (structural migration 2026-07-08);
+   the settings panel (#composer-settings-panel) is an in-flow block above the input row.
+   Shared primitives .btn/.btn-ghost/.btn-primary and .field* live elsewhere in this file. */
 /* BACK TO CHAT - CopilotApp.tsx */
 .board-bar {
   flex: none;

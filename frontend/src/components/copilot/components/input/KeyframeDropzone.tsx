@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { BrandIcon } from "../../../common/BrandIcon";
+import type { InputMode } from "../../types";
 
 interface KeyframeDropzoneProps {
   files: File[];
@@ -10,9 +11,14 @@ interface KeyframeDropzoneProps {
   onRemove: (f: File) => void;
   onClear: () => void;
   compact?: boolean;
+  mode: InputMode; // "frames" (PNG keys) | "video" (single clip)
+  onModeChange: (m: InputMode) => void;
+  videoFile: File | null;
+  onVideo: (f: File | null) => void;
 }
 /* eslint-disable @next/next/no-img-element */
-// keyframe dropzone: the peg-bar light-table (drag-drop + cel contact-sheet)
+// keyframe / video dropzone: the peg-bar light-table (drag-drop + cel contact-sheet),
+// now also the single intake + preview surface for a whole-video clip (mode selector in the header)
 export function KeyframeDropzone({
   files,
   urls,
@@ -20,66 +26,121 @@ export function KeyframeDropzone({
   onRemove,
   onClear,
   compact,
+  mode,
+  onModeChange,
+  videoFile,
+  onVideo,
 }: KeyframeDropzoneProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [over, setOver] = useState(false);
-  const [open, setOpen] = useState(true); // expand / collapse the cel contact-sheet
+  const [open, setOpen] = useState(true); // expand / collapse the preview
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: fold the preview once a run exists
     if (compact) setOpen(false);
-  }, [compact]); // once a run exists, fold the contact-sheet to reclaim top space
-  // drop accepts only PNG cels (the click path already filters via accept="image/png")
+  }, [compact]); // once a run exists, fold the preview to reclaim top space
+
+  // still-frame thumbnail source for the video mode — created here, revoked on change/unmount
+  const videoUrl = useMemo(
+    () => (videoFile ? URL.createObjectURL(videoFile) : null),
+    [videoFile],
+  );
+  useEffect(
+    () => () => {
+      if (videoUrl) URL.revokeObjectURL(videoUrl);
+    },
+    [videoUrl],
+  );
+
+  // frames: keep only PNG cels. `accept="image/png"` is only a dialog HINT (bypassable via
+  // "All files", and never enforced on drag-drop), so we filter for real on BOTH intake paths.
+  const isPng = (f: File) =>
+    f.type === "image/png" || f.name.toLowerCase().endsWith(".png");
   const acceptPng = (list: FileList | null) =>
-    onAdd(
-      Array.from(list ?? []).filter(
-        (f) => f.type === "image/png" || f.name.toLowerCase().endsWith(".png"),
-      ),
-    );
+    onAdd(Array.from(list ?? []).filter(isPng));
+  // video: take the first video file from the set
+  const acceptVideo = (list: FileList | null) => {
+    const f = Array.from(list ?? []).find((x) => x.type.startsWith("video/"));
+    if (f) onVideo(f);
+  };
+  const isVideo = mode === "video";
+
   return (
     <div className="dropzone-wrap">
-      <div
-        className={`dropzone${over ? " is-over" : ""}`}
-        role="button"
-        tabIndex={0}
-        onClick={() => inputRef.current?.click()}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            inputRef.current?.click();
-          }
-        }}
-        onDragOver={(e) => {
-          e.preventDefault();
-          setOver(true);
-        }}
-        onDragLeave={() => setOver(false)}
-        onDrop={(e) => {
-          e.preventDefault();
-          setOver(false);
-          acceptPng(e.dataTransfer.files);
-        }}
-      >
-        <input
-          ref={inputRef}
-          type="file"
-          accept="image/png"
-          multiple
-          className="visually-hidden"
-          onChange={(e) => {
-            // snapshot before resetting value (the load→clear→load bug; see FilePicker)
-            const picked = Array.from(e.currentTarget.files ?? []);
-            e.currentTarget.value = "";
-            onAdd(picked);
+      <div className="flex flex-col gap-2">
+        {/* MODE SELECTOR — sits outside the clickable box so it never opens the file dialog */}
+        <label className="field self-start">
+          input
+          <select
+            value={mode}
+            onChange={(e) => onModeChange(e.target.value as InputMode)}
+          >
+            <option value="frames">Frames (PNG)</option>
+            <option value="video">Video (MP4)</option>
+          </select>
+        </label>
+        {/* DROP BOX */}
+        <div
+          className={`dropzone${over ? " is-over" : ""}`}
+          role="button"
+          tabIndex={0}
+          onClick={() => inputRef.current?.click()}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              inputRef.current?.click();
+            }
           }}
-        />
-        <BrandIcon />
-        <span className="dropzone-cap">
-          {files.length === 0
-            ? "Drop PNG keyframes — or click to load"
-            : `${files.length} keyframes · drop or click to add more`}
-        </span>
-        <span className="dropzone-sub">PNG · 2+ keys to run</span>
+          onDragOver={(e) => {
+            e.preventDefault();
+            setOver(true);
+          }}
+          onDragLeave={() => setOver(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setOver(false);
+            if (isVideo) acceptVideo(e.dataTransfer.files);
+            else acceptPng(e.dataTransfer.files);
+          }}
+        >
+          <input
+            ref={inputRef}
+            type="file"
+            accept={isVideo ? "video/mp4,video/*" : "image/png"}
+            multiple={!isVideo}
+            className="visually-hidden"
+            onChange={(e) => {
+              // snapshot before resetting value (the load→clear→load bug; see FilePicker)
+              if (isVideo) {
+                const f = e.currentTarget.files?.[0] ?? null;
+                e.currentTarget.value = "";
+                if (f && f.type.startsWith("video/")) onVideo(f);
+              } else {
+                const picked = Array.from(e.currentTarget.files ?? []).filter(
+                  isPng,
+                );
+                e.currentTarget.value = "";
+                onAdd(picked);
+              }
+            }}
+          />
+          <BrandIcon />
+          <span className="dropzone-cap">
+            {isVideo
+              ? videoFile
+                ? "clip loaded · click to replace"
+                : "Drop a video — or click to load"
+              : files.length === 0
+                ? "Drop PNG keyframes — or click to load"
+                : `${files.length} keyframes · drop or click to add more`}
+          </span>
+          <span className="dropzone-sub">
+            {isVideo ? "MP4 · one clip" : "PNG · 2+ keys to run"}
+          </span>
+        </div>
       </div>
-      {files.length > 0 && (
+
+      {/* PREVIEW — frames contact-sheet */}
+      {!isVideo && files.length > 0 && (
         <>
           <div className="celstrip-head">
             <button
@@ -117,6 +178,56 @@ export function KeyframeDropzone({
                   <figcaption>{f.name}</figcaption>
                 </figure>
               ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* PREVIEW — single video clip (still first-frame thumbnail, no transport) */}
+      {isVideo && videoFile && videoUrl && (
+        <>
+          <div className="celstrip-head">
+            <button
+              type="button"
+              className="celstrip-toggle"
+              aria-expanded={open}
+              onClick={() => setOpen((o) => !o)}
+            >
+              <span className="celstrip-caret">{open ? "▾" : "▸"}</span> video clip
+            </button>
+            <button
+              type="button"
+              className="cel-clear"
+              onClick={() => onVideo(null)}
+            >
+              Clear
+            </button>
+          </div>
+          {open && (
+            <div className="celstrip">
+              <figure className="cel">
+                <div className="cel-frame">
+                  {/* #t=0.1 forces a first-frame paint; no `controls` = thumbnail only */}
+                  <video
+                    src={`${videoUrl}#t=0.1`}
+                    preload="metadata"
+                    muted
+                    playsInline
+                  />
+                  <button
+                    type="button"
+                    className="cel-x"
+                    title={`remove ${videoFile.name}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onVideo(null);
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+                <figcaption>{videoFile.name}</figcaption>
+              </figure>
             </div>
           )}
         </>
