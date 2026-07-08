@@ -33,3 +33,7 @@ Vault/
 
 # Coding agents - Claude
 .claude/
+
+# Coding agents - skills / agent tooling
+.agents/
+skills-lock.json
