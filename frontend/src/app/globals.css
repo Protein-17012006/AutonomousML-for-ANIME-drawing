@@ -90,22 +90,77 @@
 *::before,
 *::after {
   box-sizing: border-box;
-  font-family: Roboto, Inter;
 }
+/* ==========================================================================
+   COPILOT PAGE DESIGN TOKENS  ·  scope: /copilot only
+   Kept separate from the SHADCN framework tokens further below — each page owns
+   its own token set. Theme-reactive: the @theme block holds the LIGHT defaults
+   (on :root); the `.dark` block overrides them with the original ink-desk palette.
+   next-themes sets class="dark" on <html> (attribute="class"), so BOTH the
+   bg-sumi/text-washi utilities AND copilot.css `var(--color-*)` refs flip together.
 
-.section {
-  padding-block: var(--section-padding-block);
-  padding-inline: var(--section-padding-inline);
+   TOKEN → ELEMENT / ROLE  (names are historical: sumi=ink, washi=paper — trust the role)
+     · SURFACE (background)
+         --color-sumi        base page / body / desk background
+         --color-sumi-2      raised pane background (settings panel, strip headers)
+         --color-sumi-3      card & form-input background
+         --color-screen      media-viewport background (cel well, scanlines)
+     · TEXT
+         --color-washi       primary text (body copy, headings)
+         --color-ash         secondary / muted text (captions, labels)
+     · BORDER
+         --color-line        hairline border, divider, faint grid
+     · ACCENT (text · border · fill)
+         --color-ao          action / focus / primary button fill (非photo-blue pencil)
+         --color-on-ao       TEXT/icon ON an ao fill (primary-button label) — flips per theme
+         --color-akaire      correction / needs-key — borders & fills (赤入れ red)
+         --color-akaire-ink  correction / needs-key — TEXT (lighter, for AA)
+         --color-pass        QA status: pass — clean cel (green)
+         --color-abstain     QA status: abstain — uncertain (amber)
+   ========================================================================== */
+@theme {
+  /* LIGHT — washi-paper surfaces, sumi-ink text (accents darkened for AA on paper) */
+  --color-sumi: #efe7d6;
+  --color-sumi-2: #f5efe2;
+  --color-sumi-3: #fbf7ef;
+  --color-screen: #e7dfcd;
+  --color-line: #d7cdb8;
+  --color-washi: #20242c;
+  --color-ash: #565f6e;
+  --color-ao: #226b94;
+  --color-on-ao: #f5f8fc; /* near-white — light text on the deep-blue ao fill */
+  --color-akaire: #c73a30;
+  --color-akaire-ink: #bb3329;
+  --color-pass: #3d8c60;
+  --color-abstain: #a5731a;
 }
-.section-title {
-  color: black;
-  font-family: Roboto, Inter;
-  font-size: var(--h2-text);
-  font-weight: 600;
-  text-align: center;
-  padding-bottom: var(--medium-gap);
+.dark {
+  /* DARK — original ink desk (unchanged from the pre-theming palette) */
+  --color-sumi: #15171c;
+  --color-sumi-2: #1c1f27;
+  --color-sumi-3: #242833;
+  --color-screen: #0e1014;
+  --color-line: #323845;
+  --color-washi: #ece7d8;
+  --color-ash: #99a0ad;
+  --color-ao: #4fa3d1;
+  --color-on-ao: #08121a; /* near-black — dark text on the light-blue ao fill */
+  --color-akaire: #e2483d;
+  --color-akaire-ink: #ef6b62;
+  --color-pass: #6fb58a;
+  --color-abstain: #e0a53b;
 }
-
+/* SHARED TYPOGRAPHY (app-wide, not page-scoped) */
+@theme inline {
+  --font-display: var(--font-space);
+  --font-body: var(--font-plex-sans);
+  --font-mono: var(--font-plex-mono);
+}
+/* ==========================================================================
+   FRAMEWORK DESIGN TOKENS — SHADCN (app-wide; do NOT mix with page tokens above).
+   Values live as raw vars in :root / .dark below; these @theme inline entries
+   just expose them to Tailwind utilities.
+   ========================================================================== */
 @theme inline {
   --font-heading: var(--font-sans);
   --font-sans: var(--font-sans);

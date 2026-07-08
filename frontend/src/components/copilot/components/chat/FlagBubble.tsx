@@ -2,7 +2,7 @@
 // Prefers server-burned annotated frame (annotated_url) when available; falls back to raw mid + CSS overlay.
 // The overlay uses the EXISTING server-computed fractional box (service/app.py region_box)
 // — grid-coarse (3×3 VLM region), honestly not a pixel mask (design §0.5).
-import type { CsqBand, Explanation, PairEvent } from "../../types";
+import type { Explanation, PairEvent } from "../../types";
 
 function puLine(p: PairEvent): string {
   const bits: string[] = [];
@@ -11,11 +11,10 @@ function puLine(p: PairEvent): string {
   return bits.join(" · ");
 }
 
-export function FlagBubble({ pair, ex, keyUrls, band: _band, onReview }: {
+export function FlagBubble({ pair, ex, keyUrls, onReview }: {
   pair: PairEvent;
   ex?: Explanation;
   keyUrls: string[];
-  band?: CsqBand | null;
   onReview: () => void;
 }) {
   const a = keyUrls[pair.index];
