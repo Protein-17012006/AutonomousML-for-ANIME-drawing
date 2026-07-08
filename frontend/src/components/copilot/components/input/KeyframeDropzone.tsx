@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import { BrandIcon } from "../../../common/BrandIcon";
 import type { InputMode } from "../../types";
+import { isPng, isVideoFile } from "../../lib/media";
 
 interface KeyframeDropzoneProps {
   files: File[];
@@ -51,15 +52,13 @@ export function KeyframeDropzone({
     [videoUrl],
   );
 
-  // frames: keep only PNG cels. `accept="image/png"` is only a dialog HINT (bypassable via
-  // "All files", and never enforced on drag-drop), so we filter for real on BOTH intake paths.
-  const isPng = (f: File) =>
-    f.type === "image/png" || f.name.toLowerCase().endsWith(".png");
+  // filter for real on BOTH intake paths (the `isPng`/`isVideoFile` predicates are shared with
+  // ChatWelcome's import buttons — see lib/media). frames: keep only PNG cels.
   const acceptPng = (list: FileList | null) =>
     onAdd(Array.from(list ?? []).filter(isPng));
   // video: take the first video file from the set
   const acceptVideo = (list: FileList | null) => {
-    const f = Array.from(list ?? []).find((x) => x.type.startsWith("video/"));
+    const f = Array.from(list ?? []).find(isVideoFile);
     if (f) onVideo(f);
   };
   const isVideo = mode === "video";
@@ -113,7 +112,7 @@ export function KeyframeDropzone({
               if (isVideo) {
                 const f = e.currentTarget.files?.[0] ?? null;
                 e.currentTarget.value = "";
-                if (f && f.type.startsWith("video/")) onVideo(f);
+                if (f && isVideoFile(f)) onVideo(f);
               } else {
                 const picked = Array.from(e.currentTarget.files ?? []).filter(
                   isPng,

@@ -3,7 +3,7 @@
 // The presentational pieces were split out into ./components/* and the logic into ./lib/*
 // (this file used to be a ~1360-line monolith holding all of them).
 import { useEffect, useMemo, useState } from "react";
-import type { PairEvent, ResultEvent, DemoResult } from "./types";
+import type { PairEvent, ResultEvent, DemoResult, InputMode } from "./types";
 import {
   runSession,
   runDemo,
@@ -13,10 +13,10 @@ import {
   askQuestion,
   type PlantedCase,
 } from "./api";
-import { BrandIcon } from "@/components/common/BrandIcon";
 import { deriveMessages, type QaTurn, type UserTurn } from "./lib/chatModel";
 import { useFileSet } from "./lib/useFileSet";
 import { downloadBundle } from "./lib/exportSession";
+import { ChatHeader } from "./components/chat/ChatHeader";
 import { ChatView } from "./components/chat/ChatView";
 import { ChatComposer } from "./components/chat/ChatComposer";
 import { ChatWelcome } from "./components/chat/ChatWelcome";
@@ -55,6 +55,9 @@ export default function App() {
 
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [stride, setStride] = useState("2");
+  // Composer input mode, lifted here (was in ChatComposer) so BOTH the dropzone and the
+  // ChatWelcome quick-import buttons share one source of truth.
+  const [mode, setMode] = useState<InputMode>("frames");
 
   const [demoBuilding, setDemoBuilding] = useState(false);
   const [demoBanner, setDemoBanner] = useState<string | null>(null);
@@ -98,6 +101,27 @@ export default function App() {
     setUpload(null);
     setQaTurns([]);
     setView("chat");
+  };
+
+  // Switching input mode drops whatever the OTHER mode had staged, so `files` and `videoFile`
+  // are never both non-empty (keeps the review triptych's client-vs-server key fallback correct).
+  const changeMode = (next: InputMode) => {
+    if (next === mode) return;
+    if (next === "video")
+      keys.clear(); // leaving frames → drop staged keys
+    else setVideoFile(null); // leaving video → drop staged clip
+    setMode(next);
+  };
+  // ChatWelcome quick-import → feed the SAME state the dropzone reads, and flip the mode to
+  // match the imported media (so the dropzone selector + preview update in lockstep).
+  const importFrames = (picked: File[]) => {
+    if (!picked.length) return;
+    changeMode("frames");
+    keys.add(picked);
+  };
+  const importVideo = (file: File) => {
+    changeMode("video");
+    setVideoFile(file);
   };
 
   const run = async () => {
@@ -287,16 +311,13 @@ export default function App() {
     <div className="app">
       {view === "chat" ? (
         <div className="chat-page">
-          <header className="chat-brand">
-            <BrandIcon />
-            <div>
-              <h1>In-Between Co-pilot</h1>
-              <p className="font-mono text-xs text-ash">
-                Genga to douga · smooth motion, preserved style
-              </p>
-            </div>
-          </header>
-          {!upload && log.length === 0 && !result && <ChatWelcome />}
+          <ChatHeader />
+          {!upload && log.length === 0 && !result && (
+            <ChatWelcome
+              onImportFrames={importFrames}
+              onImportVideo={importVideo}
+            />
+          )}
           <ChatView
             msgs={msgs}
             keyUrls={effKeyUrls}
@@ -313,7 +334,8 @@ export default function App() {
               clearAll();
               setVideoFile(null);
             }}
-            onClearFrames={keys.clear}
+            mode={mode}
+            onModeChange={changeMode}
             engines={engines}
             setEngines={setEngines}
             fps={fps}

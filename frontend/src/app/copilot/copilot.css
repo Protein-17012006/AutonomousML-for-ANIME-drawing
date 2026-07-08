@@ -145,7 +145,7 @@ h1 {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* drop-a-video decimation transparency strip (above the reconstruction) */
+/* Sampling - ReviewWorkbench.tsx */
 .sampling-note {
   flex: none;
   margin: 0 0 10px;
@@ -219,7 +219,7 @@ h1 {
 /* Run = the rostrum-camera trigger: hover arms it with a 非photo-blue (ao) halo + lift; press seats it into the desk */
 .btn-primary {
   background: var(--color-ao);
-  color: #08121a;
+  color: var(--color-on-ao); /* theme-reactive: dark ink on dark-mode's light-blue ao, light on light-mode's deep-blue ao */
   border-color: var(--color-ao);
   font-weight: 600;
 }
@@ -568,7 +568,7 @@ h1 {
   padding: 1px 8px;
 }
 
-/* ===== dual scroll-synced columns ===== */
+/* Dual - ReviewWorkbench.tsx */
 .dual {
   flex: 1;
   min-height: 0;
@@ -603,6 +603,7 @@ h1 {
   border-top: 0;
   margin-top: 0;
 }
+/* LAYOUT - ReviewWorkbench.tsx   */
 .pane {
   background: var(--color-sumi-2);
   min-width: 0;
@@ -625,7 +626,7 @@ h1 {
   padding-bottom: 24px;
 }
 
-/* right column: big per-pair frames */
+/* LAYOUT (RIGHT COLUMN) - ReviewWorkbench.tsx   */
 .frames-head {
   display: flex;
   align-items: baseline;
@@ -640,7 +641,7 @@ h1 {
   font-size: 15.5px;
   color: var(--color-washi);
 }
-/* the reconstructed-cut climax band — a full-width payoff above the columns, collapsible */
+/* Reconstructed Cut - ReviewWorkbench.tsx */
 .recon-band {
   flex: none;
   background: var(--color-sumi-2);
@@ -1031,7 +1032,7 @@ h1 {
   line-height: 1.5;
   margin: 0;
 }
-/* run loader: a cel + peg-bar + in-between curve that draw themselves (pathLength=1 normalises) */
+/* RunLoader.tsx */
 .runloader {
   display: flex;
   flex-direction: column;
@@ -1569,9 +1570,7 @@ h1 {
   color: var(--color-abstain);
 }
 
-/* ===== focused-pair QA panel — the calibrated verdict as the centerpiece (the moat) =====
-   sticky at the top of the left column; carries the big dial + abstain band to scale + the
-   p_error/uncertainty in words + the in-between thumbnail with its akaire region. */
+/* QAPanel.tsx */
 .qapanel {
   position: sticky;
   top: 0;
@@ -2640,23 +2639,7 @@ h1 {
   margin: 0 auto;
   padding: 0 16px;
 }
-/* CHAT HEADER  */
-.chat-brand {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 14px 4px 8px;
-}
-.chat-brand h1 {
-  font-family: var(--font-display);
-  font-size: 1.05rem;
-  margin: 0;
-}
-.chat-brand .tier {
-  margin: 0;
-  color: var(--color-ash);
-  font-size: 0.72rem;
-}
+/* CHAT HEADER — moved to components/chat/ChatHeader.tsx (structural Tailwind) */
 /* ChatView.tsx */
 .chat-thread {
   flex: 1;

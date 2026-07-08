@@ -12,13 +12,14 @@ export function ChatComposer(p: {
   onAdd: (files: File[]) => void;
   onRemove: (f: File) => void;
   onClear: () => void;
-  onClearFrames: () => void; // frames-only clear (mode switch) — does NOT reset the session
   engines: string;
   setEngines: (s: string) => void;
   fps: string;
   setFps: (s: string) => void;
   videoFile: File | null;
   onVideo: (f: File | null) => void;
+  mode: InputMode; // lifted to CopilotApp so ChatWelcome's quick-import can drive it too
+  onModeChange: (m: InputMode) => void;
   stride: string;
   setStride: (s: string) => void;
   onRun: () => void;
@@ -32,14 +33,6 @@ export function ChatComposer(p: {
 }) {
   const [q, setQ] = useState("");
   const [gearOpen, setGearOpen] = useState(false);
-  const [mode, setMode] = useState<InputMode>("frames");
-  // switching input mode stages exactly one path: drop whatever the other mode had loaded
-  const changeMode = (next: InputMode) => {
-    if (next === mode) return;
-    if (next === "video") p.onClearFrames();
-    else p.onVideo(null);
-    setMode(next);
-  };
   const sendQ = () => {
     const t = q.trim();
     if (!t) return;
@@ -56,8 +49,8 @@ export function ChatComposer(p: {
         onRemove={p.onRemove}
         onClear={p.onClear}
         compact={p.compact}
-        mode={mode}
-        onModeChange={changeMode}
+        mode={p.mode}
+        onModeChange={p.onModeChange}
         videoFile={p.videoFile}
         onVideo={p.onVideo}
       />
@@ -91,7 +84,7 @@ export function ChatComposer(p: {
             />
           </label>
           {/* STRIDE SELECTION (VIDEO ONLY) */}
-          {mode === "video" && (
+          {p.mode === "video" && (
             <label className="field">
               stride
               <input
@@ -162,7 +155,7 @@ export function ChatComposer(p: {
           <button type="button" className="btn btn-primary" onClick={sendQ}>
             Ask
           </button>
-        ) : mode === "video" ? (
+        ) : p.mode === "video" ? (
           // BUTTON: RUNNING… (PROCESS IS RUNNING) || RUN VIDEO
           <button
             type="button"
