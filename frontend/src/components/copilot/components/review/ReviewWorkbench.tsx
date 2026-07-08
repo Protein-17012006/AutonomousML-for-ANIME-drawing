@@ -11,7 +11,7 @@ import { ReconPlayer } from "./ReconPlayer";
 import { FrameCard } from "./FrameCard";
 import { FlipPlayer, type Frame } from "./FlipPlayer";
 import { ConfidenceMeter } from "./ConfidenceMeter";
-import { MultiplaneHero } from "../archive/MultiplaneHero";
+import { ChatWelcome } from "../chat/ChatWelcome";
 
 type Filter = "offmodel" | "unsure" | "pass" | "all" | "needs_key";
 
@@ -383,7 +383,7 @@ export function ReviewWorkbench({
                     : "ao"
               }
             >
-              <span
+              <div
                 className="triage-glider"
                 aria-hidden="true"
                 style={{
@@ -460,11 +460,10 @@ export function ReviewWorkbench({
           </div>
         </div>
       )}
-
+      {/* IF THE PROCESS NOT RUNNING: DISPLAY CHAT WELCOME */}
       {log.length === 0 && !running ? (
-        /* landing thesis: the multiplane camera performs the in-between before the desk fills with work */
         <main className="landing">
-          <MultiplaneHero />
+          <ChatWelcome />
           {compareSlot}
         </main>
       ) : (
@@ -473,7 +472,7 @@ export function ReviewWorkbench({
             /* honest label: this session's in-between was PLANTED from a frozen suite — the QA
            verdict is real, the error was seeded (the live gate yields no natural flags). */
             <div className="sampling-note warn">
-              {`🧪 PLANTED DEMO — lỗi "${samp.planted_type}" cấy từ ${samp.planted_src}; verdict/annotation là pipeline QA thật.`}
+              {`🧪 PLANTED DEMO — injected error "${samp.planted_type}" from ${samp.planted_src}; verdict/annotation is produced by the real QA pipeline.`}
             </div>
           )}
           {samp && samp.kept != null && (

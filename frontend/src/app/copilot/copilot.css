@@ -487,13 +487,14 @@ h1 {
   color: var(--color-akaire);
 }
 
-/* ===== toolbar (always visible: filter + progress + export) ===== */
+/* ReviewWorkbench.tsx */
+/* Toolbar - ReviewWorkbench.tsx */
 .toolbar {
   flex: none;
   border-bottom: 1px solid var(--color-line);
   background: var(--color-sumi-2);
 }
-/* result headline — frames the payoff in plain language + a play-the-cut CTA */
+/* Headline - ReviewWorkbench.tsx */
 .headline {
   display: flex;
   align-items: center;
@@ -501,7 +502,7 @@ h1 {
   flex-wrap: wrap;
   padding: 10px 18px 2px;
 }
-/* the result payoff is a display moment — Space Grotesk carries the personality here */
+
 .headline-text {
   font-family: var(--font-display);
   font-size: 20px;
@@ -532,7 +533,7 @@ h1 {
 .headline-play:active {
   transform: translateY(1px);
 }
-/* cadence read-out — the "45fps not 60" principle made visible: holds copied, snaps kept timing */
+/* Cadence - ReviewWorkbench.tsx */
 .cadence {
   display: flex;
   align-items: center;
@@ -576,14 +577,7 @@ h1 {
   gap: 1px;
   background: var(--color-line);
 }
-/* ===== landing — the thesis before the desk fills with work ===== */
-/* Centering the landing with `justify-content: center` clips the TOP of overflowing content in a
-   scroll box: scrollTop can't go negative, so once the compare video grows the box past the viewport
-   the multiplane rig + keyframes above the fold become unreachable. `safe center` was meant to fall
-   back to top-align on overflow, but it doesn't re-trigger reliably here — the <video autoPlay> cels
-   grow the box ASYNC, after layout. Auto margins are the scroll-safe centering primitive: they split
-   the free space to center when it fits, and collapse to 0 on overflow so the whole column scrolls
-   top-to-bottom. (Keep justify-content at flex-start; auto margins consume the free space first.) */
+/* CHAT WELCOME - ReviewWorkbench.tsx */
 .landing {
   flex: 1;
   min-height: 0;
@@ -598,11 +592,11 @@ h1 {
 }
 .landing > :first-child {
   margin-top: auto;
-} /* fits → centers the hero+compare group; overflows → 0, top stays reachable */
+} 
 .landing > :last-child {
   margin-bottom: auto;
 }
-/* the demo panel is a quiet secondary below the thesis, width-capped so it doesn't sprawl */
+
 .landing .compare {
   width: 100%;
   max-width: 720px;
@@ -1967,7 +1961,7 @@ h1 {
     white-space: normal;
   } /* let the PNG/keys hint wrap instead of clipping */
 }
-/* ===== triage chips ===== */
+/* Triage - ReviewWorkbench.tsx */
 .triage {
   display: flex;
   gap: 8px;
@@ -1975,7 +1969,7 @@ h1 {
   align-items: center;
   padding: 9px 18px 5px;
 }
-/* segmented triage — a graphite rail with a sliding "current-cel" marker behind the active chip */
+
 .triage-tabs {
   position: relative;
   display: flex;
@@ -2001,6 +1995,7 @@ h1 {
 .triage-tabs[data-tone="abstain"] .triage-glider {
   background: var(--color-abstain);
 }
+/* Triage Scrollbar Buttons - ReviewWorkbench.tsx */
 .chip {
   position: relative;
   z-index: 1;
@@ -2033,7 +2028,7 @@ h1 {
 .chip b {
   font-weight: 700;
 }
-/* needs-key chip = action-needed → akaire (red pencil): the glider recolors via [data-tone] */
+
 .chip-needs_key {
   color: var(--color-akaire-ink);
   border-color: color-mix(in oklab, var(--color-akaire) 45%, var(--color-line));
@@ -2046,8 +2041,7 @@ h1 {
   color: #fff;
   border-color: transparent;
 }
-/* off-model chip = akaire (red); unsure chip = amber — mirror the needs-key treatment so the
-   split triage colour-codes the verdict before you even read the count */
+
 .chip-offmodel {
   color: var(--color-akaire-ink);
   border-color: color-mix(in oklab, var(--color-akaire) 40%, var(--color-line));
@@ -2076,7 +2070,7 @@ h1 {
   color: #08121a;
   border-color: transparent;
 }
-/* filter explainer + keyboard hint share ONE tight row (were two stacked lines — reclaims top density) */
+/* Toolbar - ReviewWorkbench.tsx */
 .toolbar-foot {
   display: flex;
   justify-content: space-between;
@@ -2085,7 +2079,7 @@ h1 {
   flex-wrap: wrap;
   padding: 2px 18px 9px;
 }
-/* one-line plain-language explainer of the active filter (kills the "what's the difference?" confusion) */
+
 .filter-desc {
   margin: 0;
   font-family: var(--font-mono);
@@ -2236,7 +2230,7 @@ h1 {
   overflow-wrap: anywhere;
 }
 
-/* ===== artist verdict (accept/reject) + keyboard review ===== */
+/* Triage - ReviewWorkbench.tsx */
 .triage-progress {
   margin-left: auto;
   align-self: center;
@@ -2276,7 +2270,7 @@ h1 {
   color: var(--color-line);
   cursor: not-allowed;
 }
-/* Export ⤓ → clean-cel ✓ — the success state borrows the desk's "pass" green (the QA language) */
+
 .export-btn.done {
   color: var(--color-pass);
   border-color: var(--color-pass);
