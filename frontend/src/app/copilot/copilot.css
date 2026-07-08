@@ -687,7 +687,7 @@ h1 {
   width: 100%;
   background: var(--color-screen);
 }
-/* reconstructed-cut transport — desk grammar (X-sheet rail + frame-step) instead of browser chrome */
+/*  */
 .rplayer video {
   border-radius: 8px 8px 0 0;
   border-bottom: 0;
@@ -726,7 +726,7 @@ h1 {
 .rbtn-play {
   min-width: 34px;
 }
-/* the scrub rail = an X-sheet column ruling, a tick per cell + a 非-photo-blue playhead peg */
+
 .rplayer-rail {
   position: relative;
   flex: 1;
@@ -774,6 +774,7 @@ h1 {
   color: var(--color-ash);
   font-style: normal;
 }
+/*  */
 .frameset {
   --lift-tone: var(--color-ao);
   margin: 0;
@@ -1024,7 +1025,7 @@ h1 {
   animation: insist 2.4s cubic-bezier(0.2, 0.7, 0.2, 1) infinite;
 }
 
-/* ===== timing sheet / decision log ===== */
+/* Log - ReviewWorkbench.tsx */
 .log-empty {
   padding: 22px 18px;
   color: var(--color-ash);
@@ -1409,6 +1410,8 @@ h1 {
     stroke-dashoffset: 0;
   }
 } */
+ 
+/* Log - ReviewWorkbench.tsx */
 
 .log {
   list-style: none;
@@ -1424,7 +1427,7 @@ h1 {
   animation: cel-in 0.26s cubic-bezier(0.2, 0.7, 0.2, 1) both;
   animation-delay: calc(var(--i, 0) * 30ms);
 }
-/* rail shows the REAL pair index (= the "PAIR N" heading + the gaps list), not a row counter */
+
 .log li::before {
   content: attr(data-pair);
   position: absolute;
@@ -1456,7 +1459,7 @@ h1 {
 }
 .log li.needs_key {
   border-left-style: dashed;
-} /* dashed = "draw here", vs solid off-model flag */
+} 
 .log li.pass::before {
   color: var(--color-pass);
 }
@@ -1475,7 +1478,7 @@ h1 {
   text-transform: uppercase;
   letter-spacing: 0.03em;
 }
-/* status glyph — a shape+colour badge so pass/flag survive without colour vision */
+/* Log - ReviewWorkbench.tsx */
 .sglyph {
   display: inline-grid;
   place-items: center;
@@ -1508,9 +1511,7 @@ h1 {
   margin-top: 3px;
   line-height: 1.45;
 }
-/* confidence meter — a 180° dial: a graphite track arc + a verdict-tinted indicator that draws
-   itself (pathLength=1, dashoffset = 1 − clean), reusing the run-loader's self-drawing-stroke idiom.
-   Raw p/u live in the title tooltip. */
+/* ConfidenceMeter.tsx */
 .confgauge {
   display: flex;
   align-items: center;
@@ -2088,7 +2089,7 @@ h1 {
   line-height: 1.45;
 }
 
-/* ===== per-pair line-test (flip) ===== */
+/* FlipPlayer.tsx */
 .flip {
   margin-top: 11px;
 }
@@ -2186,7 +2187,7 @@ h1 {
   color: var(--color-ash);
 }
 
-/* ===== gaps (needs-key) group ===== */
+/* Gaps - ReviewWorkbench.tsx */
 .gaps {
   border-top: 1px solid var(--color-line);
 }
@@ -2307,14 +2308,14 @@ h1 {
 .log li.v-reject {
   background: color-mix(in oklab, var(--color-akaire) 11%, var(--color-sumi-2));
 }
-
+/* Verdict - ReviewWorkbench.tsx */
 .verdict {
   display: flex;
   align-items: center;
   gap: 8px;
   margin-top: 11px;
 }
-/* labels the artist's layer ("your call") vs the co-pilot's read above it (glyph + why + gauge) */
+
 .verdict-label {
   font-family: var(--font-mono);
   font-size: 10px;
@@ -2323,7 +2324,7 @@ h1 {
   color: var(--color-ash);
   margin-right: 2px;
 }
-/* draw-key loop: supply a breakdown key for a too-large gap (akaire = the missing drawing) */
+/* Add key - ReviewWorkbench.tsx */
 .addkey {
   display: inline-block;
   margin-top: 11px;
@@ -2429,7 +2430,7 @@ h1 {
   border: 1px solid var(--color-akaire);
 }
 
-/* ===== streaming skeleton — pending cels shimmering in while pairs compute ===== */
+/* Skeleton - ReviewWorkbench.tsx */
 .skel-list {
   list-style: none;
   margin: 0;
@@ -2630,7 +2631,13 @@ h1 {
 }
 
 .chat-page {
-  flex: 1;
+  /* Pin the chat surface to the viewport itself, independent of the .app height chain.
+     The ≤920px media query flips html/body/.app to height:auto (for the board view's mobile
+     page-scroll) — that would collapse this flex column and un-dock the bottom composer. An
+     explicit viewport height keeps the header/middle/composer three-region shell intact at every
+     breakpoint. dvh tracks the mobile browser's dynamic chrome; vh is the fallback. */
+  height: 100vh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
   min-height: 0;

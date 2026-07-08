@@ -685,7 +685,7 @@ export function ReviewWorkbench({
               onScroll={() => sync("R")}
             >
               <div className="frames-head">
-                <span className="eyebrow">出力 frames</span>
+                <span className="eyebrow">Output Frames</span>
                 <h2>key · in-between · key</h2>
               </div>
               {running && log.length === 0 ? (

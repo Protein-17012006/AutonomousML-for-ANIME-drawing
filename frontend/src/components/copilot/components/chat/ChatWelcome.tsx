@@ -33,7 +33,7 @@ export function ChatWelcome({
   const videoInputRef = useRef<HTMLInputElement>(null);
 
   return (
-    <Card className="flex-1 w-full flex flex-col gap-4 rounded-xl bg-sumi-2 ring-line text-washi">
+    <Card className="flex-1 w-full flex flex-col justify-start gap-4 rounded-xl bg-transparent ring-0 text-washi">
       <CardHeader className="flex flex-col gap-2">
         {/* brand mark — full-width row so justify-center actually centers the icon
             (CardHeader is a flex col with items-start, which otherwise left-pins it) */}

@@ -306,25 +306,31 @@ export default function App() {
     setBoardFocus(focus);
     setView("board");
   };
+  // A session is "live" once anything has been staged/streamed. Drives the chat surface's
+  // middle region: welcome (empty) XOR transcript (live) — exactly one flex-1 child so they
+  // don't split the column and leave a gap above the docked composer.
+  const hasSession = !!upload || log.length > 0 || !!result;
 
   return (
     <div className="app">
       {view === "chat" ? (
         <div className="chat-page">
           <ChatHeader />
-          {!upload && log.length === 0 && !result && (
+          {/* Middle region — welcome XOR transcript, never both (see hasSession). */}
+          {hasSession ? (
+            <ChatView
+              msgs={msgs}
+              keyUrls={effKeyUrls}
+              onOpenBoard={openBoard}
+              onRefill={refillKey}
+              onExport={downloadBundle}
+            />
+          ) : (
             <ChatWelcome
               onImportFrames={importFrames}
               onImportVideo={importVideo}
             />
           )}
-          <ChatView
-            msgs={msgs}
-            keyUrls={effKeyUrls}
-            onOpenBoard={openBoard}
-            onRefill={refillKey}
-            onExport={downloadBundle}
-          />
           <ChatComposer
             files={keys.files}
             fileUrls={keyUrls}

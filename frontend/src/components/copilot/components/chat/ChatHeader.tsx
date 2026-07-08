@@ -7,7 +7,7 @@ import { ModeToggle } from "@/components/ModeToggle";
 // per the in-progress copilot.css → Tailwind pass.
 export function ChatHeader() {
   return (
-    <header className="flex items-center justify-between gap-3 pt-3.5 px-1 pb-2">
+    <header className="flex shrink-0 items-center justify-between gap-3 pt-3.5 px-1 pb-2">
       <div className="flex items-center gap-3">
         <BrandIcon />
         <div>
