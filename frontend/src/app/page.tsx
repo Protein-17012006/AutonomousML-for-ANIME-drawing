@@ -1,12 +1,14 @@
-"use client";
-import { useEffect } from "react";
+import type { Metadata } from "next";
+import { HomePage } from "@/components/landing/HomePage";
 
-// Front door → the chat-first In-Between Co-pilot. Client-side redirect so it works
-// both in dev and in the static export served by the box (a server redirect() is not
-// compatible with `output: export`). The stub chat landing was removed.
+// Landing / front door. Server component (statically prerendered in the export build) that owns
+// the page metadata and delegates the whole layout to <HomePage />.
+export const metadata: Metadata = {
+  title: "In-Between Co-pilot — Anime in-betweens, verified",
+  description:
+    "Draw the keys. The co-pilot fills the in-between frames and runs calibrated self-QA on every one — so nothing off-model, flickering, or morphed ever ships.",
+};
+
 export default function Home() {
-  useEffect(() => {
-    window.location.replace("/copilot");
-  }, []);
-  return null;
+  return <HomePage />;
 }

@@ -204,6 +204,22 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/* Animation utility not provided by tw-animate-css — used by the shadcn input-otp slot caret. */
+@theme {
+  --animate-caret-blink: caret-blink 1.25s ease-out infinite;
+  @keyframes caret-blink {
+    0%,
+    70%,
+    100% {
+      opacity: 1;
+    }
+    20%,
+    50% {
+      opacity: 0;
+    }
+  }
+}
+
 .dark {
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
