@@ -14,6 +14,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 from inbetween_copilot.pipeline.copilot import CopilotResult
+from inbetween_copilot.reporting.depth import expand_pair
 from inbetween_copilot.reporting.report import summarize
 
 
@@ -36,8 +37,16 @@ def _tint_color(pair) -> tuple:
     return _STATUS_COLOR.get(pair.qa.status, _DEFAULT_COLOR)
 
 
-def build_report(result: CopilotResult, out_dir: str) -> str:
-    """Write report.md to *out_dir* and return the path."""
+def build_report(result: CopilotResult, out_dir: str, *,
+                 cadence_fps: "int | None" = None, smoothness: "int | None" = None,
+                 output_fps: "int | None" = None, duration: "float | None" = None) -> str:
+    """Write report.md to *out_dir* and return the path.
+
+    ``cadence_fps``/``smoothness``/``output_fps``/``duration`` (Smoothness Control,
+    Task 7) are optional headline-badge fields. When ``output_fps`` is given, a
+    ``*smoothness ×N · on-Ms → Ffps · Ds*`` line is inserted right after the
+    ``**{summary}**`` line. Left at the default (None), the report is unchanged —
+    back-compat with existing callers/tests."""
     keys_drawn = len(result.pairs) + 1   # n pairs -> n+1 keys
     rep = summarize(result, keys_drawn)
 
@@ -57,6 +66,9 @@ def build_report(result: CopilotResult, out_dir: str) -> str:
         "| pair | action | route | QA | reason |\n",
         "|---|---|---|---|---|\n",
     ]
+    if output_fps is not None:
+        onN = {24: "on-1s", 12: "on-2s", 8: "on-3s"}.get(cadence_fps, f"{cadence_fps}fps-keys")
+        lines.insert(2, f"*smoothness ×{smoothness} · {onN} → {output_fps}fps · {duration:.1f}s*\n")
     for p in result.pairs:
         qa_s  = p.qa.status if p.qa else "-"
         qa_r  = p.qa.reason if p.qa else "-"
@@ -157,7 +169,8 @@ def build_montage(result: CopilotResult, keys: List[np.ndarray], out_dir: str,
     return path
 
 
-def _assemble_frames(result: CopilotResult) -> List[np.ndarray]:
+def _assemble_frames(result: CopilotResult, *, factor: int = 2,
+                     mid_engine=None) -> List[np.ndarray]:
     """Concatenate the filled/generated pairs into one ordered frame sequence.
 
     Each fillable pair returns ``[a, mid, b]`` where ``b`` is the SAME key as the
@@ -167,33 +180,57 @@ def _assemble_frames(result: CopilotResult) -> List[np.ndarray]:
     pair when it equals the last frame already emitted. Intentional *intra*-pair
     holds (``[a, a, b]`` on-2s cadence) are preserved — only cross-pair shared
     endpoints are dropped. ``needs_key`` pairs contribute nothing, leaving a
-    genuine gap (the segments either side are not contiguous, so no dedup)."""
+    genuine gap (the segments either side are not contiguous, so no dedup).
+
+    ``factor``/``mid_engine`` (Smoothness Control, display-only — the pair was
+    already QA'd upstream) re-expand each pair via
+    ``reporting.depth.expand_pair`` BEFORE the boundary dedup above. The default
+    ``factor=2`` is the historical behaviour (pair frames unchanged) and is kept
+    on the cheap path (no call into ``expand_pair``) so today's output is
+    reproduced byte-for-byte."""
     out: List[np.ndarray] = []
     for p in result.pairs:
         if p.action not in ("filled", "generated") or not p.frames:
             continue
+        raw = p.frames if factor == 2 else expand_pair(p.frames, p.route, factor, mid_engine)
         frames = [(fr if isinstance(fr, np.ndarray) else np.array(fr, dtype=np.uint8)).astype(np.uint8)
-                  for fr in p.frames]
+                  for fr in raw]
         start = 1 if (out and np.array_equal(out[-1], frames[0])) else 0
         out.extend(frames[start:])
     return out
 
 
-def build_video(result: CopilotResult, out_dir: str, fps: int = 24) -> str:
+def build_video(result: CopilotResult, out_dir: str, fps: int = 24, *,
+                factor: int = 2, mid_engine=None,
+                frames: "List[np.ndarray] | None" = None) -> str:
     """Write reconstructed.mp4 (browser-playable **H.264/yuv420p** via imageio+ffmpeg)
     from the filled/generated pairs. cv2 `mp4v` is not decodable in browsers, so we
     encode libx264 — matching .scratch/copilot/demo_copilot.py.
 
     ``fps`` defaults to 24: the reconstruction restores a stride-2-decimated cut to
     full frame-rate, so it must play at the source rate (~23.976/24fps). The old
-    default of 12 played a full-rate reconstruction at 2x slow-motion."""
+    default of 12 played a full-rate reconstruction at 2x slow-motion.
+
+    ``factor``/``mid_engine`` thread through to `_assemble_frames` (Smoothness
+    Control display depth); defaults reproduce today's output unchanged.
+
+    ``frames`` (M2 fix): when the caller has ALREADY assembled the display frames
+    (e.g. `_stream_session` needs them to compute the duration badge too), pass
+    them here to reuse that list instead of re-assembling — at smoothness=4,
+    `_assemble_frames` re-runs the (GPU) `mid_engine` per rife pair, so assembling
+    twice per session doubled that work for no reason. Left at the default
+    (``None``) this assembles internally exactly as before — full back-compat."""
     import imageio
 
     path = os.path.join(out_dir, "reconstructed.mp4")
 
     # collect all frames (only filled / generated pairs contribute), dropping the
-    # shared key duplicated at each pair boundary
-    all_frames: List[np.ndarray] = _assemble_frames(result)
+    # shared key duplicated at each pair boundary — unless the caller already did
+    # this assembly and handed us the result directly.
+    all_frames: List[np.ndarray] = (
+        frames if frames is not None
+        else _assemble_frames(result, factor=factor, mid_engine=mid_engine)
+    )
 
     if not all_frames:
         # nothing to write — a small black placeholder so the file exists

@@ -30,6 +30,21 @@ PERCEPTION_PROMPT = (
       'JSON: {"has_motion_error": bool, "error_type": "...", "region": "...", '
       '"explanation": "<one sentence>"}')
 
+# The LIVE binary prompt the box VLM runs per QA window (P3 2026-07-08: moved
+# here from an inline literal in service/engines.py so the production prompt
+# lives beside the validated prompt family it paraphrases — _MOTION_PROMPT is
+# the benchmarked original (P0.966/R0.800); edits here must re-run suite_motion).
+BINARY_PROMPT = (
+    "These are consecutive frames of one short animation clip, in order. Judge ONLY the motion.\n"
+    "Some clips contain a motion error from a generative interpolator - a limb that warps/melts, "
+    "identity/colour drift, a motion arc that breaks, flicker/pop, or an impossible morph. "
+    "Intentional anime stylization (smears, speed lines, squash-stretch) is NOT an error.\n"
+    'Return JSON: {"has_motion_error": true|false, '
+    '"verdict_prob": <float 0-1 confidence of error>, '
+    '"error_type": "ghost|blur|flicker|morph|identity_drift|scene_break|none", '
+    '"region": "tl|tc|tr|ml|mc|mr|bl|bc|br|whole|none", "explanation": "<one sentence>"}'
+)
+
 
 @dataclass(frozen=True)
 class QAVerdict:

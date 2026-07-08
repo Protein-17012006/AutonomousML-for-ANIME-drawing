@@ -13,6 +13,7 @@ from dataclasses import dataclass
 
 from inbetween_copilot.pipeline.plan import build_key_plan, TAU_GATE
 from inbetween_copilot.pipeline.route import choose_route
+from inbetween_copilot.pipeline.states import CorrectionStatus, PairAction, QAStatus, Route
 from inbetween_copilot.qa.gate import frame_qa, FrameQA
 from inbetween_copilot.qa.window import windows_for_run
 
@@ -34,7 +35,7 @@ class CopilotCfg:
 @dataclass
 class PairResult:
     index: int
-    action: str               # "filled" | "generated" | "needs_key"
+    action: str               # PairAction value ("filled" | "generated" | "needs_key")
     route: str | None
     frames: list | None
     qa: FrameQA | None
@@ -57,6 +58,36 @@ class CopilotResult:
             self.abstained = []
 
 
+def aggregate_result(pairs) -> CopilotResult:
+    """Derive a CopilotResult's aggregates from a finished pairs list — the ONE
+    place the pass/abstain/flag/corrected tally lives (P6, 2026-07-08). Used by
+    run_copilot at the end of PASS 2 and by service.runner.recompute_result after
+    a draw-key splice, which used to mirror this logic by hand."""
+    flagged: list = []
+    abstained: list = []
+    n_autopass = 0
+    n_corrected = 0
+    for p in pairs:
+        if p.action == PairAction.NEEDS_KEY or p.qa is None:
+            continue
+        resolved = getattr(p.correction, "status", None) == CorrectionStatus.RESOLVED
+        if p.qa.status == QAStatus.PASS:
+            n_autopass += 1
+        elif p.qa.status == QAStatus.ABSTAIN:
+            abstained.append(p.index)
+        elif p.qa.status == QAStatus.FLAG:
+            if resolved:
+                n_corrected += 1
+            else:
+                flagged.append(p.index)
+    return CopilotResult(
+        pairs=pairs,
+        keys_requested_total=sum(p.keys_requested for p in pairs),
+        flagged=flagged, n_autopass=n_autopass,
+        n_corrected=n_corrected, abstained=abstained,
+    )
+
+
 def run_copilot(keys, *, gap_fn, regime_fn, interp_fn, qa_fn, softness_fn,
                 gen_fn=None, breakdown_supply=None, corrector=None, qa3_fn=None,
                 triage_fn=None, keys_needed_fn=None,
@@ -77,32 +108,29 @@ def run_copilot(keys, *, gap_fn, regime_fn, interp_fn, qa_fn, softness_fn,
         if pp.action == "fill":
             route = choose_route(pp.regime)
             frames = interp_fn(route, a, b)
-            prelim.append((pp, "filled", route, frames))
+            prelim.append((pp, PairAction.FILLED, route, frames))
             filled.append((pp.index, frames))
         else:  # needs_key
             m = breakdown_supply(a, b) if breakdown_supply is not None else None
             if m is not None and gen_fn is not None:
                 frames = gen_fn(a, m, b)
-                prelim.append((pp, "generated", "generative", frames))
+                prelim.append((pp, PairAction.GENERATED, Route.GENERATIVE, frames))
                 filled.append((pp.index, frames))
             else:
-                prelim.append((pp, "needs_key", None, None))
+                prelim.append((pp, PairAction.NEEDS_KEY, None, None))
 
     windows = windows_for_run(filled) if qa_window else {}
 
-    # --- PASS 2: QA on the (windowed or triplet) input; handle abstain/flag. ---
+    # --- PASS 2: QA on the (windowed or triplet) input; run the correction hook.
+    # Aggregates are derived AFTER the loop by aggregate_result (P6). ---
     pairs: list = []
-    flagged: list = []
-    abstained: list = []
-    n_autopass = 0
-    n_corrected = 0
     for pp, action, route, frames in prelim:
-        if action == "needs_key":
+        if action == PairAction.NEEDS_KEY:
             a, b = keys[pp.index], keys[pp.index + 1]
             tri = triage_fn(a, b, pp) if triage_fn is not None else None
             n_keys = (tri["keys_suggested"] if isinstance(tri, dict)
                       and "keys_suggested" in tri else pp.keys_to_request)
-            pairs.append(PairResult(pp.index, "needs_key", None, None, None,
+            pairs.append(PairResult(pp.index, PairAction.NEEDS_KEY, None, None, None,
                                     n_keys, triage=tri))
             if on_pair is not None:
                 on_pair(pairs[-1])
@@ -111,26 +139,12 @@ def run_copilot(keys, *, gap_fn, regime_fn, interp_fn, qa_fn, softness_fn,
         qa_input = windows.get(pp.index, frames) if qa_window else frames
         qa = _qa_for(qa_input, qa_fn, softness_fn, qa3_fn, cfg.tau_soft)
         pair = PairResult(pp.index, action, route, frames, qa, 0)   # pair.frames = triplet
-        if qa.status == "abstain":
-            abstained.append(pp.index)
-        elif qa.status == "flag":
-            if corrector is not None:
-                corr = corrector(pair.frames, a, b)      # corrector on the TRIPLET
-                pair.correction = corr
-                pair.frames = corr.frames
-                if corr.status == "resolved":
-                    n_corrected += 1
-                else:
-                    flagged.append(pp.index)
-            else:
-                flagged.append(pp.index)
-        else:
-            n_autopass += 1
+        if qa.status == QAStatus.FLAG and corrector is not None:
+            corr = corrector(pair.frames, a, b)          # corrector on the TRIPLET
+            pair.correction = corr
+            pair.frames = corr.frames
         pairs.append(pair)
         if on_pair is not None:
             on_pair(pairs[-1])
 
-    return CopilotResult(pairs=pairs,
-                         keys_requested_total=sum(p.keys_requested for p in pairs),
-                         flagged=flagged, n_autopass=n_autopass,
-                         n_corrected=n_corrected, abstained=abstained)
+    return aggregate_result(pairs)

@@ -27,12 +27,11 @@ LABELS = ".scratch/motion_labels/artifact_final.json"
 
 
 def prf(preds, truth):
+    from benchmark.lib.scoring.metrics import precision_recall
     tp = sum(1 for p, t in zip(preds, truth) if p and t)
     fp = sum(1 for p, t in zip(preds, truth) if p and not t)
     fn = sum(1 for p, t in zip(preds, truth) if (not p) and t)
-    prec = tp / (tp + fp) if tp + fp else 0.0
-    rec = tp / (tp + fn) if tp + fn else 0.0
-    f1 = 2 * prec * rec / (prec + rec) if prec + rec else 0.0
+    prec, rec, f1 = precision_recall(tp, fp, fn)
     return {"precision": round(prec, 3), "recall": round(rec, 3),
             "f1": round(f1, 3), "tp": tp, "fp": fp, "fn": fn}
 
