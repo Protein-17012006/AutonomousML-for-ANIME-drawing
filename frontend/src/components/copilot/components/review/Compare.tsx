@@ -33,8 +33,7 @@ export function Compare(p: CompareProps) {
           <p className="hint">
             Upload a <b>full cut</b> (every frame, named 0000.png, 0001.png…).
             The system drops every other frame, then RIFE reconstructs them —{" "}
-            <b>left = source</b> · <b>right = RIFE</b>. Set <code>engine</code>{" "}
-            + <code>fps</code> above.
+            <b>left = source</b> · <b>right = RIFE</b>. Set <code>engine</code> above.
           </p>
           <div className="controls">
             <FilePicker id="demokeys" label="Load full cut" onAdd={p.onAdd} />

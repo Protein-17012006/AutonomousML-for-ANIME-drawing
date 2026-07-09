@@ -8,10 +8,7 @@ import {
   runSession,
   runDemo,
   runVideoSession,
-  runPlantedSession,
-  fetchPlantedCases,
   askQuestion,
-  type PlantedCase,
 } from "./api";
 import { deriveMessages, type QaTurn, type UserTurn } from "./lib/chatModel";
 import { useFileSet } from "./lib/useFileSet";
@@ -27,18 +24,17 @@ import { SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppSidebar } from "@/components/common/AppSidebar";
 
+/* cadence value → human "shoot on Ns" label, shared by the upload bubble + the result sampling badge */
+const CADENCE_LABEL: Record<string, string> = { "24": "on-1s", "12": "on-2s", "8": "on-3s" };
+
 export default function App() {
   const keys = useFileSet();
   const demo = useFileSet();
   const [engines, setEngines] = useState("box");
-  const [fps, setFps] = useState("24");
-  // Planted-error demo cases (labeled): loaded once; empty when the server predates the feature.
-  const [plantedCases, setPlantedCases] = useState<PlantedCase[]>([]);
-  useEffect(() => {
-    fetchPlantedCases()
-      .then(setPlantedCases)
-      .catch(() => {});
-  }, []);
+  // cadence = shoot-on-Ns rate the artist drew at (24/12/8); smoothness = the in-between
+  // multiplier applied on top (1=off, 2=standard, 4=extra — Phase 2 enables Extra).
+  const [cadence, setCadence] = useState("12");
+  const [smoothness, setSmoothness] = useState("2");
 
   const [running, setRunning] = useState(false);
   const [banner, setBanner] = useState<string | null>(null);
@@ -134,12 +130,12 @@ export default function App() {
     setVerdicts({});
     setQaTurns([]);
     setUpload({
-      label: `${keys.files.length} keyframes · ${engines === "box" ? "Co-pilot (GPU)" : "Demo"} · ${fps} fps`,
+      label: `${keys.files.length} keyframes · ${engines === "box" ? "Co-pilot (GPU)" : "Demo"} · ${CADENCE_LABEL[cadence] ?? cadence} · ×${smoothness}`,
       thumbs: keyUrls.slice(0, 6),
     });
     setRunning(true);
     try {
-      await runSession(keys.files, engines, fps, {
+      await runSession(keys.files, engines, cadence, smoothness, {
         onPair: (p) => setLog((prev) => [...prev, p]),
         onResult: (r) => setResult(r),
         onError: (m) => setBanner(m),
@@ -149,34 +145,6 @@ export default function App() {
       setBanner(
         "Couldn't reach the co-pilot — is the service running? Press Run to retry.",
       );
-    }
-    setRunning(false);
-  };
-
-  // Planted-error DEMO run: the server plants a stored bad in-between from a frozen suite
-  // and the real QA/annotate path judges it. Clearly labeled — the live gate produces no
-  // natural flags (that refusal is the product story; this shows the flag surface anyway).
-  const runPlanted = async (caseId: string) => {
-    const c = plantedCases.find((x) => x.id === caseId);
-    setBanner(null);
-    setLog([]);
-    setResult(null);
-    setVerdicts({});
-    setQaTurns([]);
-    setUpload({
-      label: `🧪 PLANTED DEMO · ${c?.title ?? caseId} — lỗi được cấy chủ đích để trình diễn QA`,
-      thumbs: [],
-    });
-    setRunning(true);
-    try {
-      await runPlantedSession(caseId, engines, fps, {
-        onPair: (p) => setLog((prev) => [...prev, p]),
-        onResult: (r) => setResult(r),
-        onError: (m) => setBanner(m),
-      });
-    } catch (err) {
-      console.error("planted session failed:", err);
-      setBanner("Couldn't reach the co-pilot — is the service running?");
     }
     setRunning(false);
   };
@@ -194,7 +162,7 @@ export default function App() {
     });
     setRunning(true);
     try {
-      await runVideoSession(videoFile, stride, fps, engines, {
+      await runVideoSession(videoFile, stride, cadence, smoothness, engines, {
         onPair: (p) => setLog((prev) => [...prev, p]),
         onResult: (r) => setResult(r),
         onError: (m) => setBanner(m),
@@ -255,7 +223,9 @@ export default function App() {
     setDemoResult(null);
     setDemoBuilding(true);
     try {
-      setDemoResult(await runDemo(demo.files, engines, fps || "48"));
+      // the full-cut Compare panel is a separate legacy demo (not wired to the chat composer's
+      // cadence/smoothness controls) — kept at its historical default playback rate.
+      setDemoResult(await runDemo(demo.files, engines, "24"));
     } catch (err) {
       setDemoBanner(`${err}`);
     }
@@ -351,8 +321,10 @@ export default function App() {
             onModeChange={changeMode}
             engines={engines}
             setEngines={setEngines}
-            fps={fps}
-            setFps={setFps}
+            cadence={cadence}
+            setCadence={setCadence}
+            smoothness={smoothness}
+            setSmoothness={setSmoothness}
             videoFile={videoFile}
             onVideo={setVideoFile}
             stride={stride}
@@ -363,8 +335,6 @@ export default function App() {
             compact={running || log.length > 0}
             askEnabled={!!result?.artifacts}
             onAsk={onAsk}
-            plantedCases={plantedCases}
-            onRunPlanted={runPlanted}
           />
         </div>
       ) : (
@@ -386,7 +356,7 @@ export default function App() {
             verdicts={verdicts}
             onVerdict={setVerdict}
             onRefill={refillKey}
-            fps={Number(fps) || 24}
+            fps={result?.sampling?.output_fps || Number(cadence) * Number(smoothness) || 24}
             initialFocus={boardFocus}
             compareSlot={
               <Compare

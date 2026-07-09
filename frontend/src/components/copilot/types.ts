@@ -54,9 +54,13 @@ export interface ResultEvent {
     requested_stride?: number;
     stride?: number;                    // > requested_stride when the clip was auto-fit (coarser)
     kept?: number;
-    planted?: string;                   // planted-error DEMO session: case id (label it!)
-    planted_type?: string;              //   the seeded error class (ghost/morph/drift/…)
-    planted_src?: string;               //   suite/clip the bad mid came from
+    cadence_fps?: number;               // shoot-on-Ns cadence the artist selected (24/12/8)
+    smoothness?: number;                // in-between multiplier applied (1=off, 2=standard, 4=extra)
+    output_fps?: number;                // cadence_fps × smoothness — the delivered playback rate
+    duration?: number;                  // reconstructed cut length, seconds
+    planted?: string;                   // planted-error DEMO session: case id — dormant field,
+    planted_type?: string;              //   the seeded error class (ghost/morph/drift/…) — no
+    planted_src?: string;               //   suite/clip the bad mid came from — production path posts this
   } | null;
   csq?: CsqBand | null;                 // calibrated abstain band for the dial (box engines only)
   qa_degraded?: boolean;                // true when the served VLM was unreachable during the run

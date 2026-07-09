@@ -14,8 +14,10 @@ export function ChatComposer(p: {
   onClear: () => void;
   engines: string;
   setEngines: (s: string) => void;
-  fps: string;
-  setFps: (s: string) => void;
+  cadence: string;
+  setCadence: (s: string) => void;
+  smoothness: string;
+  setSmoothness: (s: string) => void;
   videoFile: File | null;
   onVideo: (f: File | null) => void;
   mode: InputMode; // lifted to CopilotApp so ChatWelcome's quick-import can drive it too
@@ -28,8 +30,6 @@ export function ChatComposer(p: {
   compact: boolean; // a session exists → fold the dropzone
   askEnabled: boolean; // result retained server-side → grounded Q&A available
   onAsk: (q: string) => void;
-  plantedCases: { id: string; title: string }[]; // labeled planted-error demo cases
-  onRunPlanted: (id: string) => void;
 }) {
   const [q, setQ] = useState("");
   const [gearOpen, setGearOpen] = useState(false);
@@ -71,17 +71,28 @@ export function ChatComposer(p: {
               <option value="stub">Demo (no GPU)</option>
             </select>
           </label>
-          {/* FPS SELECTION */}
+          {/* CADENCE SELECTION — shoot-on-Ns rate the keys were drawn at */}
           <label className="field">
-            shoot rate
-            <input
-              type="number"
-              min={1}
-              max={60}
-              step={1}
-              value={p.fps}
-              onChange={(e) => p.setFps(e.target.value)}
-            />
+            cadence
+            <select
+              value={p.cadence}
+              onChange={(e) => p.setCadence(e.target.value)}
+            >
+              <option value="24">on-1s</option>
+              <option value="12">on-2s</option>
+              <option value="8">on-3s</option>
+            </select>
+          </label>
+          {/* SMOOTHNESS SELECTION — in-between multiplier on top of the cadence */}
+          <label className="field">
+            smoothness
+            <select
+              value={p.smoothness}
+              onChange={(e) => p.setSmoothness(e.target.value)}
+            >
+              <option value="1">Off</option>
+              <option value="2">Standard</option>
+            </select>
           </label>
           {/* STRIDE SELECTION (VIDEO ONLY) */}
           {p.mode === "video" && (
@@ -95,27 +106,6 @@ export function ChatComposer(p: {
                 value={p.stride}
                 onChange={(e) => p.setStride(e.target.value)}
               />
-            </label>
-          )}
-          {/* PLANTED CASE TO TEST QA AGENT */}
-          {p.plantedCases.length > 0 && (
-            <label className="field">
-              🧪 planted demo
-              <select
-                value=""
-                disabled={p.running}
-                onChange={(e) => {
-                  const id = e.target.value;
-                  if (id) p.onRunPlanted(id);
-                }}
-              >
-                <option value="">Select a QA demo options</option>
-                {p.plantedCases.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.title}
-                  </option>
-                ))}
-              </select>
             </label>
           )}
         </div>
