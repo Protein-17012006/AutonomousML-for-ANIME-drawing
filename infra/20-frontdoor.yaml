@@ -1,0 +1,152 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: copilot front door - ALB (cognito auth) + EC2 nginx proxy in the default VPC
+
+Parameters:
+  VpcId: {Type: AWS::EC2::VPC::Id}
+  SubnetIds: {Type: List<AWS::EC2::Subnet::Id>}       # 2+ subnets, different AZs
+  OriginDomain: {Type: String}                        # origin.<APP_DOMAIN> (CloudFront -> ALB)
+  HostedZoneId: {Type: AWS::Route53::HostedZone::Id}
+  CloudFrontPrefixListId: {Type: String}              # origin-facing prefix list in THIS region
+  BoxHost: {Type: String, Default: 100.71.161.102}
+  BucketPrefix: {Type: String, Default: copilot-g4}
+  AmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+
+Resources:
+  AlbCert:                                  # regional cert for the ALB origin domain
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Ref OriginDomain
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - {DomainName: !Ref OriginDomain, HostedZoneId: !Ref HostedZoneId}
+      Tags: [{Key: project, Value: copilot}]
+
+  AlbSg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: copilot ALB - 443 from CloudFront only (design sec3 Edge)
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - {IpProtocol: tcp, FromPort: 443, ToPort: 443, SourcePrefixListId: !Ref CloudFrontPrefixListId}
+      Tags: [{Key: project, Value: copilot}]
+
+  Ec2Sg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: copilot EC2 - 80 from the ALB only, no SSH (SSM instead)
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - {IpProtocol: tcp, FromPort: 80, ToPort: 80, SourceSecurityGroupId: !Ref AlbSg}
+      Tags: [{Key: project, Value: copilot}]
+
+  Ec2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: copilot-ec2-proxy
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - {Effect: Allow, Principal: {Service: ec2.amazonaws.com}, Action: sts:AssumeRole}
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: copilot-ec2
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: ssm:GetParameter
+                Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/copilot/*
+              - Effect: Allow
+                Action: [s3:GetObject, s3:ListBucket]
+                Resource:
+                  - !Sub arn:aws:s3:::${BucketPrefix}-deploy
+                  - !Sub arn:aws:s3:::${BucketPrefix}-deploy/*
+              - Effect: Allow
+                Action: kms:Decrypt
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub ssm.${AWS::Region}.amazonaws.com
+      Tags: [{Key: project, Value: copilot}]
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref Ec2Role]
+
+  Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t3.micro
+      ImageId: !Ref AmiId
+      SubnetId: !Select [0, !Ref SubnetIds]
+      SecurityGroupIds: [!Ref Ec2Sg]
+      IamInstanceProfile: !Ref InstanceProfile
+      Tags: [{Key: Name, Value: copilot-proxy}, {Key: project, Value: copilot}]
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -e
+          aws s3 cp s3://${BucketPrefix}-deploy/infra/ec2-userdata.sh /root/setup.sh --region ${AWS::Region}
+          bash /root/setup.sh ${AWS::Region} ${BoxHost} ${BucketPrefix} 2>&1 | tee /var/log/copilot-setup.log
+
+  Tg:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      VpcId: !Ref VpcId
+      Port: 80
+      Protocol: HTTP
+      TargetType: instance
+      Targets: [{Id: !Ref Instance}]
+      HealthCheckPath: /
+      Tags: [{Key: project, Value: copilot}]
+
+  Alb:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Scheme: internet-facing
+      Subnets: !Ref SubnetIds
+      SecurityGroups: [!Ref AlbSg]
+      LoadBalancerAttributes:
+        - {Key: idle_timeout.timeout_seconds, Value: '1800'}   # SSE (design §2)
+      Tags: [{Key: project, Value: copilot}]
+
+  Listener443:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref Alb
+      Port: 443
+      Protocol: HTTPS
+      Certificates: [{CertificateArn: !Ref AlbCert}]
+      DefaultActions:
+        - Type: authenticate-cognito
+          Order: 1
+          AuthenticateCognitoConfig:
+            UserPoolArn: !ImportValue copilot-UserPoolArn
+            UserPoolClientId: !ImportValue copilot-UserPoolClientId
+            UserPoolDomain: !ImportValue copilot-UserPoolDomain
+            OnUnauthenticatedRequest: authenticate
+            SessionTimeout: 604800            # 7 days
+        - Type: forward
+          Order: 2
+          TargetGroupArn: !Ref Tg
+
+  OriginRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref OriginDomain
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt Alb.DNSName
+        HostedZoneId: !GetAtt Alb.CanonicalHostedZoneID
+
+Outputs:
+  InstanceId:
+    Value: !Ref Instance
+    Export: {Name: copilot-InstanceId}
+  AlbDNS:
+    Value: !GetAtt Alb.DNSName
