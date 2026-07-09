@@ -1,0 +1,57 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: copilot front door - Cognito user pool (no self-signup) for ALB authenticate-cognito
+
+Parameters:
+  AppDomain:
+    Type: String
+    Description: Public app host staff use, e.g. copilot.example.click
+  HostedUiPrefix:
+    Type: String
+    Default: copilot-g4-auth
+    Description: Globally-unique Cognito hosted-UI domain prefix
+
+Resources:
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: copilot-users
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: true        # design §3: self-signup OFF
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+      UserPoolTags:
+        project: copilot
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: copilot-alb
+      UserPoolId: !Ref UserPool
+      GenerateSecret: true                    # ALB authenticate-cognito requires a secret
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows: [code]
+      AllowedOAuthScopes: [openid]
+      SupportedIdentityProviders: [COGNITO]
+      CallbackURLs:
+        - !Sub https://${AppDomain}/oauth2/idpresponse
+      ExplicitAuthFlows:
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+
+  UserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: !Ref HostedUiPrefix
+      UserPoolId: !Ref UserPool
+
+Outputs:
+  UserPoolArn:
+    Value: !GetAtt UserPool.Arn
+    Export: {Name: copilot-UserPoolArn}
+  UserPoolClientId:
+    Value: !Ref UserPoolClient
+    Export: {Name: copilot-UserPoolClientId}
+  UserPoolDomainPrefix:
+    Value: !Ref HostedUiPrefix
+    Export: {Name: copilot-UserPoolDomain}

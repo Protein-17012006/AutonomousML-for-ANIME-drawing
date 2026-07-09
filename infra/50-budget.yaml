@@ -1,0 +1,25 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: copilot front door - $200 budget guard (design section 4)
+
+Parameters:
+  NotificationEmail: {Type: String}
+
+Resources:
+  Budget:
+    Type: AWS::Budgets::Budget
+    Properties:
+      Budget:
+        BudgetName: copilot-200
+        BudgetType: COST
+        TimeUnit: ANNUALLY                  # the $200 is a total, not per-month
+        BudgetLimit: {Amount: 200, Unit: USD}
+      NotificationsWithSubscribers:
+        - Notification: {NotificationType: ACTUAL, ComparisonOperator: GREATER_THAN,
+                         Threshold: 25, ThresholdType: PERCENTAGE}
+          Subscribers: [{SubscriptionType: EMAIL, Address: !Ref NotificationEmail}]
+        - Notification: {NotificationType: ACTUAL, ComparisonOperator: GREATER_THAN,
+                         Threshold: 50, ThresholdType: PERCENTAGE}
+          Subscribers: [{SubscriptionType: EMAIL, Address: !Ref NotificationEmail}]
+        - Notification: {NotificationType: ACTUAL, ComparisonOperator: GREATER_THAN,
+                         Threshold: 75, ThresholdType: PERCENTAGE}
+          Subscribers: [{SubscriptionType: EMAIL, Address: !Ref NotificationEmail}]
