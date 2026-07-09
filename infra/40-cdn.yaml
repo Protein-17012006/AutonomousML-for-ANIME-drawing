@@ -1,0 +1,87 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: copilot front door - CloudFront (ALB app origin + S3 artifacts origin via OAC)
+
+Parameters:
+  AppDomain: {Type: String}
+  CFCertArn: {Type: String}                 # us-east-1 cert (15-cert stack output)
+  OriginDomain: {Type: String}              # origin.<APP_DOMAIN> -> ALB
+  HostedZoneId: {Type: AWS::Route53::HostedZone::Id}
+  BucketPrefix: {Type: String, Default: copilot-g4}
+
+Resources:
+  Oac:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: copilot-artifacts-oac
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  Dist:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: copilot front door
+        Aliases: [!Ref AppDomain]
+        HttpVersion: http2
+        PriceClass: PriceClass_200            # includes Asia edges (100 does NOT)
+        ViewerCertificate:
+          AcmCertificateArn: !Ref CFCertArn
+          SslSupportMethod: sni-only
+          MinimumProtocolVersion: TLSv1.2_2021
+        Origins:
+          - Id: alb
+            DomainName: !Ref OriginDomain
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols: [TLSv1.2]
+              OriginReadTimeout: 60           # IDLE timeout; service pings every 15s
+              OriginKeepaliveTimeout: 60
+          - Id: artifacts
+            DomainName: !Sub ${BucketPrefix}-artifacts.s3.${AWS::Region}.amazonaws.com
+            OriginAccessControlId: !Ref Oac
+            S3OriginConfig: {OriginAccessIdentity: ''}
+        DefaultCacheBehavior:                 # everything -> ALB, uncached (auth cookies +
+          TargetOriginId: alb                 # SSE; static is small, nginx serves it fast)
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad        # Managed-CachingDisabled
+          OriginRequestPolicyId: 216adef6-5c7f-47e4-b989-5492eafa07d3 # Managed-AllViewer
+        CacheBehaviors:
+          - PathPattern: /artifacts/*         # durable artifacts, cache hard
+            TargetOriginId: artifacts
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD]
+            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6      # Managed-CachingOptimized
+      Tags: [{Key: project, Value: copilot}]
+
+  ArtifactsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Sub ${BucketPrefix}-artifacts
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: cloudfront.amazonaws.com}
+            Action: s3:GetObject
+            Resource: !Sub arn:aws:s3:::${BucketPrefix}-artifacts/*
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/${Dist}
+
+  AppRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref AppDomain
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt Dist.DomainName
+        HostedZoneId: Z2FDTNDATAQYW2          # CloudFront's fixed alias zone
+
+Outputs:
+  DistributionDomain: {Value: !GetAtt Dist.DomainName}
+  StaffUrl: {Value: !Sub 'https://${AppDomain}'}

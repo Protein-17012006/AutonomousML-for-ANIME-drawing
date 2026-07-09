@@ -1,0 +1,23 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: copilot front door - ACM cert for CloudFront (MUST deploy in us-east-1)
+
+Parameters:
+  DomainName:
+    Type: String                 # = APP_DOMAIN, e.g. copilot.example.click
+  HostedZoneId:
+    Type: AWS::Route53::HostedZone::Id
+
+Resources:
+  Cert:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Ref DomainName
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName: !Ref DomainName
+          HostedZoneId: !Ref HostedZoneId   # auto-creates the validation CNAME
+      Tags: [{Key: project, Value: copilot}]
+
+Outputs:
+  CertArn:
+    Value: !Ref Cert
