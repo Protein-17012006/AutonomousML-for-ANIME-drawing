@@ -11,13 +11,42 @@ from __future__ import annotations
 
 import os
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
 from service.routes import demo as demo_routes
+from service.routes import memory as memory_routes
 from service.routes import review as review_routes
 from service.routes import session as session_routes
 
 app = FastAPI(title="In-Between Co-pilot Service")
+
+
+@app.middleware("http")
+async def _cognito_session_gate(request: Request, call_next):
+    """Single-login Stage-3 gate.
+
+    The SPA/login assets stay public.  Production can require the same Cognito
+    bearer token on every GPU/session route without re-introducing ALB's second
+    interactive login.  The flag defaults off for local stub development.
+    """
+    from service.auth import auth_required, authenticate_request
+
+    has_bearer = request.headers.get("Authorization", "").lower().startswith("bearer ")
+    if ((auth_required() or has_bearer) and request.method != "OPTIONS"
+            and request.url.path.startswith("/session")):
+        try:
+            request.state.user = authenticate_request(request)
+        except Exception as exc:
+            from fastapi import HTTPException
+            if isinstance(exc, HTTPException):
+                return JSONResponse(
+                    status_code=exc.status_code,
+                    content={"detail": exc.detail},
+                    headers=exc.headers,
+                )
+            raise
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -40,6 +69,7 @@ async def _no_cache_html(request, call_next):
 app.include_router(session_routes.router)
 app.include_router(demo_routes.router)
 app.include_router(review_routes.router)
+app.include_router(memory_routes.router)
 
 
 # --- static web UI: mounted LAST so the API routes above take precedence ---
