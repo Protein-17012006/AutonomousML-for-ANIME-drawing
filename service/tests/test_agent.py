@@ -76,3 +76,26 @@ def test_history_reaches_prompt():
         return '{"say":"ok","tool":null,"args":null}'
     decide_agent(_state(), "and now?", [{"role": "user", "text": "make it smoother"}], ask_fn=fn)
     assert "make it smoother" in seen["p"]
+
+
+# --- Task A2: POST /session/{sid}/agent (route) ---------------------------------
+from fastapi.testclient import TestClient
+
+from service import state as state_mod
+from service.app import app
+
+
+def test_agent_route_404_on_unknown_sid():
+    c = TestClient(app)
+    r = c.post("/session/999/agent", json={"message": "hi", "history": []})
+    assert r.status_code == 404
+
+
+def test_agent_route_degraded_shape(monkeypatch):
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)   # force degrade path
+    state_mod._state[91] = _state()
+    c = TestClient(app)
+    r = c.post("/session/91/agent", json={"message": "hi", "history": []})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["grounded"] is False and body["action"] is None and body["say"]

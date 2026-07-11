@@ -27,6 +27,11 @@ class AskReq(BaseModel):
     question: str
 
 
+class AgentReq(BaseModel):
+    message: str
+    history: list[dict] = []
+
+
 @router.post("/session/{sid}/ask")
 def post_ask(sid: int, req: AskReq):
     """Grounded Q&A about a finished session (vault 'Chat-First Copilot Surface' §3).
@@ -38,6 +43,19 @@ def post_ask(sid: int, req: AskReq):
     from service.ask import answer_question
     from service.director_llm import make_ask_fn
     return answer_question(st, req.question, make_ask_fn())
+
+
+@router.post("/session/{sid}/agent")
+def post_agent(sid: int, req: AgentReq):
+    """UIA (agent #3): grounded chat + ONE validated tool proposal per turn.
+    The LLM proposes, the whitelist validates, the USER confirms anything that
+    costs GPU (see rerun below). Same degrade discipline as /ask — never 500."""
+    st = _state.get(sid)
+    if st is None:
+        raise HTTPException(status_code=404, detail="Unknown session (or no result yet)")
+    from service.agent import decide_agent
+    from service.director_llm import make_ask_fn
+    return decide_agent(st, req.message, req.history, make_ask_fn())
 
 
 @router.get("/session/{sid}/{name}")
