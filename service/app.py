@@ -14,13 +14,16 @@ import os
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from service.routes import demo as demo_routes
-from service.routes import feedback as feedback_routes
-from service.routes import memory as memory_routes
-from service.routes import review as review_routes
-from service.routes import session as session_routes
+from service.assistant import api as assistant_routes
+from service.core.dependencies import session_repository_for
+from service.feedback import api as feedback_routes
+from service.media import api as demo_routes
+from service.memory import api as memory_routes
+from service.review import api as review_routes
+from service.sessions import api as session_routes
 
 app = FastAPI(title="In-Between Co-pilot Service")
+app.state.session_repository = session_repository_for()
 
 
 @app.middleware("http")
@@ -31,7 +34,7 @@ async def _cognito_session_gate(request: Request, call_next):
     bearer token on every GPU/session route without re-introducing ALB's second
     interactive login.  The flag defaults off for local stub development.
     """
-    from service.auth import auth_required, authenticate_request
+    from service.core.auth import auth_required, authenticate_request
 
     has_bearer = request.headers.get("Authorization", "").lower().startswith("bearer ")
     if ((auth_required() or has_bearer) and request.method != "OPTIONS"
@@ -72,6 +75,7 @@ async def _no_cache_html(request, call_next):
 app.include_router(feedback_routes.router)
 app.include_router(session_routes.router)
 app.include_router(demo_routes.router)
+app.include_router(assistant_routes.router)
 app.include_router(review_routes.router)
 app.include_router(memory_routes.router)
 

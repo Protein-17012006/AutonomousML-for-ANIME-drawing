@@ -1,6 +1,6 @@
 """BOX-ONLY RIFE generator for the small-gap probe. Loads Practical-RIFE once,
 RIFEs the mid of each (a, b) source pair, writes mids to disk. Mirrors
-service.engines.box_engines.rife_engine exactly so probe ghosts == production
+service.infrastructure.engines.box_engines.rife_engine exactly so probe ghosts == production
 ghosts. Run on the box:  ~/cogvideo-venv/bin/python gen_rife_box.py --pairs
 pairs.json --out ~/rife_probe/mids"""
 from __future__ import annotations

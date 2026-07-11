@@ -1,7 +1,7 @@
 """Deterministic wide-gap triage: WHY a pair was gate-refused + key budget.
 
 Numpy-pure (no cv2/torch/network) so it imports and tests anywhere; the caller
-(service.engines / benchmark eval) supplies `regime` and `has_cut` computed from
+(service.infrastructure.engines / benchmark eval) supplies `regime` and `has_cut` computed from
 inbetween_copilot.signals. Decision order: scene_cut > camera_move > large_action,
 else pose_snap. `regime` is still accepted and recorded in evidence, but since the
 2026-07-03 recalibration it is evidence-only, not decision-bearing: tau_snap regimes

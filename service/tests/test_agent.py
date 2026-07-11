@@ -1,6 +1,6 @@
 """Tests for service/agent.py — UIA decide_agent."""
 from unittest.mock import MagicMock
-from service.agent import decide_agent
+from service.assistant.agent import decide_agent
 
 
 def _make_pair(index: int, action: str = "fill", qa_status: str = "pass"):
@@ -112,7 +112,7 @@ import cv2
 import numpy as np
 from fastapi.testclient import TestClient
 
-from service import state as state_mod
+from service.sessions.dependencies import default_session_repository
 from service.app import app
 
 
@@ -124,7 +124,7 @@ def test_agent_route_404_on_unknown_sid():
 
 def test_agent_route_degraded_shape(monkeypatch):
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)   # force degrade path
-    state_mod._state[91] = _state()
+    default_session_repository.states[91] = _state()
     c = TestClient(app)
     r = c.post("/session/91/agent", json={"message": "hi", "history": []})
     assert r.status_code == 200
@@ -200,8 +200,8 @@ def test_agent_route_keeps_history_server_side(monkeypatch):
             return '{"say":"Pair 1 ghosted.","tool":null,"args":null}'
         return fn
 
-    monkeypatch.setattr("service.director_llm.make_ask_fn", fake_make_ask_fn)
-    state_mod._state[92] = _state()
+    monkeypatch.setattr("service.infrastructure.director_llm.make_ask_fn", fake_make_ask_fn)
+    default_session_repository.states[92] = _state()
     c = TestClient(app)
     c.post("/session/92/agent", json={"message": "why flagged?"})
     c.post("/session/92/agent", json={"message": "and now?"})
@@ -211,7 +211,7 @@ def test_agent_route_keeps_history_server_side(monkeypatch):
 
 # --- v1.2: SSE streaming ----------------------------------------------------------
 def test_say_streamer_across_chunks_and_escapes():
-    from service.agent import _SayStreamer
+    from service.assistant.agent import _SayStreamer
     s = _SayStreamer()
     parts = ['{"say', '": "Hel', 'lo \\"wo', 'rld\\"\\nok", "tool": null}']
     out = "".join(s.feed(p) for p in parts)
@@ -220,7 +220,7 @@ def test_say_streamer_across_chunks_and_escapes():
 
 
 def test_decide_agent_stream_yields_say_deltas_then_decision():
-    from service.agent import decide_agent_stream
+    from service.assistant.agent import decide_agent_stream
 
     def fake_stream(p):
         yield '{"say": "Try '
@@ -235,7 +235,7 @@ def test_decide_agent_stream_yields_say_deltas_then_decision():
 
 
 def test_decide_agent_stream_degrades_without_fn():
-    from service.agent import decide_agent_stream
+    from service.assistant.agent import decide_agent_stream
     evs = list(decide_agent_stream(_state(), "hi", [], None))
     assert [e["event"] for e in evs] == ["decision"]
     assert evs[0]["data"]["grounded"] is False
@@ -247,18 +247,18 @@ def test_agent_stream_route_sse_contract(monkeypatch):
             yield '{"say": "Pair 1 ghosted.", "tool": null, "args": null}'
         return fn
 
-    monkeypatch.setattr("service.director_llm.make_ask_stream_fn", fake_make_stream)
-    state_mod._state[97] = _state()
+    monkeypatch.setattr("service.infrastructure.director_llm.make_ask_stream_fn", fake_make_stream)
+    default_session_repository.states[97] = _state()
     c = TestClient(app)
     r = c.post("/session/97/agent/stream", json={"message": "hi"})
     assert r.status_code == 200
     assert "event: say" in r.text and "event: decision" in r.text
-    chat = state_mod._state[97]["chat"]
+    chat = default_session_repository.states[97]["chat"]
     assert chat[-1] == {"role": "assistant", "text": "Pair 1 ghosted."}
 
 
 def test_make_ask_stream_fn_parses_deepseek_sse():
-    from service.director_llm import make_ask_stream_fn
+    from service.infrastructure.director_llm import make_ask_stream_fn
     lines = [
         b'data: {"choices":[{"delta":{"content":"He"}}]}\n',
         b'\n',
@@ -270,7 +270,7 @@ def test_make_ask_stream_fn_parses_deepseek_sse():
 
 
 def test_make_ask_stream_fn_none_without_key(monkeypatch):
-    from service.director_llm import make_ask_stream_fn
+    from service.infrastructure.director_llm import make_ask_stream_fn
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     assert make_ask_stream_fn() is None
 
@@ -285,20 +285,20 @@ def test_regenerate_reasks_last_user_turn(monkeypatch):
             return f'{{"say":"answer {len(prompts)}","tool":null,"args":null}}'
         return fn
 
-    monkeypatch.setattr("service.director_llm.make_ask_fn", fake_make_ask_fn)
-    state_mod._state[94] = _state()
+    monkeypatch.setattr("service.infrastructure.director_llm.make_ask_fn", fake_make_ask_fn)
+    default_session_repository.states[94] = _state()
     c = TestClient(app)
     c.post("/session/94/agent", json={"message": "why flagged?"})
     r = c.post("/session/94/agent", json={"regenerate": True})
     assert r.status_code == 200
     assert prompts[1].rstrip().endswith('USER: why flagged?\nJSON:')
-    chat = state_mod._state[94]["chat"]
+    chat = default_session_repository.states[94]["chat"]
     assert [t["role"] for t in chat] == ["user", "assistant"]   # no duplicate turns
     assert chat[-1]["text"] == "answer 2"                       # fresh reply replaced old
 
 
 def test_regenerate_422_when_nothing_to_regenerate():
-    state_mod._state[95] = _state()
+    default_session_repository.states[95] = _state()
     c = TestClient(app)
     assert c.post("/session/95/agent", json={"regenerate": True}).status_code == 422
 
@@ -306,7 +306,7 @@ def test_regenerate_422_when_nothing_to_regenerate():
 def test_agent_rate_limited_429(monkeypatch):
     monkeypatch.setenv("COPILOT_AGENT_RPM", "2")
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
-    state_mod._state[96] = _state()
+    default_session_repository.states[96] = _state()
     c = TestClient(app)
     assert c.post("/session/96/agent", json={"message": "1"}).status_code == 200
     assert c.post("/session/96/agent", json={"message": "2"}).status_code == 200
@@ -336,8 +336,8 @@ def test_followups_garbage_dropped():
 
 def test_agent_route_chat_turns_capped(monkeypatch):
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)   # degrade path still logs chat
-    state_mod._state[93] = _state()
+    default_session_repository.states[93] = _state()
     c = TestClient(app)
     for i in range(12):
         c.post("/session/93/agent", json={"message": f"msg {i}"})
-    assert len(state_mod._state[93]["chat"]) <= 16
+    assert len(default_session_repository.states[93]["chat"]) <= 16

@@ -9,7 +9,9 @@ pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient
 
 from service.app import app
-from service.state import _state
+from service.sessions.dependencies import default_session_repository
+
+session_states = default_session_repository.states
 
 
 def _png(v: int) -> io.BytesIO:
@@ -21,16 +23,16 @@ def _png(v: int) -> io.BytesIO:
 
 def test_stub_session_state_carries_explanations_and_qa_degraded():
     c = TestClient(app)
-    before = set(_state)
+    before = set(session_states)
     r = c.post("/session",
                files=[("keys", (f"{i}.png", _png(i * 60), "image/png")) for i in range(3)],
                data={"engines": "stub"})
     assert r.status_code == 200 and "event: result" in r.text
-    new_sids = set(_state) - before
-    assert new_sids, "session did not register in _state"
+    new_sids = set(session_states) - before
+    assert new_sids, "session did not register in the repository"
     sid = new_sids.pop()
-    assert isinstance(_state[sid]["explanations"], dict)
-    assert _state[sid]["qa_degraded"] is False   # stub engines: no VLM, not degraded
+    assert isinstance(session_states[sid]["explanations"], dict)
+    assert session_states[sid]["qa_degraded"] is False   # stub engines: no VLM, not degraded
 
 
 # --- Task 3: FeedbackRecord + build_feedback tests ---
@@ -38,7 +40,7 @@ def test_stub_session_state_carries_explanations_and_qa_degraded():
 from inbetween_copilot.pipeline.copilot import CopilotResult, PairResult
 from inbetween_copilot.qa.gate import FrameQA
 from service.feedback import build_feedback
-from service.schemas import SessionCfg
+from service.sessions.schemas import SessionCfg
 
 
 def _feedback_state():
@@ -94,7 +96,7 @@ def test_bad_pair_index_and_bad_vote_raise():
 # --- Task 4: feedback stores ---
 
 from service.feedback import FeedbackRecord
-from service.feedback_store import DynamoFeedbackStore, InMemoryFeedbackStore
+from service.feedback.adapters import DynamoFeedbackStore, InMemoryFeedbackStore
 
 
 def _rec(sid=1, pair=0, voter="anon", vote="up"):
@@ -145,7 +147,7 @@ def test_dynamo_from_row_parses_real_all_decimal_shape():
 
 
 def test_feedback_store_for_prefers_app_state_injection():
-    from service.feedback_store import feedback_store_for
+    from service.feedback.dependencies import feedback_store_for
 
     class App:
         class state:

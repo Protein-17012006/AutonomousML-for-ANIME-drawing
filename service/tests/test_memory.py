@@ -4,10 +4,10 @@ import time
 from fastapi.testclient import TestClient
 
 from service.app import app
-from service.auth import CognitoJwtVerifier
+from service.core.auth import CognitoJwtVerifier
 from service.memory import (MemoryCandidate, extract_candidates, new_memory,
                             render_confirmed_memories, validate_candidate)
-from service.memory_store import DynamoMemoryStore, InMemoryMemoryStore
+from service.memory.adapters import DynamoMemoryStore, InMemoryMemoryStore
 
 
 def _verifier(sub="user-1"):
@@ -54,7 +54,7 @@ def test_confirmed_only_memory_reaches_prompt_renderer():
 
 def test_confirmed_memory_reaches_uia_prompt_as_data():
     from unittest.mock import MagicMock
-    from service.agent import decide_agent
+    from service.assistant.agent import decide_agent
 
     result = MagicMock()
     result.pairs = []
@@ -148,18 +148,18 @@ def test_memory_api_requires_auth_and_supports_user_control():
 
 def test_extract_api_saves_candidate_not_confirmed(monkeypatch):
     from unittest.mock import MagicMock
-    from service import state as state_mod
+    from service.sessions.dependencies import default_session_repository
 
     old_verifier = getattr(app.state, "auth_verifier", None)
     old_store = getattr(app.state, "memory_store", None)
     app.state.auth_verifier = _verifier()
     app.state.memory_store = InMemoryMemoryStore()
-    state_mod._state[811] = {
+    default_session_repository.states[811] = {
         "chat": [{"role": "user", "text": "Please remember I prefer smoothness 2"}],
         "result": MagicMock(),
     }
     monkeypatch.setattr(
-        "service.director_llm.make_ask_fn",
+        "service.infrastructure.director_llm.make_ask_fn",
         lambda: lambda prompt: ('{"candidates":[{"kind":"preference",'
                                 '"key":"smoothness","value":"2",'
                                 '"confidence":0.99}]}'),
@@ -177,7 +177,7 @@ def test_extract_api_saves_candidate_not_confirmed(monkeypatch):
             app.state.memory_store.get("user-1", candidate["id"])
         ]) == "(none)"
     finally:
-        state_mod._state.pop(811, None)
+        default_session_repository.states.pop(811, None)
         if old_verifier is None:
             del app.state.auth_verifier
         else:

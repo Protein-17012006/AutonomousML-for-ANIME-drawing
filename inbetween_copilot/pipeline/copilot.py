@@ -61,7 +61,7 @@ class CopilotResult:
 def aggregate_result(pairs) -> CopilotResult:
     """Derive a CopilotResult's aggregates from a finished pairs list — the ONE
     place the pass/abstain/flag/corrected tally lives (P6, 2026-07-08). Used by
-    run_copilot at the end of PASS 2 and by service.runner.recompute_result after
+    run_copilot at the end of PASS 2 and by service.sessions.runner.recompute_result after
     a draw-key splice, which used to mirror this logic by hand."""
     flagged: list = []
     abstained: list = []
