@@ -27,6 +27,11 @@ class AskReq(BaseModel):
     question: str
 
 
+class AgentReq(BaseModel):
+    message: str
+    history: list[dict] = []
+
+
 @router.post("/session/{sid}/ask")
 def post_ask(sid: int, req: AskReq):
     """Grounded Q&A about a finished session (vault 'Chat-First Copilot Surface' §3).
@@ -38,6 +43,40 @@ def post_ask(sid: int, req: AskReq):
     from service.ask import answer_question
     from service.director_llm import make_ask_fn
     return answer_question(st, req.question, make_ask_fn())
+
+
+@router.post("/session/{sid}/agent")
+def post_agent(sid: int, req: AgentReq):
+    """UIA (agent #3): grounded chat + ONE validated tool proposal per turn.
+    The LLM proposes, the whitelist validates, the USER confirms anything that
+    costs GPU (see rerun below). Same degrade discipline as /ask — never 500."""
+    st = _state.get(sid)
+    if st is None:
+        raise HTTPException(status_code=404, detail="Unknown session (or no result yet)")
+    from service.agent import decide_agent
+    from service.director_llm import make_ask_fn
+    return decide_agent(st, req.message, req.history, make_ask_fn())
+
+
+@router.post("/session/{sid}/rerun")
+def post_rerun(sid: int, engines: str | None = Form(None),
+               cadence: int | None = Form(None),
+               smoothness: int | None = Form(None)):
+    """Confirmed UIA action: stream a NEW session from the RETAINED keys of `sid`
+    with overridden settings (missing field -> keep the session's current value).
+    Returns the same SSE stream as POST /session; a bad value 422s via
+    `_session_cfg_or_422` inside stream_session."""
+    st = _state.get(sid)
+    if st is None:
+        raise HTTPException(status_code=404, detail="Unknown session (or no result yet)")
+    from service.streaming import stream_session
+    cfg = st["cfg"]
+    return stream_session(
+        st["keys"],
+        engines if engines is not None else cfg.engines,
+        cadence_fps=cadence if cadence is not None else cfg.cadence_fps,
+        smoothness=smoothness if smoothness is not None else cfg.smoothness,
+    )
 
 
 @router.get("/session/{sid}/{name}")
