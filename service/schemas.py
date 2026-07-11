@@ -21,6 +21,9 @@ class SessionCfg(BaseModel):
     cadence_fps: int = 12      # nominal rate of the artist's keys (on-1s 24 / on-2s 12 / on-3s 8)
     smoothness: int = 2        # display depth: 1 Off / 2 Standard / 4 Extra
     fps: Optional[int] = None  # reconstructed-video playback rate; derived = cadence_fps*smoothness unless passed
+    # optional show/series tag — the per-show axis of flag-feedback calibration data
+    # (H3). Free-form short string; None = untagged pool.
+    show: Optional[str] = None
 
     @model_validator(mode="after")
     def _derive_fps(self):
@@ -30,6 +33,9 @@ class SessionCfg(BaseModel):
             raise ValueError("smoothness=4 (Extra) is gated; set COPILOT_SMOOTHNESS_X4 after the CSQ probe passes")
         if self.fps is None:
             object.__setattr__(self, "fps", self.cadence_fps * self.smoothness)
+        if self.show is not None:
+            s = self.show.strip()[:64]
+            object.__setattr__(self, "show", s or None)
         return self
 
 

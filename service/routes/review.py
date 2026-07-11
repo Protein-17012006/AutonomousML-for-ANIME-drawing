@@ -247,6 +247,8 @@ async def post_key(sid: int, index: int = Form(...), key: UploadFile = File(...)
     pair_files = build_pair_frames(new_result, session_dir)
 
     st["keys"], st["result"] = new_keys, new_result
+    st["explanations"] = explanations
+    st["qa_degraded"] = bool(eng.vlm_status.get("degraded"))
     st["rev"] = st.get("rev", 0) + 1
     bust = f"?r={st['rev']}"     # files are overwritten -> bust the browser cache by URL
     for i, fn in ann_files.items():
