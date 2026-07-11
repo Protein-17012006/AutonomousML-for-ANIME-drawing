@@ -1,5 +1,5 @@
-"""Session feature API: POST /session, /session/video, and planted demos.
-and the planted-error demo endpoints. All funnel into streaming.stream_session."""
+"""Session feature API: POST /session and /session/video.
+Both funnel into streaming.stream_session."""
 from __future__ import annotations
 
 from typing import List
@@ -54,31 +54,4 @@ async def post_session_video(
     }
     return stream_session(key_arrays, engines, cadence_fps=cadence_fps,
                            smoothness=smoothness, sampling=sampling, show=show or None,
-                           repository=repository)
-
-
-@router.get("/session/planted/cases")
-def get_planted_cases():
-    """Case list for the UI's planted-demo picker (labeled demo — see service/planted.py)."""
-    from service.media.planted import list_cases
-    return {"cases": list_cases()}
-
-
-@router.post("/session/planted")
-def post_session_planted(case: str = Form(...), engines: str = Form("box"),
-                         cadence: int = Form(12), smoothness: int = Form(2),
-                         repository: SessionRepository = Depends(get_session_repository)):
-    """PLANTED-ERROR demo session: a stored bad in-between from a frozen suite is planted
-    as the pair's fill, then the REAL QA/perception/annotate path judges it. Exists because
-    the live path yields no natural flags (the gate refuses ghost-prone pairs — probed
-    n=9+n=40); every event carries `planted` metadata so the UI labels it honestly."""
-    from service.media.planted import load_case, planted_overrides
-    try:
-        keys, mid, meta = load_case(case)
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"unknown planted case {case!r}")
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=503, detail=str(exc))
-    return stream_session(keys, engines, cadence_fps=cadence, smoothness=smoothness,
-                           sampling=meta, eng_override=planted_overrides(mid),
                            repository=repository)

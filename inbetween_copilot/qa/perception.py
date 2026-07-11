@@ -10,13 +10,12 @@ softness-only verdict, never raises.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 from inbetween_copilot.signals.prompt import _MOTION_PROMPT
 from inbetween_copilot.qa.csq.channels import channel_scores
 from inbetween_copilot.qa.csq.confidence import aggregate
 from inbetween_copilot.qa.csq.perturb import flip_rates, perturb_views
 from inbetween_copilot.qa.csq.verdict import Decision
+from inbetween_copilot.qa.models import QAVerdict
 
 _VALID_TYPES = {"ghost", "blur", "flicker", "morph", "identity_drift", "scene_break", "none"}
 _VALID_HINTS = {"tl", "tc", "tr", "ml", "mc", "mr", "bl", "bc", "br", "whole", "none"}
@@ -44,19 +43,6 @@ BINARY_PROMPT = (
     '"error_type": "ghost|blur|flicker|morph|identity_drift|scene_break|none", '
     '"region": "tl|tc|tr|ml|mc|mr|bl|bc|br|whole|none", "explanation": "<one sentence>"}'
 )
-
-
-@dataclass(frozen=True)
-class QAVerdict:
-    has_error: bool
-    err_type: str
-    region_hint: str
-    explanation: str
-    softness: float
-    hold_fixable: float = 0.0
-    decision: str = "flag"
-    p_error: float = 1.0
-    u: float = 0.0
 
 
 def perceive(frames, *, vlm_fn, softness_fn, holdfix_fn=None,

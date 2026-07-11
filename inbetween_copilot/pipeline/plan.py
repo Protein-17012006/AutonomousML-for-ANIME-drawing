@@ -6,23 +6,8 @@ to draw one more breakdown key. keys_needed names the *minimum* extra keys.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-
-
-@dataclass(frozen=True)
-class PairPlan:
-    index: int
-    gap: float
-    regime: str
-    action: str          # "fill" | "needs_key"
-    keys_to_request: int
-
-
-@dataclass
-class KeyPlan:
-    pairs: list[PairPlan]
-    total_keys_requested: int
-    n_fillable: int
+from inbetween_copilot.pipeline.plan_models import KeyPlan, PairPlan
+from inbetween_copilot.pipeline.states import PlanAction
 
 
 # Interpolable-gate threshold on gap_score: gap < TAU_GATE -> RIFE can interpolate;
@@ -57,10 +42,10 @@ def build_key_plan(gaps: list[float], regimes: list[str], *,
     pairs: list[PairPlan] = []
     for i, (g, r) in enumerate(zip(gaps, regimes)):
         if g < tau_gate:
-            pairs.append(PairPlan(index=i, gap=g, regime=r, action="fill", keys_to_request=0))
+            pairs.append(PairPlan(index=i, gap=g, regime=r, action=PlanAction.FILL, keys_to_request=0))
         else:
-            pairs.append(PairPlan(index=i, gap=g, regime=r, action="needs_key",
+            pairs.append(PairPlan(index=i, gap=g, regime=r, action=PlanAction.NEEDS_KEY,
                                   keys_to_request=int(keys_needed_fn(g))))
     total = sum(p.keys_to_request for p in pairs)
-    n_fillable = sum(1 for p in pairs if p.action == "fill")
+    n_fillable = sum(1 for p in pairs if p.action == PlanAction.FILL)
     return KeyPlan(pairs=pairs, total_keys_requested=total, n_fillable=n_fillable)

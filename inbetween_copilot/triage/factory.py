@@ -17,21 +17,13 @@ from __future__ import annotations
 def make_triage_fn(*, tau_hold: float, tau_snap: float, ask_fn=None):
     """Real triage: signals-based class + DeepSeek brief (template on any failure).
     ask_fn = director_llm.make_ask_fn() product, or None -> template-only."""
-    import dataclasses
+    from inbetween_copilot.triage.brief import LLMBriefWriter, TemplateBriefWriter
+    from inbetween_copilot.triage.service import TriagePair
 
-    from inbetween_copilot.signals.motion import gap_score
-    from inbetween_copilot.signals.regime import classify, scene_cut
-    from inbetween_copilot.triage.brief import brief_prompt, template_brief
-    from inbetween_copilot.triage.widegap import classify_gap
+    writer = LLMBriefWriter(ask_fn) if ask_fn is not None else TemplateBriefWriter()
+    service = TriagePair(tau_hold=tau_hold, tau_snap=tau_snap, brief_writer=writer)
 
     def triage_fn(a, b, pp):
-        has_cut = bool(scene_cut(a, b))
-        regime = classify([gap_score(a, b)], tau_hold=tau_hold,
-                          tau_snap=tau_snap, has_cut=has_cut)
-        t = classify_gap(a, b, gap=pp.gap, regime=regime, has_cut=has_cut)
-        brief = ""
-        if ask_fn is not None:
-            brief = (ask_fn(brief_prompt(t)) or "").strip()
-        return {**dataclasses.asdict(t), "brief": brief or template_brief(t)}
+        return service.execute(a, b, pp).to_payload()
 
     return triage_fn

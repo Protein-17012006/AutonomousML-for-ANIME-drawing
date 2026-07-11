@@ -148,8 +148,8 @@ def box_engines(cfg: SessionCfg) -> EngineBundle:
         }
 
     # --- CSQ artifact ---
-    from inbetween_copilot.qa.csq.artifact import load_artifact
-    art = load_artifact("inbetween_copilot/artifacts/csq_smallgap_v3.json")
+    from inbetween_copilot.infrastructure.artifact_json import CSQArtifactJsonStore
+    art = CSQArtifactJsonStore().load("inbetween_copilot/artifacts/csq_smallgap_v3.json")
 
     # --- AniSora placeholder (large-gap generator; out of slice-1.5 scope) ---
     # Real AniSora wiring is deferred: co-residency with the live VLM on 32GB VRAM
@@ -168,10 +168,10 @@ def box_engines(cfg: SessionCfg) -> EngineBundle:
               "ladder (decide_fixed), not the DeepSeek brain.",
               file=sys.stderr, flush=True)
 
-    from inbetween_copilot.pipeline.wiring import build_real_callables
+    from inbetween_copilot.composition import build_real_ports
     # ask_fn: wide-gap diagnosis (ADR-0015) gets an LLM-written brief when
     # DEEPSEEK_API_KEY is set; make_ask_fn() -> None degrades to template-only.
-    callables = build_real_callables(
+    ports = build_real_ports(
         None,
         tau_hold=BOX_TAU_HOLD,
         tau_snap=BOX_TAU_SNAP,
@@ -185,8 +185,8 @@ def box_engines(cfg: SessionCfg) -> EngineBundle:
     # surface the calibrated abstain band so the UI dial can draw the measured pass/abstain/flag
     # zones (per-u-bin thresholds on p_error) — the trust instrument, not just a bare %.
     cal = art.calibrator
-    return EngineBundle(
-        **callables,
+    return EngineBundle.from_ports(
+        ports,
         vlm_struct_fn=vlm_struct_fn,
         rife_engine=rife_engine,    # raw [a, mid, b] for the decimate-vs-GT demo
         vlm_status=vlm_status,      # degraded-QA flag -> ResultEvent.qa_degraded

@@ -10,18 +10,12 @@ Fails safe: bad/again output falls back to the fixed ladder for that round.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from inbetween_copilot.generate.models import (CorrectionAction,
+                                                CorrectionActionKind,
+                                                CorrectionMethod)
 
-_KINDS = {"region_refill", "escalate_engine", "ask_key"}
-_METHODS = {"hold_copy", "alt_engine"}
-
-
-@dataclass(frozen=True)
-class CorrectionAction:
-    kind: str
-    region: object          # Region | None
-    method: str
-    reason: str
+_KINDS = {item.value for item in CorrectionActionKind}
+_METHODS = {item.value for item in CorrectionMethod if item.value}
 
 
 def decide_fixed(verdict, region, attempts, *, tau_holdfix: float = 0.05) -> CorrectionAction:
@@ -44,7 +38,7 @@ def _director_prompt(verdict, attempts) -> str:
         f"region_hint={verdict.region_hint} softness={verdict.softness:.3f} "
         f"hold_fixable={verdict.hold_fixable:.2f}\n"
         f"explanation: {verdict.explanation}\n"
-        f"attempts so far: {[a.action_kind for a in attempts]}\n"
+        f"attempts so far: {[str(a.action_kind) for a in attempts]}\n"
         "Choose ONE next action to fix it: region_refill (re-fill only the bad "
         "region; cheap; good for a localized ghost), escalate_engine (redraw the "
         "whole pair with the stronger generator; for frame-wide breakdowns), or "

@@ -1,14 +1,15 @@
 """Session application runner: wraps run_copilot with pair-event callbacks."""
 from __future__ import annotations
 
-from inbetween_copilot.pipeline.copilot import aggregate_result, run_copilot, CopilotResult
+from inbetween_copilot.pipeline.copilot import aggregate_result, CopilotResult
+from inbetween_copilot.pipeline.service import RunCopilot
 from service.infrastructure.engine_bundle import EngineBundle
 
 
 def run_session(keys, engines: EngineBundle, on_pair=None) -> CopilotResult:
     if len(keys) < 2:
         raise ValueError("need >= 2 keys")
-    return run_copilot(keys, on_pair=on_pair, **engines.copilot_kwargs())
+    return RunCopilot(engines).execute(keys, on_pair=on_pair)
 
 
 def recompute_result(pairs) -> CopilotResult:

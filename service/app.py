@@ -67,11 +67,9 @@ async def _no_cache_html(request, call_next):
     return response
 
 
-# Order matters: /session/planted/cases must register before GET /session/{sid}/{name}
-# (an int-typed {sid} 422s on "planted" instead of falling through), the feedback
-# router must too (GET /session/{sid}/feedback would be swallowed by the artifact
-# route as name="feedback"), and the static mount must come last so API routes
-# take precedence.
+# Order matters: the feedback router must register before GET /session/{sid}/{name}
+# (GET /session/{sid}/feedback would be swallowed by the artifact route as
+# name="feedback"), and the static mount must come last so API routes take precedence.
 app.include_router(feedback_routes.router)
 app.include_router(session_routes.router)
 app.include_router(demo_routes.router)

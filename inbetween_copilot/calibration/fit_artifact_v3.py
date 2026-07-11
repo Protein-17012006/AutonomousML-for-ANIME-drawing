@@ -17,7 +17,8 @@ import numpy as np
 from PIL import Image
 
 from inbetween_copilot.qa.csq.conformal import fit
-from inbetween_copilot.qa.csq.artifact import CSQArtifact, save_artifact
+from inbetween_copilot.qa.csq.models import CSQArtifact
+from inbetween_copilot.infrastructure.artifact_json import CSQArtifactJsonStore
 from inbetween_copilot.qa.csq.features import clip_su
 
 CALIB = "benchmark/suites/suite_csq_calibration/manifest.json"
@@ -48,7 +49,7 @@ def main() -> int:
                       meta={"suite": "suite_smallgap", "n_fit": len(S), "n_err": int(sum(T)),
                             "note": "continuous VLM + content-relative sharpness (soft_worst); §5k+§5m"})
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
-    save_artifact(art, OUT)
+    CSQArtifactJsonStore().save(art, OUT)
     print(f"v3 fit n={len(S)} err={int(sum(T))} -> {OUT}")
     print(f"  a={cal.a:.4f} b={cal.b:.4f} tau_pass={tuple(round(x,3) for x in cal.tau_pass)} "
           f"tau_flag={tuple(round(x,3) for x in cal.tau_flag)}")

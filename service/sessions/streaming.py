@@ -72,8 +72,7 @@ def _workflow(repository: SessionRepository) -> RunSession:
 
 
 def stream_session(key_arrays: List[np.ndarray], engines: str, *, cadence_fps: int = 12,
-                   smoothness: int = 2, sampling: dict = None,
-                   eng_override: dict = None, show: str = None,
+                   smoothness: int = 2, sampling: dict = None, show: str = None,
                    repository: SessionRepository | None = None) -> StreamingResponse:
     """Start one run and adapt its pair/result callbacks to an SSE response."""
     cfg = _session_cfg_or_422(
@@ -84,8 +83,6 @@ def stream_session(key_arrays: List[np.ndarray], engines: str, *, cadence_fps: i
         eng = resolve(engines, cfg)
     except UnknownEngine as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if eng_override:
-        eng = eng.override(**eng_override)
 
     repository = repository or default_session_repository
     sid, session_dir = repository.create("copilot_session")

@@ -10,9 +10,9 @@ ADR-0015: this DIAGNOSES wide gaps; it never fills them.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 import numpy as np
+
+from inbetween_copilot.triage.models import GapTriage
 
 # Uncalibrated defaults = plan.py's historical buckets scaled to tau_gate. Task 10
 # (2026-07-03) attempted to refit these on suite_widegap_v1's 35 non-cut pairs via
@@ -67,14 +67,6 @@ def global_shift_fraction(a, b) -> float:
     if before <= 1e-6:
         return 0.0
     return max(0.0, min(1.0, 1.0 - after / before))
-
-
-@dataclass(frozen=True)
-class GapTriage:
-    cls: str            # "scene_cut" | "camera_move" | "pose_snap" | "large_action"
-    keys_suggested: int
-    confidence: str     # "high" (deterministic separators) | "medium" (default bucket)
-    evidence: dict
 
 
 def classify_gap(a, b, *, gap: float, regime: str, has_cut: bool,
