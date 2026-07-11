@@ -58,6 +58,27 @@ def post_agent(sid: int, req: AgentReq):
     return decide_agent(st, req.message, req.history, make_ask_fn())
 
 
+@router.post("/session/{sid}/rerun")
+def post_rerun(sid: int, engines: str | None = Form(None),
+               cadence: int | None = Form(None),
+               smoothness: int | None = Form(None)):
+    """Confirmed UIA action: stream a NEW session from the RETAINED keys of `sid`
+    with overridden settings (missing field -> keep the session's current value).
+    Returns the same SSE stream as POST /session; a bad value 422s via
+    `_session_cfg_or_422` inside stream_session."""
+    st = _state.get(sid)
+    if st is None:
+        raise HTTPException(status_code=404, detail="Unknown session (or no result yet)")
+    from service.streaming import stream_session
+    cfg = st["cfg"]
+    return stream_session(
+        st["keys"],
+        engines if engines is not None else cfg.engines,
+        cadence_fps=cadence if cadence is not None else cfg.cadence_fps,
+        smoothness=smoothness if smoothness is not None else cfg.smoothness,
+    )
+
+
 @router.get("/session/{sid}/{name}")
 async def get_artifact(sid: int, name: str):
     if sid not in _sessions:

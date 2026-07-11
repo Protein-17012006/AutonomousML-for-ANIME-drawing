@@ -99,3 +99,39 @@ def test_agent_route_degraded_shape(monkeypatch):
     assert r.status_code == 200
     body = r.json()
     assert body["grounded"] is False and body["action"] is None and body["say"]
+
+
+# --- Task A3: POST /session/{sid}/rerun (confirmed action, real stub session) ----
+import re
+
+import cv2
+import numpy as np
+
+
+def _png_bytes(shift: int) -> bytes:
+    img = np.zeros((64, 64, 3), np.uint8)
+    cv2.circle(img, (20 + shift, 32), 8, (255, 255, 255), -1)
+    return cv2.imencode(".png", img)[1].tobytes()
+
+
+def _open_stub_session(c: TestClient) -> int:
+    files = [("keys", ("0000.png", _png_bytes(0), "image/png")),
+             ("keys", ("0001.png", _png_bytes(6), "image/png"))]
+    r = c.post("/session", files=files, data={"engines": "stub"})
+    assert r.status_code == 200
+    return int(re.search(r"/session/(\d+)/", r.text).group(1))
+
+
+def test_rerun_streams_new_result_from_retained_keys():
+    c = TestClient(app)
+    sid = _open_stub_session(c)
+    r = c.post(f"/session/{sid}/rerun", data={"smoothness": "1"})
+    assert r.status_code == 200
+    assert "event: result" in r.text        # same SSE contract as POST /session
+
+
+def test_rerun_404_unknown_sid_and_422_bad_value():
+    c = TestClient(app)
+    assert c.post("/session/999/rerun", data={}).status_code == 404
+    sid = _open_stub_session(c)
+    assert c.post(f"/session/{sid}/rerun", data={"smoothness": "9"}).status_code == 422
