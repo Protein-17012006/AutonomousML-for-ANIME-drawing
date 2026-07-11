@@ -15,6 +15,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from service.routes import demo as demo_routes
+from service.routes import feedback as feedback_routes
 from service.routes import memory as memory_routes
 from service.routes import review as review_routes
 from service.routes import session as session_routes
@@ -64,8 +65,11 @@ async def _no_cache_html(request, call_next):
 
 
 # Order matters: /session/planted/cases must register before GET /session/{sid}/{name}
-# (an int-typed {sid} 422s on "planted" instead of falling through), and the static
-# mount must come last so API routes take precedence.
+# (an int-typed {sid} 422s on "planted" instead of falling through), the feedback
+# router must too (GET /session/{sid}/feedback would be swallowed by the artifact
+# route as name="feedback"), and the static mount must come last so API routes
+# take precedence.
+app.include_router(feedback_routes.router)
 app.include_router(session_routes.router)
 app.include_router(demo_routes.router)
 app.include_router(review_routes.router)

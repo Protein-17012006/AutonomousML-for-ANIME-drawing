@@ -59,7 +59,7 @@ def _drain_events(q: "queue.Queue", keepalive: "float | None" = None):
 
 def stream_session(key_arrays: List[np.ndarray], engines: str, *, cadence_fps: int = 12,
                     smoothness: int = 2, sampling: dict = None,
-                    eng_override: dict = None) -> StreamingResponse:
+                    eng_override: dict = None, show: str = None) -> StreamingResponse:
     """Run the co-pilot over `key_arrays` and stream the SSE decision-log + result.
     This is the shared body behind POST /session, /session/video and /session/planted.
     `cadence_fps`/`smoothness` (Smoothness Control) build `SessionCfg`, whose `fps`
@@ -68,7 +68,8 @@ def stream_session(key_arrays: List[np.ndarray], engines: str, *, cadence_fps: i
     "kept K of N frames (every S-th)" and flag a coarse auto-fit; it also gains the
     cadence/smoothness/output_fps/duration badge fields once the result is built.
     `eng_override` (planted-demo flow only) replaces named engine callables after the build."""
-    cfg = _session_cfg_or_422(engines=engines, cadence_fps=cadence_fps, smoothness=smoothness)
+    cfg = _session_cfg_or_422(engines=engines, cadence_fps=cadence_fps,
+                              smoothness=smoothness, show=show)
     eng = resolve(engines, cfg)
     if eng_override:
         eng = eng.override(**eng_override)
@@ -136,7 +137,9 @@ def stream_session(key_arrays: List[np.ndarray], engines: str, *, cadence_fps: i
                 # images (they're decoded server-side), so without these the review A/B cells
                 # render black. The PNG-upload UI ignores these (it has client object URLs).
                 key_files = build_key_frames(key_arrays, session_dir)
-                _state[sid] = {"keys": key_arrays, "eng": eng, "cfg": cfg, "result": result, "rev": 0}
+                _state[sid] = {"keys": key_arrays, "eng": eng, "cfg": cfg, "result": result,
+                               "rev": 0, "explanations": explanations,
+                               "qa_degraded": bool(eng.vlm_status.get("degraded"))}
                 pair_mids = {str(i): f"/session/{sid}/{fn}" for i, fn in pair_files.items()}
                 key_urls = {str(i): f"/session/{sid}/{fn}" for i, fn in key_files.items()}
                 artifact_urls = {

@@ -18,10 +18,12 @@ async def post_session(
     engines: str = Form("stub"),
     cadence: int = Form(12),
     smoothness: int = Form(2),
+    show: str = Form(""),
 ):
     if len(keys) < 2:
         raise HTTPException(status_code=400, detail="Need >= 2 key frames")
-    return stream_session(_load_keys(keys), engines, cadence_fps=cadence, smoothness=smoothness)
+    return stream_session(_load_keys(keys), engines, cadence_fps=cadence,
+                          smoothness=smoothness, show=show or None)
 
 
 @router.post("/session/video")
@@ -31,6 +33,7 @@ async def post_session_video(
     engines: str = Form("stub"),
     cadence: int = Form(12),
     smoothness: int = Form(2),
+    show: str = Form(""),
 ):
     """Drop-a-video session: decode the upload, keep every `stride`-th frame as the
     artist's keys, then run the SAME co-pilot session as POST /session. `cadence` (the
@@ -45,7 +48,7 @@ async def post_session_video(
         "kept": len(key_arrays),
     }
     return stream_session(key_arrays, engines, cadence_fps=cadence_fps,
-                           smoothness=smoothness, sampling=sampling)
+                           smoothness=smoothness, sampling=sampling, show=show or None)
 
 
 @router.get("/session/planted/cases")
