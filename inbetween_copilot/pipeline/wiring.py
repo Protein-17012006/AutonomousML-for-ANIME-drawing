@@ -150,7 +150,7 @@ def build_real_callables(spec: "CharacterSpec | None", *, tau_hold: float, tau_s
 
 def _assert_max_pixels_320():
     """Guard against the #1 operational trap: a served VLM launched with a stale
-    max_pixels (train/serve mismatch). Called from service.engines.box_engines at
+    max_pixels (train/serve mismatch). Called from service.infrastructure.engines.box_engines at
     engine-build time (the dead CLI stub that used to call it was removed in the
     2026-07-02 audit — the guard was unreachable in production)."""
     mp = os.environ.get("VISION_MAX_PIXELS_CHECK")

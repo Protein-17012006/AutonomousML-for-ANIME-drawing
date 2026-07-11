@@ -7,7 +7,7 @@ import jwt
 from cryptography.hazmat.primitives.asymmetric import rsa
 
 from service.app import app
-from service.auth import CognitoJwtVerifier
+from service.core.auth import CognitoJwtVerifier
 
 
 ISSUER = "https://cognito-idp.ap-southeast-1.amazonaws.com/pool-1"

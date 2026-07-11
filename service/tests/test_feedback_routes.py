@@ -7,9 +7,11 @@ from fastapi.testclient import TestClient
 from inbetween_copilot.pipeline.copilot import CopilotResult, PairResult
 from inbetween_copilot.qa.gate import FrameQA
 from service.app import app
-from service.feedback_store import InMemoryFeedbackStore
-from service.schemas import SessionCfg
-from service.state import _state
+from service.feedback.adapters import InMemoryFeedbackStore
+from service.sessions.dependencies import default_session_repository
+from service.sessions.schemas import SessionCfg
+
+session_states = default_session_repository.states
 
 SID = 90001
 
@@ -21,7 +23,7 @@ def client():
                    FrameQA("pass", "csq:pass", p_error=0.04, u=0.10), 0),
         PairResult(1, "needs_key", None, None, None, 1),
     ]
-    _state[SID] = {
+    session_states[SID] = {
         "result": CopilotResult(pairs=pairs, keys_requested_total=1, flagged=[],
                                 n_autopass=1, n_corrected=0),
         "cfg": SessionCfg(engines="stub", cadence_fps=12, smoothness=2, show="Wistoria"),
@@ -31,7 +33,7 @@ def client():
     }
     app.state.feedback_store = InMemoryFeedbackStore()
     yield TestClient(app)
-    _state.pop(SID, None)
+    session_states.pop(SID, None)
     app.state.feedback_store = None
 
 

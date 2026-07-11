@@ -1,0 +1,13 @@
+"""Persistence port for the memory feature."""
+from __future__ import annotations
+
+from typing import Protocol
+
+from service.memory.models import MemoryItem
+
+
+class MemoryStore(Protocol):
+    def list(self, user_sub: str) -> list[MemoryItem]: ...
+    def put(self, user_sub: str, item: MemoryItem) -> MemoryItem: ...
+    def get(self, user_sub: str, memory_id: str) -> MemoryItem | None: ...
+    def delete(self, user_sub: str, memory_id: str) -> bool: ...
