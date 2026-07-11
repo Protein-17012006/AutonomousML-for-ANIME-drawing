@@ -1,11 +1,8 @@
-# inbetween_copilot/pipeline/wiring.py
-"""Operational entrypoint: bind the real engines/QA into run_copilot.
+"""Compatibility composition module for production co-pilot ports.
 
-regime_fn   = smallgap.regime.classify over the pair's single step
-interp_fn   = hold/snap copy, or RIFE+hold-aware for small motion (box)
-qa_fn       = vision_common.vision_json with the (optionally spec-conditioned) prompt
-softness_fn = smallgap.softness_signal.interp_softness -> soft_mean
-gen_fn      = AniSora reference-conditioned A->M->B (box script)
+New callers should import :func:`build_real_ports` from
+``inbetween_copilot.composition``. ``build_real_callables`` remains for callers
+that still consume the historical dictionary contract.
 """
 from __future__ import annotations
 
@@ -13,55 +10,53 @@ import dataclasses
 import os
 import sys
 
+from inbetween_copilot.generate.correct import composite_region, hold_copy
+from inbetween_copilot.generate.director import decide, decide_fixed
+from inbetween_copilot.generate.localize import hold_fixable_fraction, localize_held_soft
+from inbetween_copilot.generate.service import CorrectInbetween
+from inbetween_copilot.infrastructure.vision_qa import VisionJSONQA
+from inbetween_copilot.pipeline.ports import CopilotPorts
+from inbetween_copilot.qa.csq.features import standard_channel_fns
+from inbetween_copilot.qa.csq.stillness import (
+    TAU_SRC_MOTION,
+    TAU_STILL,
+    motion_concentration,
+    window_source_motion,
+)
+from inbetween_copilot.qa.gate import frame_qa_from_verdict
+from inbetween_copilot.qa.perception import perceive, perceive_calibrated
+from inbetween_copilot.reporting.charspec import (
+    CharacterSpec,
+    condition_qa_prompt,
+    reference_frames_for_gen,
+)
 from inbetween_copilot.signals.motion import gap_score
+from inbetween_copilot.signals.prompt import _MOTION_PROMPT
 from inbetween_copilot.signals.regime import classify, scene_cut
 from inbetween_copilot.signals.softness import interp_softness
-from inbetween_copilot.signals.prompt import _MOTION_PROMPT   # the exact validated detector prompt
-from inbetween_copilot.reporting.charspec import (CharacterSpec, condition_qa_prompt,
-                                        reference_frames_for_gen)
-from inbetween_copilot.qa.perception import perceive, perceive_calibrated
-from inbetween_copilot.qa.gate import frame_qa_from_verdict
-from inbetween_copilot.qa.csq.features import standard_channel_fns
-from inbetween_copilot.qa.csq.stillness import (motion_concentration, TAU_STILL,
-                                             window_source_motion, TAU_SRC_MOTION)
-from inbetween_copilot.generate.localize import localize_held_soft, hold_fixable_fraction
-from inbetween_copilot.generate.director import decide, decide_fixed
-from inbetween_copilot.generate.correct import composite_region, hold_copy
-from inbetween_copilot.generate.correction import correct_inbetween
 from inbetween_copilot.triage.factory import make_triage_fn
 from inbetween_copilot.triage.widegap import keys_from_gap
 
 
-def build_real_callables(spec: "CharacterSpec | None", *, tau_hold: float, tau_snap: float,
-                         rife_engine, anisora_gen, breakdown_supply=None,
-                         vlm_fn=None, reason_fn=None, askkey_fn=None,
-                         use_director: bool = True, csq_artifact=None,
-                         ask_fn=None) -> dict:
+def build_real_ports(spec: "CharacterSpec | None", *, tau_hold: float, tau_snap: float,
+                     rife_engine, anisora_gen, breakdown_supply=None,
+                     vlm_fn=None, reason_fn=None, askkey_fn=None,
+                     use_director: bool = True, csq_artifact=None,
+                     ask_fn=None) -> CopilotPorts:
+    """Compose pure policies with the concrete engines supplied by infrastructure."""
+
     def regime_fn(a, b):
-        return classify([gap_score(a, b)], tau_hold=tau_hold, tau_snap=tau_snap,
-                        has_cut=scene_cut(a, b))
+        return classify(
+            [gap_score(a, b)], tau_hold=tau_hold, tau_snap=tau_snap,
+            has_cut=scene_cut(a, b),
+        )
 
     def interp_fn(route, a, b):
         if route in ("hold", "snap_preserve"):
-            return [a, a, b]            # copy/keep timing, never morph
-        return rife_engine(a, b)        # small -> RIFE + hold-aware (box)
+            return [a, a, b]
+        return rife_engine(a, b)
 
-    prompt = condition_qa_prompt(_MOTION_PROMPT, spec)
-
-    def qa_fn(frames):
-        # vision_json takes (prompt, image_paths) — write frames to temp PNGs and
-        # read the validated detector's verdict key, identical to motion_arms._run_arm.
-        import tempfile
-        from PIL import Image
-        from vision_common import vision_json
-        tmpdir = tempfile.mkdtemp(prefix="copilot_qa_")
-        paths = []
-        for i, fr in enumerate(frames):
-            p = os.path.join(tmpdir, f"{i:04d}.png")
-            Image.fromarray(fr).save(p)
-            paths.append(p)
-        reply = vision_json(prompt, paths, tier="check", max_tokens=800)
-        return bool(reply.get("has_motion_error"))
+    qa_fn = VisionJSONQA(condition_qa_prompt(_MOTION_PROMPT, spec))
 
     def softness_fn(frames):
         return float(interp_softness(frames)["soft_mean"])
@@ -69,42 +64,49 @@ def build_real_callables(spec: "CharacterSpec | None", *, tau_hold: float, tau_s
     def gen_fn(a, m, b):
         return anisora_gen(a, m, b, references=reference_frames_for_gen(spec))
 
-    # --- calibrated self-QA (CSQ) wiring, behind the artifact flag (CSQ Design §5d) ---
-    def _calibrated_verdict(frames):
-        # VLM is a CONSTANT channel under perturbation (computed once, flip_rate 0) --
-        # faithful to the Phase-1 calibration and 1 real VLM call; softness/sharpness
-        # recompute per perturbed view (the shared standard_channel_fns definition).
+    def calibrated_verdict(frames):
         raw = (vlm_fn(frames) if vlm_fn is not None else None) or {}
         vlm_err = bool(raw.get("has_motion_error"))
-        # §5k: a continuous artifact reads the served verdict_prob (P(error)); the
-        # binary artifact ignores it and uses the {0,1} verdict.
-        vlm_score = raw.get("verdict_prob") if csq_artifact.vlm_mode == "continuous" else None
-        channel_fns = standard_channel_fns(vlm_err, tau_soft=csq_artifact.tau_soft,
-                                           vlm_score=vlm_score,
-                                           sharp_mode=getattr(csq_artifact, "sharp_mode", "absolute"))
-        return perceive_calibrated(frames, channel_fns=channel_fns,
-                                   base_auc=csq_artifact.base_auc,
-                                   calibrator=csq_artifact.calibrator,
-                                   k=csq_artifact.k, lam=csq_artifact.lam,
-                                   stillness_fn=motion_concentration,        # §5h anti-Goodhart guard
-                                   tau_still=csq_artifact.meta.get("tau_still", TAU_STILL),
-                                   source_motion_fn=window_source_motion,    # §5n recall guard
-                                   tau_motion=csq_artifact.meta.get("tau_motion", TAU_SRC_MOTION))
+        vlm_score = (
+            raw.get("verdict_prob")
+            if csq_artifact.vlm_mode == "continuous" else None
+        )
+        channel_fns = standard_channel_fns(
+            vlm_err,
+            tau_soft=csq_artifact.tau_soft,
+            vlm_score=vlm_score,
+            sharp_mode=getattr(csq_artifact, "sharp_mode", "absolute"),
+        )
+        return perceive_calibrated(
+            frames,
+            channel_fns=channel_fns,
+            base_auc=csq_artifact.base_auc,
+            calibrator=csq_artifact.calibrator,
+            k=csq_artifact.k,
+            lam=csq_artifact.lam,
+            stillness_fn=motion_concentration,
+            tau_still=csq_artifact.meta.get("tau_still", TAU_STILL),
+            source_motion_fn=window_source_motion,
+            tau_motion=csq_artifact.meta.get("tau_motion", TAU_SRC_MOTION),
+        )
 
     def qa3_fn(frames):
-        return frame_qa_from_verdict(_calibrated_verdict(frames))
+        return frame_qa_from_verdict(calibrated_verdict(frames))
 
-    # --- correction loop wiring ---
     def perceive_fn(frames):
         if csq_artifact is None:
-            return perceive(frames, vlm_fn=vlm_fn, softness_fn=softness_fn,
-                            holdfix_fn=hold_fixable_fraction)
-        v = _calibrated_verdict(frames)
-        try:                                    # hold_fixable drives the director's region_refill/ask_key choice
-            hf = float(hold_fixable_fraction(frames))
+            return perceive(
+                frames,
+                vlm_fn=vlm_fn,
+                softness_fn=softness_fn,
+                holdfix_fn=hold_fixable_fraction,
+            )
+        verdict = calibrated_verdict(frames)
+        try:
+            hold_fixable = float(hold_fixable_fraction(frames))
         except Exception:
-            hf = 0.0
-        return dataclasses.replace(v, hold_fixable=hf)
+            hold_fixable = 0.0
+        return dataclasses.replace(verdict, hold_fixable=hold_fixable)
 
     def decide_fn(verdict, region, attempts):
         if use_director and reason_fn is not None:
@@ -113,49 +115,58 @@ def build_real_callables(spec: "CharacterSpec | None", *, tau_hold: float, tau_s
 
     def refill_fn(frames, a, b, region):
         if not region.mask:
-            return list(frames)                     # nothing hold-fixable -> NO-OP (let the loop escalate)
-        fill = hold_copy(a, b, len(frames))         # anti-ghost source copies
-        return composite_region(frames, fill, region)
+            return list(frames)
+        return composite_region(frames, hold_copy(a, b, len(frames)), region)
 
     def escalate_fn(a, b):
-        # AniSora endpoint-conditioned; no artist breakdown at the escalate rung,
-        # so the start key stands in as the placeholder mid.
         return anisora_gen(a, a, b, references=reference_frames_for_gen(spec))
 
     def split_fill_fn(a, m, b):
         return rife_engine(a, m) + rife_engine(m, b)
 
-    def corrector(frames, a, b):
-        return correct_inbetween(
-            frames, a, b, perceive_fn=perceive_fn, localize_fn=localize_held_soft,
-            decide_fn=decide_fn, refill_fn=refill_fn, escalate_fn=escalate_fn,
-            askkey_fn=(askkey_fn or (lambda a, b: None)), split_fill_fn=split_fill_fn)
+    corrector = CorrectInbetween(
+        perceive_fn=perceive_fn,
+        localize_fn=localize_held_soft,
+        decide_fn=decide_fn,
+        refill_fn=refill_fn,
+        escalate_fn=escalate_fn,
+        askkey_fn=askkey_fn or (lambda a, b: None),
+        split_fill_fn=split_fill_fn,
+    ).execute
 
-    # wide-gap diagnosis (ADR-0015): signals-based class + template brief; box_engines
-    # passes ask_fn=make_ask_fn() for the LLM-written brief (was: built twice — once
-    # here with ask_fn=None, then overridden). keys_needed_fn drives the plan's actual
-    # keys_to_request/keys_requested count with the SAME calibrated buckets triage.
-    # keys_suggested uses, so the two no longer diverge (Task 10 fixes the
-    # keys_requested-vs-keys_suggested split noted at Task 8).
-    triage_fn = make_triage_fn(tau_hold=tau_hold, tau_snap=tau_snap, ask_fn=ask_fn)
-    keys_needed_fn = lambda g: keys_from_gap(g)
+    return CopilotPorts(
+        gap_fn=gap_score,
+        regime_fn=regime_fn,
+        interp_fn=interp_fn,
+        qa_fn=qa_fn,
+        softness_fn=softness_fn,
+        triage_fn=make_triage_fn(
+            tau_hold=tau_hold, tau_snap=tau_snap, ask_fn=ask_fn,
+        ),
+        keys_needed_fn=keys_from_gap,
+        gen_fn=gen_fn,
+        breakdown_supply=breakdown_supply,
+        corrector=corrector,
+        qa3_fn=qa3_fn if csq_artifact is not None else None,
+        qa_window=True,
+    )
 
-    return {"gap_fn": gap_score, "regime_fn": regime_fn, "interp_fn": interp_fn,
-            "qa_fn": qa_fn, "softness_fn": softness_fn, "gen_fn": gen_fn,
-            "breakdown_supply": breakdown_supply, "corrector": corrector,
-            "qa3_fn": (qa3_fn if csq_artifact is not None else None),
-            "triage_fn": triage_fn, "keys_needed_fn": keys_needed_fn,
-            "qa_window": True}
+
+def build_real_callables(*args, **kwargs) -> dict:
+    """Compatibility facade for the legacy dictionary contract."""
+    return build_real_ports(*args, **kwargs).as_kwargs()
 
 
 def _assert_max_pixels_320():
-    """Guard against the #1 operational trap: a served VLM launched with a stale
-    max_pixels (train/serve mismatch). Called from service.infrastructure.engines.box_engines at
-    engine-build time (the dead CLI stub that used to call it was removed in the
-    2026-07-02 audit — the guard was unreachable in production)."""
-    mp = os.environ.get("VISION_MAX_PIXELS_CHECK")
-    if mp is None:
-        print("[WARN] VISION_MAX_PIXELS_CHECK not set — cannot verify served max_pixels==320 (stale-copy gotcha)",
-              file=sys.stderr)
-    elif mp != "320":
-        raise SystemExit(f"[ABORT] served max_pixels={mp!r}, expected 320 (stale-copy gotcha)")
+    """Abort when the served VLM resolution does not match calibration."""
+    max_pixels = os.environ.get("VISION_MAX_PIXELS_CHECK")
+    if max_pixels is None:
+        print(
+            "[WARN] VISION_MAX_PIXELS_CHECK not set -- cannot verify "
+            "served max_pixels==320",
+            file=sys.stderr,
+        )
+    elif max_pixels != "320":
+        raise SystemExit(
+            f"[ABORT] served max_pixels={max_pixels!r}, expected 320"
+        )

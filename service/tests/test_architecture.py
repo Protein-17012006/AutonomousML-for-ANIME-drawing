@@ -6,6 +6,8 @@ import importlib.util
 from pathlib import Path
 
 from service.sessions.repository import InMemorySessionRepository
+from inbetween_copilot.pipeline.ports import CopilotPorts
+from service.infrastructure.engine_bundle import EngineBundle
 
 
 SERVICE_ROOT = Path(__file__).parents[1]
@@ -46,6 +48,10 @@ def test_engine_adapter_is_framework_independent():
         name.startswith("fastapi") for name in _imports("infrastructure/engines.py"))
 
 
+def test_service_engine_bundle_extends_core_owned_ports():
+    assert issubclass(EngineBundle, CopilotPorts)
+
+
 def test_compatibility_modules_are_removed():
     for name in REMOVED_COMPAT_MODULES:
         assert not (SERVICE_ROOT / f"{name}.py").exists(), name
@@ -54,6 +60,8 @@ def test_compatibility_modules_are_removed():
     assert not (SERVICE_ROOT / "sessions" / "state.py").exists()
     assert not (SERVICE_ROOT / "memory" / "repository.py").exists()
     assert not (SERVICE_ROOT / "feedback" / "repository.py").exists()
+    # planted-error demo removed 2026-07-11 (user decision) — must not regrow
+    assert not (SERVICE_ROOT / "media" / "planted.py").exists()
 
 
 def test_in_memory_repository_owns_state_and_bounded_paths(tmp_path):

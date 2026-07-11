@@ -39,21 +39,30 @@ def _tile_bounds(h: int, w: int, grid: int, r: int, c: int):
     return (r * h // grid, (r + 1) * h // grid, c * w // grid, (c + 1) * w // grid)
 
 
-def localize_softness(frames, *, grid: int = 4, top_k: int = 2) -> Region:
+def _tile_softness_map(frames, grid: int):
+    """[((r, c), softness)] for every tile — the ONE spatial-softness body shared by
+    localize_softness / localize_held_soft / hold_fixable_fraction (it used to be
+    copy-pasted in all three, a 3-way drift hazard). softness = 1 - interp/source
+    tile sharpness. Empty list when the window has no source or no interp frames."""
     arrs = [np.asarray(f) for f in frames]
-    src = arrs[0::2]
-    interp = arrs[1::2]
+    src, interp = arrs[0::2], arrs[1::2]
     if not src or not interp:
-        return Region(grid=grid, mask=())
+        return []
     h, w = arrs[0].shape[:2]
-    scored = []
+    out = []
     for r in range(grid):
         for c in range(grid):
             y0, y1, x0, x1 = _tile_bounds(h, w, grid, r, c)
             s = float(np.mean([frame_sharpness(a[y0:y1, x0:x1]) for a in src]))
             m = float(np.mean([frame_sharpness(a[y0:y1, x0:x1]) for a in interp]))
-            soft = 1.0 - (m / s if s > _EPS else 1.0)
-            scored.append(((r, c), soft))
+            out.append(((r, c), 1.0 - (m / s if s > _EPS else 1.0)))
+    return out
+
+
+def localize_softness(frames, *, grid: int = 4, top_k: int = 2) -> Region:
+    scored = _tile_softness_map(frames, grid)
+    if not scored:
+        return Region(grid=grid, mask=())
     scored.sort(key=lambda t: t[1], reverse=True)
     mask = tuple(rc for rc, soft in scored[:top_k] if soft > _EPS)
     return Region(grid=grid, mask=mask)
@@ -108,23 +117,11 @@ def localize_held_soft(
     Empty mask means no qualifying tile (either flat clip, no soft tiles, or all soft tiles
     are moving).
     """
-    arrs = [np.asarray(f) for f in frames]
-    src = arrs[0::2]
-    interp = arrs[1::2]
-    if not src or not interp:
+    tiles = _tile_softness_map(frames, grid)
+    if not tiles:
         return Region(grid=grid, mask=())
-    h, w = arrs[0].shape[:2]
-
-    qualified = []
-    for r in range(grid):
-        for c in range(grid):
-            y0, y1, x0, x1 = _tile_bounds(h, w, grid, r, c)
-            s_sharp = float(np.mean([frame_sharpness(a[y0:y1, x0:x1]) for a in src]))
-            m_sharp = float(np.mean([frame_sharpness(a[y0:y1, x0:x1]) for a in interp]))
-            softness = 1.0 - (m_sharp / s_sharp if s_sharp > _EPS else 1.0)
-            if softness > soft_thr and _tile_motion(frames, grid, r, c) < tau_motion:
-                qualified.append(((r, c), softness))
-
+    qualified = [(rc, soft) for rc, soft in tiles
+                 if soft > soft_thr and _tile_motion(frames, grid, *rc) < tau_motion]
     qualified.sort(key=lambda t: t[1], reverse=True)
     return Region(grid=grid, mask=tuple(rc for rc, _ in qualified))
 
@@ -145,24 +142,10 @@ def hold_fixable_fraction(
     probe (held tiles Q1 motion<0.006 gave +5.15 dB hold-vs-interp). UNCALIBRATED
     on other content. Reference-free (no GT) -> deployable.
     """
-    arrs = [np.asarray(f) for f in frames]
-    src = arrs[0::2]
-    interp = arrs[1::2]
-    if not src or not interp:
+    soft_tiles = [(rc, soft) for rc, soft in _tile_softness_map(frames, grid)
+                  if soft > soft_thr]
+    if not soft_tiles:
         return 0.0
-    h, w = arrs[0].shape[:2]
-
-    n_soft = 0
-    n_held_and_soft = 0
-    for r in range(grid):
-        for c in range(grid):
-            y0, y1, x0, x1 = _tile_bounds(h, w, grid, r, c)
-            s_sharp = float(np.mean([frame_sharpness(a[y0:y1, x0:x1]) for a in src]))
-            m_sharp = float(np.mean([frame_sharpness(a[y0:y1, x0:x1]) for a in interp]))
-            softness = 1.0 - (m_sharp / s_sharp if s_sharp > _EPS else 1.0)
-            if softness > soft_thr:
-                n_soft += 1
-                if _tile_motion(frames, grid, r, c) < tau_motion:
-                    n_held_and_soft += 1
-
-    return float(n_held_and_soft / n_soft) if n_soft > 0 else 0.0
+    n_held = sum(1 for rc, _ in soft_tiles
+                 if _tile_motion(frames, grid, *rc) < tau_motion)
+    return float(n_held / len(soft_tiles))

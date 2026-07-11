@@ -9,11 +9,11 @@ is injected -- this module has no torch/cv2/network.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 from inbetween_copilot.pipeline.plan import build_key_plan, TAU_GATE
+from inbetween_copilot.pipeline.models import CopilotCfg, CopilotResult, PairResult
 from inbetween_copilot.pipeline.route import choose_route
-from inbetween_copilot.pipeline.states import CorrectionStatus, PairAction, QAStatus, Route
+from inbetween_copilot.pipeline.states import (CorrectionStatus, PairAction,
+                                                PlanAction, QAStatus, Route)
 from inbetween_copilot.qa.gate import frame_qa, FrameQA
 from inbetween_copilot.qa.window import windows_for_run
 
@@ -24,38 +24,6 @@ def _qa_for(frames, qa_fn, softness_fn, qa3_fn, tau_soft):
     if qa3_fn is not None:
         return qa3_fn(frames)
     return frame_qa(qa_fn(frames), softness_fn(frames), tau_soft=tau_soft)
-
-
-@dataclass
-class CopilotCfg:
-    tau_gate: float = TAU_GATE   # recalibrated 0.18 -> 0.017 (see plan.TAU_GATE)
-    tau_soft: float = 0.15
-
-
-@dataclass
-class PairResult:
-    index: int
-    action: str               # PairAction value ("filled" | "generated" | "needs_key")
-    route: str | None
-    frames: list | None
-    qa: FrameQA | None
-    keys_requested: int
-    correction: object = None  # CorrectionResult | None
-    triage: object = None      # dict payload for gate-refused pairs (ADR-0015) | None
-
-
-@dataclass
-class CopilotResult:
-    pairs: list
-    keys_requested_total: int
-    flagged: list
-    n_autopass: int
-    n_corrected: int = 0
-    abstained: list = None     # indices the calibrated QA was unsure about -> artist review
-
-    def __post_init__(self):
-        if self.abstained is None:
-            self.abstained = []
 
 
 def aggregate_result(pairs) -> CopilotResult:
@@ -92,9 +60,10 @@ def run_copilot(keys, *, gap_fn, regime_fn, interp_fn, qa_fn, softness_fn,
                 gen_fn=None, breakdown_supply=None, corrector=None, qa3_fn=None,
                 triage_fn=None, keys_needed_fn=None,
                 on_pair=None, qa_window=False,
-                cfg: CopilotCfg = CopilotCfg()) -> CopilotResult:
+                cfg: CopilotCfg | None = None) -> CopilotResult:
     if len(keys) < 2:
         raise ValueError("run_copilot needs >= 2 keys")
+    cfg = cfg or CopilotCfg(tau_gate=TAU_GATE)
     gaps = [gap_fn(keys[i], keys[i + 1]) for i in range(len(keys) - 1)]
     regimes = [regime_fn(keys[i], keys[i + 1]) for i in range(len(keys) - 1)]
     plan = build_key_plan(gaps, regimes, tau_gate=cfg.tau_gate, keys_needed_fn=keys_needed_fn)
@@ -105,7 +74,7 @@ def run_copilot(keys, *, gap_fn, regime_fn, interp_fn, qa_fn, softness_fn,
     filled: list = []          # (pair_index, [a, mid, b]) for windowing
     for pp in plan.pairs:
         a, b = keys[pp.index], keys[pp.index + 1]
-        if pp.action == "fill":
+        if pp.action == PlanAction.FILL:
             route = choose_route(pp.regime)
             frames = interp_fn(route, a, b)
             prelim.append((pp, PairAction.FILLED, route, frames))

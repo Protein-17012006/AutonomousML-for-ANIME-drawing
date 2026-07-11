@@ -60,7 +60,7 @@ def test_x4_rejected_server_side():
 
 
 def test_unknown_tool_dropped():
-    fn = lambda p: '{"say": "ok", "tool": "run_planted", "args": {}}'
+    fn = lambda p: '{"say": "ok", "tool": "delete_session", "args": {}}'
     out = decide_agent(_state(), "demo an error", [], ask_fn=fn)
     assert out["action"] is None
 

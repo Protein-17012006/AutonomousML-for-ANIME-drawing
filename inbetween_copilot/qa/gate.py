@@ -6,20 +6,8 @@ This never drops or ships silently: a flag routes the frame to the artist.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 from inbetween_copilot.pipeline.states import QAStatus
-
-
-@dataclass(frozen=True)
-class FrameQA:
-    status: str   # QAStatus value ("pass" | "flag" | "abstain"; abstain = calibrated path only)
-    reason: str
-    # Typed CSQ numbers (P2+D, 2026-07-08): the service used to regex-parse these
-    # back OUT of the reason string ("csq:… p=… u=…") — a reformat silently killed
-    # the UI confidence meter. The note stays human-readable; the numbers ride typed.
-    p_error: "float | None" = None
-    u: "float | None" = None
+from inbetween_copilot.qa.models import FrameQA
 
 
 def frame_qa(has_error: bool, softness: float, *, tau_soft: float = 0.15) -> FrameQA:

@@ -50,24 +50,6 @@ Return JSON: {"has_motion_error": true or false, "explanation": "<one sentence>"
 # carry unintended rendering degradation (smear/melt/ghost/warp/wobble) the
 # identity arm passes. This arm asks ONLY about rendering breakdown, decoupled
 # from "is it the same person". Same binary verdict contract as the other arms.
-_ARTIFACT_PROMPT = """\
-These are consecutive frames of one short animation clip, in order. Judge ONLY
-the visual INTEGRITY of how the character is RENDERED across the frames — not
-whether it stays the same person, not the story.
-
-Flag an error if the character shows UNINTENDED generative degradation across the
-frames: features smearing or melting, edges liquefying, ghosting or doubling,
-limbs blurring into paste, or the face / body proportions wobbling or warping
-from one frame to the next.
-
-Intentional anime stylization (smears, speed lines, squash-and-stretch), ordinary
-camera moves, head turns and expression changes are NOT errors. A deliberate
-stylistic effect (magic swirl, aura, particles, glow) is NOT an error by itself —
-only flag it if the CHARACTER itself dissolves or loses coherent form. Only flag a
-genuine rendering breakdown / distortion of the character.
-
-Return JSON: {"has_motion_error": true or false, "explanation": "<one sentence>"}"""
-
 
 def _as_bool(v):
     if isinstance(v, bool):
@@ -144,13 +126,6 @@ def run_anchor_arm(suite_dir: str, manifest: MotionManifest) -> dict[str, dict]:
     """Anchor-conditioned arm (IVC, design §3a): first/last frames are the trusted
     reference; flag identity/style drift away from them (_ANCHOR_PROMPT)."""
     return _run_arm(suite_dir, manifest, _ANCHOR_PROMPT)
-
-
-def run_artifact_arm(suite_dir: str, manifest: MotionManifest) -> dict[str, dict]:
-    """Visual-integrity arm: flag unintended rendering degradation (smear/melt/
-    ghost/warp/wobble) regardless of identity (_ARTIFACT_PROMPT). Targets the
-    artifact axis the identity/motion prompts miss (suite_identity re-audit)."""
-    return _run_arm(suite_dir, manifest, _ARTIFACT_PROMPT)
 
 
 # Environment/FX framing (Phase C) — judge the SCENE + effects, not the character.
