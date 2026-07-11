@@ -4,7 +4,10 @@ Registered LAST: GET /session/{sid}/{name} is the broadest matcher."""
 from __future__ import annotations
 
 import io
+import json
+import os
 import pathlib
+import time
 import zipfile
 
 import numpy as np
@@ -28,8 +31,25 @@ class AskReq(BaseModel):
 
 
 class AgentReq(BaseModel):
-    message: str
+    message: str = ""
+    regenerate: bool = False   # true -> re-ask the last user turn (message ignored)
     # v1.1: history is server-side (_state[sid]["chat"]); extra client keys are ignored.
+
+
+_agent_calls: dict[int, list] = {}   # sid -> monotonic timestamps inside the window
+
+
+def _agent_rate_ok(sid: int) -> bool:
+    """Per-session sliding 60s window on the LLM-backed agent endpoints."""
+    rpm = int(os.environ.get("COPILOT_AGENT_RPM", "20"))
+    now = time.monotonic()
+    calls = [t for t in _agent_calls.get(sid, []) if now - t < 60]
+    if len(calls) >= rpm:
+        _agent_calls[sid] = calls
+        return False
+    calls.append(now)
+    _agent_calls[sid] = calls
+    return True
 
 
 @router.post("/session/{sid}/ask")
@@ -50,16 +70,57 @@ def post_agent(sid: int, req: AgentReq):
     """UIA (agent #3): grounded chat + ONE validated tool proposal per turn.
     The LLM proposes, the whitelist validates, the USER confirms anything that
     costs GPU (see rerun below). Same degrade discipline as /ask — never 500.
-    Chat history lives server-side in _state[sid]["chat"] (v1.1)."""
+    Chat history lives server-side in _state[sid]["chat"] (v1.1).
+    regenerate=true re-asks the last user turn and replaces the last reply (v1.2)."""
     st = _state.get(sid)
     if st is None:
         raise HTTPException(status_code=404, detail="Unknown session (or no result yet)")
+    if not _agent_rate_ok(sid):
+        raise HTTPException(status_code=429, detail="Agent rate limit reached; retry shortly")
     from service.agent import append_chat, decide_agent
     from service.director_llm import make_ask_fn
-    out = decide_agent(st, req.message, st.get("chat", []), make_ask_fn())
+
+    chat = st.get("chat", [])
+    if req.regenerate:
+        if chat and chat[-1]["role"] == "assistant":
+            chat.pop()
+        if not chat or chat[-1]["role"] != "user":
+            raise HTTPException(status_code=422, detail="Nothing to regenerate yet")
+        out = decide_agent(st, chat[-1]["text"], chat[:-1], make_ask_fn())
+        append_chat(st, "assistant", out["say"])
+        return out
+
+    out = decide_agent(st, req.message, chat, make_ask_fn())
     append_chat(st, "user", req.message)
     append_chat(st, "assistant", out["say"])
     return out
+
+
+@router.post("/session/{sid}/agent/stream")
+def post_agent_stream(sid: int, req: AgentReq):
+    """SSE sibling of /agent (v1.2): `event: say` text deltas while the LLM talks,
+    then one final `event: decision` with the same JSON /agent would return.
+    Degrade = a single decision event; history handling identical to /agent."""
+    st = _state.get(sid)
+    if st is None:
+        raise HTTPException(status_code=404, detail="Unknown session (or no result yet)")
+    if not _agent_rate_ok(sid):
+        raise HTTPException(status_code=429, detail="Agent rate limit reached; retry shortly")
+    from service.agent import append_chat, decide_agent_stream
+    from service.director_llm import make_ask_stream_fn
+
+    def gen():
+        final = None
+        for ev in decide_agent_stream(st, req.message, st.get("chat", []),
+                                      make_ask_stream_fn()):
+            if ev["event"] == "decision":
+                final = ev["data"]
+            yield (f"event: {ev['event']}\n"
+                   f"data: {json.dumps(ev['data'], ensure_ascii=False)}\n\n")
+        append_chat(st, "user", req.message)
+        append_chat(st, "assistant", (final or {}).get("say", ""))
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
 
 
 @router.post("/session/{sid}/rerun")
