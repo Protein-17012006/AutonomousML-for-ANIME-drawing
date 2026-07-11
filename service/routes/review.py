@@ -12,7 +12,7 @@ import zipfile
 
 import numpy as np
 from PIL import Image
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
@@ -52,6 +52,16 @@ def _agent_rate_ok(sid: int) -> bool:
     return True
 
 
+def _user_memories(request: Request):
+    """Confirmed memory is available only for a verified Cognito identity."""
+    user = getattr(request.state, "user", None)
+    if user is None:
+        return []
+    from service.memory_store import memory_store_for
+    return [m for m in memory_store_for(request.app).list(user.sub)
+            if m.status == "confirmed"]
+
+
 @router.post("/session/{sid}/ask")
 def post_ask(sid: int, req: AskReq):
     """Grounded Q&A about a finished session (vault 'Chat-First Copilot Surface' §3).
@@ -66,7 +76,7 @@ def post_ask(sid: int, req: AskReq):
 
 
 @router.post("/session/{sid}/agent")
-def post_agent(sid: int, req: AgentReq):
+def post_agent(sid: int, req: AgentReq, request: Request):
     """UIA (agent #3): grounded chat + ONE validated tool proposal per turn.
     The LLM proposes, the whitelist validates, the USER confirms anything that
     costs GPU (see rerun below). Same degrade discipline as /ask — never 500.
@@ -86,18 +96,19 @@ def post_agent(sid: int, req: AgentReq):
             chat.pop()
         if not chat or chat[-1]["role"] != "user":
             raise HTTPException(status_code=422, detail="Nothing to regenerate yet")
-        out = decide_agent(st, chat[-1]["text"], chat[:-1], make_ask_fn())
+        out = decide_agent(st, chat[-1]["text"], chat[:-1], make_ask_fn(),
+                           _user_memories(request))
         append_chat(st, "assistant", out["say"])
         return out
 
-    out = decide_agent(st, req.message, chat, make_ask_fn())
+    out = decide_agent(st, req.message, chat, make_ask_fn(), _user_memories(request))
     append_chat(st, "user", req.message)
     append_chat(st, "assistant", out["say"])
     return out
 
 
 @router.post("/session/{sid}/agent/stream")
-def post_agent_stream(sid: int, req: AgentReq):
+def post_agent_stream(sid: int, req: AgentReq, request: Request):
     """SSE sibling of /agent (v1.2): `event: say` text deltas while the LLM talks,
     then one final `event: decision` with the same JSON /agent would return.
     Degrade = a single decision event; history handling identical to /agent."""
@@ -108,11 +119,12 @@ def post_agent_stream(sid: int, req: AgentReq):
         raise HTTPException(status_code=429, detail="Agent rate limit reached; retry shortly")
     from service.agent import append_chat, decide_agent_stream
     from service.director_llm import make_ask_stream_fn
+    memories = _user_memories(request)
 
     def gen():
         final = None
         for ev in decide_agent_stream(st, req.message, st.get("chat", []),
-                                      make_ask_stream_fn()):
+                                      make_ask_stream_fn(), memories):
             if ev["event"] == "decision":
                 final = ev["data"]
             yield (f"event: {ev['event']}\n"
