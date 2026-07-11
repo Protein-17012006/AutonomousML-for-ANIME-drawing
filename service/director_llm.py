@@ -105,3 +105,60 @@ def make_ask_fn(*, api_key: str | None = None, base_url: str | None = None,
             return ""
 
     return ask_fn
+
+
+def _default_stream_opener(url: str, body: bytes, headers: dict):
+    req = urllib.request.Request(url, data=body, headers=headers)
+    resp = urllib.request.urlopen(req, timeout=120)
+    yield from resp
+
+
+def make_ask_stream_fn(*, api_key: str | None = None, base_url: str | None = None,
+                       model: str | None = None, max_tokens: int = 512, opener=None):
+    """Streaming sibling of make_ask_fn (UIA /agent/stream): returns a function
+    that yields reply-text deltas from DeepSeek's SSE (`stream: true`). Yields
+    nothing on any failure (the caller then serves the fallback decision);
+    None when no API key is configured."""
+    api_key = (api_key if api_key is not None
+               else os.environ.get("DEEPSEEK_API_KEY", "")).strip()
+    if not api_key:
+        return None
+    base = (base_url or os.environ.get("DEEPSEEK_BASE_URL")
+            or "https://api.deepseek.com/v1").rstrip("/")
+    model = model or os.environ.get("DEEPSEEK_MODEL", "").strip() or "deepseek-chat"
+    op = opener or _default_stream_opener
+    url = base + "/chat/completions"
+    eff_max = max_tokens + (_REASONING_HEADROOM
+                            if any(t in model for t in _REASONING_MODELS) else 0)
+    headers = {"Content-Type": "application/json",
+               "Authorization": f"Bearer {api_key}"}
+    _warned = []
+
+    def ask_stream_fn(prompt: str):
+        body = json.dumps({
+            "model": model, "temperature": 0, "max_tokens": eff_max, "stream": True,
+            "messages": [{"role": "user", "content": prompt}],
+        }).encode()
+        try:
+            for line in op(url, body, headers):
+                if isinstance(line, bytes):
+                    line = line.decode("utf-8", "replace")
+                line = line.strip()
+                if not line.startswith("data:"):
+                    continue
+                payload = line[len("data:"):].strip()
+                if payload == "[DONE]":
+                    break
+                delta = (json.loads(payload)["choices"][0]
+                         .get("delta", {}).get("content") or "")
+                if delta:
+                    yield delta
+        except Exception as e:
+            if not _warned:
+                print(f"[director_llm] DeepSeek stream at {url} died ({e!r}); "
+                      f"the agent stream serves its fallback decision.",
+                      file=sys.stderr, flush=True)
+                _warned.append(True)
+            return
+
+    return ask_stream_fn
