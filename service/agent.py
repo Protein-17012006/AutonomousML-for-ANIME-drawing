@@ -1,4 +1,5 @@
 """User-Interaction Agent (UIA, agent #3).
+
 decide_agent() extends ask.py's grounded-Q&A with ONE optional tool
 proposal per turn. Degrades cleanly when LLM is unavailable — never raises.
 """
@@ -9,6 +10,17 @@ from service.ask import build_session_context, fallback_answer
 _ALLOWED_CADENCE = {24, 12, 8}
 _ALLOWED_SMOOTHNESS = {1, 2}   # x4 descoped 2026-07-06
 _ALLOWED_ENGINES = {"box", "stub"}
+
+_MAX_TURN_CHARS = 400    # per history turn reaching the prompt
+_MAX_MSG_CHARS = 2000    # user message reaching the prompt (and chat storage)
+MAX_CHAT_TURNS = 16      # server-side retention in _state[sid]["chat"]
+
+
+def append_chat(state: dict, role: str, text: str) -> None:
+    """Server-side chat log (v1.1): the route owns persistence, oldest turns fall off."""
+    chat = state.setdefault("chat", [])
+    chat.append({"role": role, "text": str(text or "")[:_MAX_MSG_CHARS]})
+    del chat[:-MAX_CHAT_TURNS]
 
 def _valid_index(args: dict, n_pairs: int) -> bool:
     return isinstance(args.get("index"), int) and 0 <= args["index"] < n_pairs
@@ -38,7 +50,10 @@ def _prompt(ctx: str, hist: str, q: str) -> str:
         '  open_board    args {"index": int}\n'
         '  export_bundle args {}\n'
         '  rerun_session args {"cadence": 24|12|8|null, "smoothness": 1|2|null, "engines": "box"|"stub"|null}\n'
-        'Reply STRICT JSON only: {"say": "<=100 words", "tool": <name or null>, "args": <object or null>}\n\n'
+        'Reply STRICT JSON only: {"say": "<=100 words", "tool": <name or null>, "args": <object or null>}\n'
+        "Rules: reply in the language of the user's LATEST message (ignore the "
+        "language of earlier turns); propose a tool ONLY when the user's request "
+        "calls for one — otherwise tool=null.\n\n"
         "SESSION FACTS:\n" + ctx + "\n\nCHAT SO FAR:\n" + (hist or "(none)") +
         "\n\nUSER: " + q + "\nJSON:"
     )
@@ -46,7 +61,9 @@ def _prompt(ctx: str, hist: str, q: str) -> str:
 def decide_agent(state: dict, message: str, history: list[dict], ask_fn) -> dict:
     """Returns {say, grounded, action}. Never raises."""
     ctx = build_session_context(state)
-    hist = "\n".join(f"{t.get('role','user')}: {t.get('text','')}" for t in history[-8:])
+    message = str(message or "")[:_MAX_MSG_CHARS]
+    hist = "\n".join(f"{t.get('role','user')}: {t.get('text','')[:_MAX_TURN_CHARS]}"
+                     for t in history[-8:])
 
     if ask_fn is None:
         return {"say": fallback_answer(ctx), "grounded": False, "action": None}

@@ -29,7 +29,7 @@ class AskReq(BaseModel):
 
 class AgentReq(BaseModel):
     message: str
-    history: list[dict] = []
+    # v1.1: history is server-side (_state[sid]["chat"]); extra client keys are ignored.
 
 
 @router.post("/session/{sid}/ask")
@@ -49,13 +49,17 @@ def post_ask(sid: int, req: AskReq):
 def post_agent(sid: int, req: AgentReq):
     """UIA (agent #3): grounded chat + ONE validated tool proposal per turn.
     The LLM proposes, the whitelist validates, the USER confirms anything that
-    costs GPU (see rerun below). Same degrade discipline as /ask — never 500."""
+    costs GPU (see rerun below). Same degrade discipline as /ask — never 500.
+    Chat history lives server-side in _state[sid]["chat"] (v1.1)."""
     st = _state.get(sid)
     if st is None:
         raise HTTPException(status_code=404, detail="Unknown session (or no result yet)")
-    from service.agent import decide_agent
+    from service.agent import append_chat, decide_agent
     from service.director_llm import make_ask_fn
-    return decide_agent(st, req.message, req.history, make_ask_fn())
+    out = decide_agent(st, req.message, st.get("chat", []), make_ask_fn())
+    append_chat(st, "user", req.message)
+    append_chat(st, "assistant", out["say"])
+    return out
 
 
 @router.post("/session/{sid}/rerun")

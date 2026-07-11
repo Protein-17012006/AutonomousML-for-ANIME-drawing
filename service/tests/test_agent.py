@@ -79,6 +79,10 @@ def test_history_reaches_prompt():
 
 
 # --- Task A2: POST /session/{sid}/agent (route) ---------------------------------
+import re
+
+import cv2
+import numpy as np
 from fastapi.testclient import TestClient
 
 from service import state as state_mod
@@ -102,12 +106,6 @@ def test_agent_route_degraded_shape(monkeypatch):
 
 
 # --- Task A3: POST /session/{sid}/rerun (confirmed action, real stub session) ----
-import re
-
-import cv2
-import numpy as np
-
-
 def _png_bytes(shift: int) -> bytes:
     img = np.zeros((64, 64, 3), np.uint8)
     cv2.circle(img, (20 + shift, 32), 8, (255, 255, 255), -1)
@@ -135,3 +133,58 @@ def test_rerun_404_unknown_sid_and_422_bad_value():
     assert c.post("/session/999/rerun", data={}).status_code == 404
     sid = _open_stub_session(c)
     assert c.post(f"/session/{sid}/rerun", data={"smoothness": "9"}).status_code == 422
+
+
+# --- v1.1 hardening: server-side history + caps + prompt rules -------------------
+def _capture_fn(seen):
+    def fn(p):
+        seen["p"] = p
+        return '{"say":"ok","tool":null,"args":null}'
+    return fn
+
+
+def test_prompt_has_language_and_tool_restraint_rules():
+    seen = {}
+    decide_agent(_state(), "hi", [], ask_fn=_capture_fn(seen))
+    assert "language of the user's LATEST message" in seen["p"]
+    assert "ONLY when the user's request calls for" in seen["p"]
+
+
+def test_history_turn_text_is_capped():
+    seen = {}
+    hist = [{"role": "user", "text": "z" * 10_000}]
+    decide_agent(_state(), "hi", hist, ask_fn=_capture_fn(seen))
+    assert len(seen["p"]) < 5_000
+
+
+def test_user_message_is_capped():
+    seen = {}
+    decide_agent(_state(), "y" * 10_000, [], ask_fn=_capture_fn(seen))
+    assert len(seen["p"]) < 5_000
+
+
+def test_agent_route_keeps_history_server_side(monkeypatch):
+    prompts = []
+
+    def fake_make_ask_fn(**kw):
+        def fn(p):
+            prompts.append(p)
+            return '{"say":"Pair 1 ghosted.","tool":null,"args":null}'
+        return fn
+
+    monkeypatch.setattr("service.director_llm.make_ask_fn", fake_make_ask_fn)
+    state_mod._state[92] = _state()
+    c = TestClient(app)
+    c.post("/session/92/agent", json={"message": "why flagged?"})
+    c.post("/session/92/agent", json={"message": "and now?"})
+    assert "why flagged?" in prompts[1]        # user turn persisted server-side
+    assert "Pair 1 ghosted." in prompts[1]     # assistant turn persisted too
+
+
+def test_agent_route_chat_turns_capped(monkeypatch):
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)   # degrade path still logs chat
+    state_mod._state[93] = _state()
+    c = TestClient(app)
+    for i in range(12):
+        c.post("/session/93/agent", json={"message": f"msg {i}"})
+    assert len(state_mod._state[93]["chat"]) <= 16
