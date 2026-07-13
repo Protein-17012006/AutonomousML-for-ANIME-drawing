@@ -4,9 +4,10 @@ from __future__ import annotations
 import io
 import zipfile
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 
+from service.core.auth import request_user_sub
 from service.core.dependencies import get_session_repository
 from service.core.errors import InvalidGapIndex, SessionNotFound
 from service.review.service import ReviewSession
@@ -18,7 +19,7 @@ router = APIRouter()
 
 
 @router.post("/session/{sid}/rerun")
-def post_rerun(sid: int, engines: str | None = Form(None),
+def post_rerun(sid: int, request: Request, engines: str | None = Form(None),
                cadence: int | None = Form(None),
                smoothness: int | None = Form(None),
                sessions: SessionRepository = Depends(get_session_repository)):
@@ -33,6 +34,7 @@ def post_rerun(sid: int, engines: str | None = Form(None),
         cadence_fps=cadence if cadence is not None else cfg.cadence_fps,
         smoothness=smoothness if smoothness is not None else cfg.smoothness,
         repository=sessions,
+        owner_sub=request_user_sub(request),
     )
 
 

@@ -146,6 +146,11 @@ def authenticate_request(request: Request) -> CurrentUser:
         ) from exc
 
 
+def request_user_sub(request: Request) -> str | None:
+    """Stable Cognito sub set by the auth middleware; None on the anonymous dev path."""
+    return getattr(getattr(request.state, "user", None), "sub", None)
+
+
 def require_current_user(request: Request) -> CurrentUser:
     user = getattr(request.state, "user", None)
     if user is None:
