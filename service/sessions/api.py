@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from typing import List
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 
+from service.core.auth import request_user_sub
 from service.core.dependencies import get_session_repository
 from service.media.ingest import _load_frames_from_video, _load_keys
 from service.sessions.repository import SessionRepository
@@ -16,6 +17,7 @@ router = APIRouter()
 
 @router.post("/session")
 async def post_session(
+    request: Request,
     keys: List[UploadFile] = File(...),
     engines: str = Form("stub"),
     cadence: int = Form(12),
@@ -27,11 +29,12 @@ async def post_session(
         raise HTTPException(status_code=400, detail="Need >= 2 key frames")
     return stream_session(_load_keys(keys), engines, cadence_fps=cadence,
                           smoothness=smoothness, show=show or None,
-                          repository=repository)
+                          repository=repository, owner_sub=request_user_sub(request))
 
 
 @router.post("/session/video")
 async def post_session_video(
+    request: Request,
     video: UploadFile = File(...),
     stride: int = Form(2),
     engines: str = Form("stub"),
@@ -54,4 +57,4 @@ async def post_session_video(
     }
     return stream_session(key_arrays, engines, cadence_fps=cadence_fps,
                            smoothness=smoothness, sampling=sampling, show=show or None,
-                           repository=repository)
+                           repository=repository, owner_sub=request_user_sub(request))

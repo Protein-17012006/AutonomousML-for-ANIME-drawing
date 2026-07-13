@@ -50,6 +50,20 @@ async def _cognito_session_gate(request: Request, call_next):
                     headers=exc.headers,
                 )
             raise
+
+    # Session ownership: a session created by a verified Cognito user is invisible
+    # to everyone else — same 404 wording as an unknown sid so strangers cannot
+    # even confirm it exists. Enforced here (not per-route) so every current and
+    # future /session/{sid}/* route inherits the isolation.
+    segments = request.url.path.strip("/").split("/")
+    if (request.method != "OPTIONS" and len(segments) >= 2
+            and segments[0] == "session" and segments[1].isdigit()):
+        owner = session_repository_for(request.app).owner_for(int(segments[1]))
+        if owner is not None:
+            user = getattr(request.state, "user", None)
+            if user is None or user.sub != owner:
+                return JSONResponse(status_code=404,
+                                    content={"detail": "Unknown session (or no result yet)"})
     return await call_next(request)
 
 

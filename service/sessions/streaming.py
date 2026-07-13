@@ -73,7 +73,8 @@ def _workflow(repository: SessionRepository) -> RunSession:
 
 def stream_session(key_arrays: List[np.ndarray], engines: str, *, cadence_fps: int = 12,
                    smoothness: int = 2, sampling: dict = None, show: str = None,
-                   repository: SessionRepository | None = None) -> StreamingResponse:
+                   repository: SessionRepository | None = None,
+                   owner_sub: str | None = None) -> StreamingResponse:
     """Start one run and adapt its pair/result callbacks to an SSE response."""
     cfg = _session_cfg_or_422(
         engines=engines, cadence_fps=cadence_fps,
@@ -86,6 +87,8 @@ def stream_session(key_arrays: List[np.ndarray], engines: str, *, cadence_fps: i
 
     repository = repository or default_session_repository
     sid, session_dir = repository.create("copilot_session")
+    if owner_sub:
+        repository.set_owner(sid, owner_sub)
 
     def generate():
         events = queue.Queue()
