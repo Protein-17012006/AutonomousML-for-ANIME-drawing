@@ -21,6 +21,13 @@ class PairAction(str, Enum):
     NEEDS_KEY = "needs_key"
 
 
+class PlanAction(str, Enum):
+    """PairPlan.action -- whether a pair may be filled or needs another key."""
+    __str__ = str.__str__
+    FILL = "fill"
+    NEEDS_KEY = "needs_key"
+
+
 class QAStatus(str, Enum):
     """FrameQA.status — the 3-state self-QA outcome (abstain = calibrated path only)."""
     __str__ = str.__str__

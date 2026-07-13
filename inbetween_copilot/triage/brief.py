@@ -6,7 +6,27 @@ path builds brief_prompt() and sends it through director_llm.make_ask_fn.
 """
 from __future__ import annotations
 
-from inbetween_copilot.triage.widegap import GapTriage
+from inbetween_copilot.triage.models import GapTriage
+
+
+class TemplateBriefWriter:
+    def __call__(self, triage: GapTriage) -> str:
+        return template_brief(triage)
+
+
+class LLMBriefWriter:
+    """LLM strategy decorated with deterministic fallback behavior."""
+
+    def __init__(self, ask_fn, fallback=None):
+        self.ask_fn = ask_fn
+        self.fallback = fallback or TemplateBriefWriter()
+
+    def __call__(self, triage: GapTriage) -> str:
+        try:
+            brief = (self.ask_fn(brief_prompt(triage)) or "").strip()
+        except Exception:
+            brief = ""
+        return brief or self.fallback(triage)
 
 _TEMPLATES = {
     "scene_cut": ("These two keys belong to different shots — do not in-between "

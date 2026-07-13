@@ -11,13 +11,60 @@ from __future__ import annotations
 
 import os
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
-from service.routes import demo as demo_routes
-from service.routes import review as review_routes
-from service.routes import session as session_routes
+from service.assistant import api as assistant_routes
+from service.core.dependencies import session_repository_for
+from service.feedback import api as feedback_routes
+from service.media import api as demo_routes
+from service.memory import api as memory_routes
+from service.review import api as review_routes
+from service.sessions import api as session_routes
 
 app = FastAPI(title="In-Between Co-pilot Service")
+app.state.session_repository = session_repository_for()
+
+
+@app.middleware("http")
+async def _cognito_session_gate(request: Request, call_next):
+    """Single-login Stage-3 gate.
+
+    The SPA/login assets stay public.  Production can require the same Cognito
+    bearer token on every GPU/session route without re-introducing ALB's second
+    interactive login.  The flag defaults off for local stub development.
+    """
+    from service.core.auth import auth_required, authenticate_request
+
+    has_bearer = request.headers.get("Authorization", "").lower().startswith("bearer ")
+    if ((auth_required() or has_bearer) and request.method != "OPTIONS"
+            and request.url.path.startswith("/session")):
+        try:
+            request.state.user = authenticate_request(request)
+        except Exception as exc:
+            from fastapi import HTTPException
+            if isinstance(exc, HTTPException):
+                return JSONResponse(
+                    status_code=exc.status_code,
+                    content={"detail": exc.detail},
+                    headers=exc.headers,
+                )
+            raise
+
+    # Session ownership: a session created by a verified Cognito user is invisible
+    # to everyone else — same 404 wording as an unknown sid so strangers cannot
+    # even confirm it exists. Enforced here (not per-route) so every current and
+    # future /session/{sid}/* route inherits the isolation.
+    segments = request.url.path.strip("/").split("/")
+    if (request.method != "OPTIONS" and len(segments) >= 2
+            and segments[0] == "session" and segments[1].isdigit()):
+        owner = session_repository_for(request.app).owner_for(int(segments[1]))
+        if owner is not None:
+            user = getattr(request.state, "user", None)
+            if user is None or user.sub != owner:
+                return JSONResponse(status_code=404,
+                                    content={"detail": "Unknown session (or no result yet)"})
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -34,12 +81,15 @@ async def _no_cache_html(request, call_next):
     return response
 
 
-# Order matters: /session/planted/cases must register before GET /session/{sid}/{name}
-# (an int-typed {sid} 422s on "planted" instead of falling through), and the static
-# mount must come last so API routes take precedence.
+# Order matters: the feedback router must register before GET /session/{sid}/{name}
+# (GET /session/{sid}/feedback would be swallowed by the artifact route as
+# name="feedback"), and the static mount must come last so API routes take precedence.
+app.include_router(feedback_routes.router)
 app.include_router(session_routes.router)
 app.include_router(demo_routes.router)
+app.include_router(assistant_routes.router)
 app.include_router(review_routes.router)
+app.include_router(memory_routes.router)
 
 
 # --- static web UI: mounted LAST so the API routes above take precedence ---
