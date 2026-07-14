@@ -6,15 +6,17 @@ assembly and this second, hand-rolled VLM path is one visible module instead of
 a closure. (vision_common/client.py stays the CLOUD/tier client; the box path
 deliberately posts raw to the served endpoint — no SDK, no tier routing.)
 
-FAIL-SAFE contract (unchanged): if the served VLM is unreachable or errors
-(e.g. Errno 111 when serve.sh isn't running), post() returns {} so QA degrades
-to the softness/gate signals — perceive() and the CSQ channels treat {} as a
-benign no-error verdict. The `status` dict flips {"degraded": True} so the
-worker can surface ResultEvent.qa_degraded (audit 2026-07-02 finding #6).
+FAIL-SAFE contract: if the served VLM is unreachable or errors (e.g. Errno 111
+when serve.sh isn't running), post() returns {} and flips the mutable status to
+{"degraded": True}. The engine adapter preserves that absence explicitly so
+the calibrated QA path abstains; transport failure must never become a benign
+"no motion error" vote.
 """
 from __future__ import annotations
 
 import sys
+
+from service.core.json_tools import first_json_object
 
 
 def make_post_vlm(url: str, model: str, *, timeout: float = 180):
@@ -27,7 +29,6 @@ def make_post_vlm(url: str, model: str, *, timeout: float = 180):
     def post(prompt, frames):
         import base64
         import json
-        import re
         import urllib.request
 
         import cv2
@@ -46,13 +47,12 @@ def make_post_vlm(url: str, model: str, *, timeout: float = 180):
         try:
             txt = json.loads(urllib.request.urlopen(req, timeout=timeout).read()
                              )["choices"][0]["message"]["content"]
-            m = re.search(r"\{.*\}", txt, re.S)
-            return json.loads(m.group(0)) if m else {}
+            return first_json_object(txt) or {}
         except Exception as e:
             status["degraded"] = True
             if not warned:
-                print(f"[box_vlm] VLM at {url} unavailable ({e!r}); QA degrades "
-                      f"to softness/gate. Start it on the box with: serve.sh 320 "
+                print(f"[box_vlm] VLM at {url} unavailable ({e!r}); QA will "
+                      f"abstain. Start it on the box with: serve.sh 320 "
                       f"~/anime-ft-data/motion/runs/motion_lora16_on2s_v2",
                       file=sys.stderr, flush=True)
                 warned.append(True)

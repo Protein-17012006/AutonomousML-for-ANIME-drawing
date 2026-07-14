@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from inbetween_copilot.pipeline.states import QAStatus
+from inbetween_copilot.domain.states import QAStatus
 
 
 @dataclass(frozen=True)

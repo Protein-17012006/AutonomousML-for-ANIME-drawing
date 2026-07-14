@@ -14,6 +14,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from service.core.json_tools import first_json_object
+
 
 MemoryKind = Literal["preference", "show_context"]
 MemoryStatus = Literal["candidate", "confirmed", "dismissed"]
@@ -114,7 +116,9 @@ def extract_candidates(chat: list[dict], ask_fn) -> list[MemoryCandidate]:
         return []
     try:
         raw = ask_fn(extraction_prompt(chat))
-        doc = json.loads(raw[raw.index("{"):raw.rindex("}") + 1])
+        doc = first_json_object(raw)
+        if doc is None:
+            return []
         rows = doc.get("candidates", [])
         if not isinstance(rows, list):
             return []

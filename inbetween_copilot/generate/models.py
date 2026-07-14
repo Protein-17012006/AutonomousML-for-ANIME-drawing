@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
-from inbetween_copilot.pipeline.states import CorrectionStatus
+from inbetween_copilot.domain.states import CorrectionStatus
 
 
 class CorrectionActionKind(str, Enum):

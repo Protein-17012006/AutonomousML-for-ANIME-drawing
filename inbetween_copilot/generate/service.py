@@ -4,17 +4,26 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from inbetween_copilot.generate.correction import correct_inbetween
+from inbetween_copilot.generate.ports import (
+    AskKey,
+    Decide,
+    Escalate,
+    Localize,
+    Perceive,
+    Refill,
+    SplitFill,
+)
 
 
 @dataclass(frozen=True)
 class CorrectInbetween:
-    perceive_fn: object
-    localize_fn: object
-    decide_fn: object
-    refill_fn: object
-    escalate_fn: object
-    askkey_fn: object
-    split_fill_fn: object
+    perceive_fn: Perceive
+    localize_fn: Localize
+    decide_fn: Decide
+    refill_fn: Refill
+    escalate_fn: Escalate
+    askkey_fn: AskKey
+    split_fill_fn: SplitFill
     max_rounds: int = 3
 
     def execute(self, frames, a, b):

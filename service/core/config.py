@@ -1,28 +1,424 @@
-"""Environment-backed service settings.
+"""Validated, environment-backed settings at service boundaries.
 
-Only this module knows the environment variable names used by the service.  The
-rest of the application asks small functions for the value it needs, which keeps
-configuration parsing out of feature and infrastructure modules.
+Settings are deliberately split by consumer and are not cached.  Long-lived
+runtime assets may be cached by their infrastructure adapter, but reading the
+configuration itself remains deterministic and friendly to process/test env
+overrides.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 import os
+from pathlib import Path
+from urllib.parse import urlparse
+
+
+class ConfigurationError(RuntimeError):
+    """An environment setting is missing or cannot satisfy its contract."""
+
+
+_TRUE = {"1", "true", "yes", "on"}
+_FALSE = {"", "0", "false", "no", "off"}
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def env_bool(name: str, default: bool = False) -> bool:
+    """Compatibility flag parser used by existing feature toggles.
+
+    Keep the historical permissive semantics here: any non-false value enables
+    the flag.  New typed settings use the strict parser below.
+    """
     value = os.environ.get(name)
     if value is None:
         return default
-    return value.strip().lower() not in {"", "0", "false", "no", "off"}
+    return value.strip().lower() not in _FALSE
+
+
+def _strict_bool(name: str, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    normalized = value.strip().lower()
+    if normalized in _TRUE:
+        return True
+    if normalized in _FALSE:
+        return False
+    raise ConfigurationError(
+        f"{name} must be one of 1/0, true/false, yes/no, or on/off"
+    )
+
+
+def _text(name: str, default: str | None = None, *, required: bool = False) -> str | None:
+    raw = os.environ.get(name)
+    value = raw.strip() if raw is not None else default
+    if required and not value:
+        raise ConfigurationError(f"{name} is required")
+    return value or None
+
+
+def _integer(name: str, default: int, *, minimum: int | None = None) -> int:
+    raw = os.environ.get(name)
+    try:
+        value = default if raw is None else int(raw.strip())
+    except (AttributeError, ValueError) as exc:
+        raise ConfigurationError(f"{name} must be an integer") from exc
+    if minimum is not None and value < minimum:
+        raise ConfigurationError(f"{name} must be >= {minimum}; got {value}")
+    return value
+
+
+def _number(name: str, default: float, *, minimum: float | None = None) -> float:
+    raw = os.environ.get(name)
+    try:
+        value = default if raw is None else float(raw.strip())
+    except (AttributeError, ValueError) as exc:
+        raise ConfigurationError(f"{name} must be a number") from exc
+    if minimum is not None and value < minimum:
+        raise ConfigurationError(f"{name} must be >= {minimum}; got {value}")
+    return value
+
+
+def _choice(name: str, default: str, allowed: set[str]) -> str:
+    value = (_text(name, default) or "").lower()
+    if value not in allowed:
+        choices = " or ".join(sorted(allowed))
+        raise ConfigurationError(f"{name} must be {choices}; got {value!r}")
+    return value
+
+
+@dataclass(frozen=True)
+class SessionSettings:
+    max_sessions: int = 8
+    sse_keepalive_seconds: float = 15.0
+
+    @classmethod
+    def from_env(cls) -> "SessionSettings":
+        return cls(
+            max_sessions=_integer("COPILOT_MAX_SESSIONS", 8, minimum=1),
+            sse_keepalive_seconds=_number(
+                "COPILOT_SSE_KEEPALIVE", 15.0, minimum=0.0
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class AdmissionSettings:
+    max_concurrent_sessions: int = 8
+    max_concurrent_gpu_jobs: int = 1
+    queue_size: int = 8
+    queue_timeout_seconds: float = 30.0
+
+    @classmethod
+    def from_env(cls) -> "AdmissionSettings":
+        return cls(
+            max_concurrent_sessions=_integer(
+                "COPILOT_MAX_CONCURRENT_SESSIONS", 8, minimum=1
+            ),
+            max_concurrent_gpu_jobs=_integer(
+                "COPILOT_MAX_CONCURRENT_GPU_JOBS", 1, minimum=1
+            ),
+            queue_size=_integer("COPILOT_RUNTIME_QUEUE_SIZE", 8, minimum=0),
+            queue_timeout_seconds=_number(
+                "COPILOT_RUNTIME_QUEUE_TIMEOUT", 30.0, minimum=0.0
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class MediaIngestSettings:
+    max_keys: int = 100
+    max_image_bytes: int = 16 * 1024 * 1024
+    max_image_total_bytes: int = 64 * 1024 * 1024
+    max_video_bytes: int = 256 * 1024 * 1024
+    max_frame_pixels: int = 16_777_216
+    max_key_total_pixels: int = 67_108_864
+    max_frame_dimension: int = 8192
+    max_video_frames: int = 7200
+    autofit_max_factor: int = 4
+
+    @classmethod
+    def from_env(
+        cls, defaults: "MediaIngestSettings | None" = None
+    ) -> "MediaIngestSettings":
+        base = defaults or cls()
+        settings = cls(
+            max_keys=_integer("COPILOT_MAX_KEYS", base.max_keys, minimum=2),
+            max_image_bytes=_integer(
+                "COPILOT_MAX_IMAGE_BYTES", base.max_image_bytes, minimum=1
+            ),
+            max_image_total_bytes=_integer(
+                "COPILOT_MAX_IMAGE_TOTAL_BYTES",
+                base.max_image_total_bytes,
+                minimum=1,
+            ),
+            max_video_bytes=_integer(
+                "COPILOT_MAX_VIDEO_BYTES", base.max_video_bytes, minimum=1
+            ),
+            max_frame_pixels=_integer(
+                "COPILOT_MAX_FRAME_PIXELS", base.max_frame_pixels, minimum=1
+            ),
+            max_key_total_pixels=_integer(
+                "COPILOT_MAX_KEY_TOTAL_PIXELS",
+                base.max_key_total_pixels,
+                minimum=1,
+            ),
+            max_frame_dimension=_integer(
+                "COPILOT_MAX_FRAME_DIMENSION", base.max_frame_dimension, minimum=1
+            ),
+            max_video_frames=_integer(
+                "COPILOT_MAX_VIDEO_FRAMES", base.max_video_frames, minimum=2
+            ),
+            autofit_max_factor=_integer(
+                "COPILOT_AUTOFIT_MAX_FACTOR", base.autofit_max_factor, minimum=1
+            ),
+        )
+        if settings.max_image_total_bytes < settings.max_image_bytes:
+            raise ConfigurationError(
+                "COPILOT_MAX_IMAGE_TOTAL_BYTES must be >= COPILOT_MAX_IMAGE_BYTES"
+            )
+        return settings
+
+
+@dataclass(frozen=True)
+class AgentRateLimitSettings:
+    requests_per_minute: int = 20
+    max_buckets: int = 1024
+
+    @classmethod
+    def from_env(cls) -> "AgentRateLimitSettings":
+        return cls(
+            requests_per_minute=_integer("COPILOT_AGENT_RPM", 20, minimum=1),
+            max_buckets=_integer(
+                "COPILOT_AGENT_RATE_BUCKETS", 1024, minimum=1
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class AuthSettings:
+    required: bool
+    trust_alb_oidc: bool
+    region: str | None
+    user_pool_id: str | None
+    app_client_id: str | None
+    alb_arn: str | None
+
+    @classmethod
+    def from_env(cls, *, validate_required: bool = True) -> "AuthSettings":
+        settings = cls(
+            required=_strict_bool("COPILOT_AUTH_REQUIRED", False),
+            trust_alb_oidc=_strict_bool("COPILOT_TRUST_ALB_OIDC", False),
+            region=_text("COPILOT_COGNITO_REGION"),
+            user_pool_id=_text("COPILOT_COGNITO_USER_POOL_ID"),
+            app_client_id=_text("COPILOT_COGNITO_APP_CLIENT_ID"),
+            alb_arn=_text("COPILOT_ALB_ARN"),
+        )
+        if validate_required and (settings.required or settings.trust_alb_oidc):
+            missing = [
+                name for name, value in (
+                    ("COPILOT_COGNITO_REGION", settings.region),
+                    ("COPILOT_COGNITO_USER_POOL_ID", settings.user_pool_id),
+                    ("COPILOT_COGNITO_APP_CLIENT_ID", settings.app_client_id),
+                ) if not value
+            ]
+            if settings.trust_alb_oidc and not settings.alb_arn:
+                missing.append("COPILOT_ALB_ARN")
+            if missing:
+                raise ConfigurationError(
+                    "authentication is enabled but settings are missing: "
+                    + ", ".join(missing)
+                )
+        return settings
+
+
+@dataclass(frozen=True)
+class DirectorSettings:
+    api_key: str | None = field(repr=False)
+    base_url: str = "https://api.deepseek.com/v1"
+    model: str = "deepseek-chat"
+
+    @classmethod
+    def from_env(cls) -> "DirectorSettings":
+        base_url = (
+            _text("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1") or ""
+        ).rstrip("/")
+        parsed = urlparse(base_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ConfigurationError(
+                "DEEPSEEK_BASE_URL must be an absolute http(s) URL"
+            )
+        return cls(
+            api_key=_text("DEEPSEEK_API_KEY"),
+            base_url=base_url,
+            model=_text("DEEPSEEK_MODEL", "deepseek-chat", required=True)
+            or "deepseek-chat",
+        )
+
+
+@dataclass(frozen=True)
+class WebSettings:
+    directory: Path
+
+    @classmethod
+    def from_env(cls) -> "WebSettings":
+        configured = Path(_text("COPILOT_WEB_DIR", "web") or "web").expanduser()
+        if not configured.is_absolute():
+            configured = _REPO_ROOT / configured
+        return cls(directory=configured.resolve())
+
+
+@dataclass(frozen=True)
+class EngineSelectionSettings:
+    default_engine: str = "stub"
+
+    @classmethod
+    def from_env(cls) -> "EngineSelectionSettings":
+        return cls(
+            default_engine=_choice(
+                "COPILOT_ENGINES", "stub", {"stub", "box"}
+            )
+        )
+
+
+@dataclass(frozen=True)
+class StoreSettings:
+    backend: str
+    table_name: str | None
+    region: str | None
+
+
+def _store_settings(
+    *, backend_env: str, table_env: str, default_backend: str
+) -> StoreSettings:
+    backend = _choice(backend_env, default_backend, {"memory", "dynamodb"})
+    table_name = _text(table_env)
+    if backend == "dynamodb" and not table_name:
+        raise ConfigurationError(f"{table_env} is required when {backend_env}=dynamodb")
+    return StoreSettings(
+        backend=backend,
+        table_name=table_name,
+        region=_text("COPILOT_COGNITO_REGION"),
+    )
+
+
+def memory_store_settings(default_backend: str) -> StoreSettings:
+    return _store_settings(
+        backend_env="COPILOT_MEMORY_BACKEND",
+        table_env="COPILOT_MEMORY_TABLE",
+        default_backend=default_backend,
+    )
+
+
+def feedback_store_settings(default_backend: str) -> StoreSettings:
+    return _store_settings(
+        backend_env="COPILOT_FEEDBACK_BACKEND",
+        table_env="COPILOT_FEEDBACK_TABLE",
+        default_backend=default_backend,
+    )
+
+
+@dataclass(frozen=True)
+class PublisherSettings:
+    enabled: bool
+    artifact_bucket: str | None
+    sessions_table: str | None
+    region: str
+    require_owner: bool = False
+
+    @classmethod
+    def from_env(
+        cls, *, require_owner: bool = False, validate_required: bool = True
+    ) -> "PublisherSettings":
+        enabled = _strict_bool("AWS_PUBLISH", False)
+        settings = cls(
+            enabled=enabled,
+            artifact_bucket=_text("AWS_ARTIFACT_BUCKET"),
+            sessions_table=_text("AWS_SESSIONS_TABLE"),
+            region=_text("AWS_REGION", "ap-southeast-1") or "ap-southeast-1",
+            require_owner=require_owner,
+        )
+        if validate_required and enabled:
+            if not settings.artifact_bucket:
+                raise ConfigurationError("AWS_ARTIFACT_BUCKET is required when AWS_PUBLISH=1")
+            if not settings.sessions_table:
+                raise ConfigurationError("AWS_SESSIONS_TABLE is required when AWS_PUBLISH=1")
+        return settings
+
+
+@dataclass(frozen=True)
+class BoxSettings:
+    vlm_base_url: str
+    vlm_model: str
+    vlm_max_pixels: int
+    rife_root: Path
+    rife_model_dir: Path
+    rife_device: str
+    csq_artifact_path: Path
+
+    @classmethod
+    def from_env(cls) -> "BoxSettings":
+        base_url = _text(
+            "VISION_BASE_URL_CHECK", "http://127.0.0.1:8001/v1"
+        ) or ""
+        parsed = urlparse(base_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ConfigurationError(
+                "VISION_BASE_URL_CHECK must be an absolute http(s) URL"
+            )
+
+        max_pixels = _integer("VISION_MAX_PIXELS_CHECK", 320, minimum=1)
+        if max_pixels != 320:
+            raise ConfigurationError(
+                "VISION_MAX_PIXELS_CHECK must be 320 to match the CSQ calibration"
+            )
+
+        rife_root = Path(
+            _text("COPILOT_RIFE_ROOT", str(Path.home() / "Practical-RIFE")) or ""
+        ).expanduser().resolve()
+        rife_model_dir = Path(
+            _text("COPILOT_RIFE_MODEL_DIR", str(rife_root / "train_log")) or ""
+        ).expanduser().resolve()
+        artifact = Path(
+            _text(
+                "COPILOT_CSQ_ARTIFACT_PATH",
+                str(_REPO_ROOT / "inbetween_copilot" / "artifacts" / "csq_smallgap_v3.json"),
+            ) or ""
+        ).expanduser().resolve()
+
+        return cls(
+            vlm_base_url=base_url.rstrip("/"),
+            vlm_model=_text("VISION_MODEL_CHECK", "qwen3vl-anime", required=True) or "",
+            vlm_max_pixels=max_pixels,
+            rife_root=rife_root,
+            rife_model_dir=rife_model_dir,
+            rife_device=_text("COPILOT_RIFE_DEVICE", "cuda", required=True) or "cuda",
+            csq_artifact_path=artifact,
+        )
 
 
 def max_sessions() -> int:
-    return max(1, int(os.environ.get("COPILOT_MAX_SESSIONS", "8")))
+    return SessionSettings.from_env().max_sessions
 
 
 def sse_keepalive_seconds() -> float:
-    return float(os.environ.get("COPILOT_SSE_KEEPALIVE", "15"))
+    return SessionSettings.from_env().sse_keepalive_seconds
 
 
-def smoothness_x4_enabled() -> bool:
-    return env_bool("COPILOT_SMOOTHNESS_X4")
+def max_concurrent_sessions() -> int:
+    return AdmissionSettings.from_env().max_concurrent_sessions
+
+
+def max_concurrent_gpu_jobs() -> int:
+    return AdmissionSettings.from_env().max_concurrent_gpu_jobs
+
+
+def runtime_queue_size() -> int:
+    return AdmissionSettings.from_env().queue_size
+
+
+def runtime_queue_timeout_seconds() -> float:
+    return AdmissionSettings.from_env().queue_timeout_seconds
+
+
+def default_engine() -> str:
+    return EngineSelectionSettings.from_env().default_engine

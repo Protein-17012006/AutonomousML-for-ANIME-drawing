@@ -14,13 +14,13 @@ catches the attack. Reference-free, pure numpy. Used as a deterministic OR-guard
 from __future__ import annotations
 
 from inbetween_copilot.signals.motion import gap_score
+# Re-exported for guard wiring; canonical home = inbetween_copilot.thresholds
+# (TAU_SRC_MOTION = the calibrated tau_gate; corr(src_motion, recon_psnr) = -0.81,
+# §5n).
+from inbetween_copilot.thresholds import TAU_SRC_MOTION  # noqa: F401
 
 TAU_MOTION = 0.02      # total inter-frame motion below this = genuine static hold -> 0
 TAU_STILL = 0.6        # concentration above this = step-function hold -> fires the guard
-
-
-TAU_SRC_MOTION = 0.017     # window source-motion above this -> reconstruction unverifiable -> abstain
-                           # (= the calibrated tau_gate; corr(src_motion, recon_psnr) = -0.81, §5n)
 
 
 def window_source_motion(frames) -> float:

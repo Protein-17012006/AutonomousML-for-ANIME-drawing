@@ -6,7 +6,7 @@ these morph a drawing that should not move.
 """
 from __future__ import annotations
 
-from inbetween_copilot.pipeline.states import Route
+from inbetween_copilot.domain.states import Route
 
 _ROUTES = {"hold": Route.HOLD, "small": Route.RIFE, "snap": Route.SNAP_PRESERVE}
 

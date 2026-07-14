@@ -4,13 +4,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from inbetween_copilot.qa.csq.conformal import Calibrator
+from inbetween_copilot.thresholds import TAU_SOFT
 
 
 @dataclass(frozen=True)
 class CSQArtifact:
     calibrator: Calibrator
     base_auc: dict
-    tau_soft: float = 0.15
+    tau_soft: float = TAU_SOFT
     k: int = 4
     lam: float = 0.5
     version: str = "v1"

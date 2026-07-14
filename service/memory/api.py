@@ -7,12 +7,13 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
-from service.core.auth import CurrentUser, require_current_user
-from service.core.dependencies import get_session_repository
+from service.core.auth import (CurrentUser, authorize_session_access,
+                               require_current_user)
 from service.memory.models import (MemoryCandidate, MemoryItem, MemoryStatus,
                                    extract_candidates, new_memory, validate_candidate)
 from service.memory.dependencies import memory_store_for
 from service.sessions.repository import SessionRepository
+from service.sessions.http_dependencies import get_session_repository
 
 router = APIRouter(prefix="/me/memories", tags=["memory"])
 
@@ -45,8 +46,11 @@ def list_memories(request: Request,
 
 @router.post("", status_code=201)
 def create_memory(req: CreateMemoryReq, request: Request,
-                  user: CurrentUser = Depends(require_current_user)):
+                  user: CurrentUser = Depends(require_current_user),
+                  sessions: SessionRepository = Depends(get_session_repository)):
     try:
+        if req.source_sid is not None:
+            authorize_session_access(request, sessions, req.source_sid)
         candidate = MemoryCandidate(kind=req.kind, key=req.key, value=req.value,
                                     evidence="Explicitly saved by the user", confidence=1)
         item = new_memory(candidate, status="confirmed", source_cid=req.source_cid,
@@ -95,6 +99,7 @@ def delete_memory(memory_id: str, request: Request,
 def extract_session_memories(req: ExtractMemoryReq, request: Request,
                              user: CurrentUser = Depends(require_current_user),
                              sessions: SessionRepository = Depends(get_session_repository)):
+    authorize_session_access(request, sessions, req.sid)
     state = sessions.state_for(req.sid)
     if state is None:
         raise HTTPException(status_code=404, detail="Unknown live session")

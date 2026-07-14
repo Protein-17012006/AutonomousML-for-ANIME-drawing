@@ -8,10 +8,10 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-from service.core.dependencies import get_session_repository
 from service.feedback.models import FeedbackRecord, build_feedback
 from service.feedback.dependencies import feedback_store_for
 from service.sessions.repository import SessionRepository
+from service.sessions.http_dependencies import get_session_repository
 
 router = APIRouter(tags=["feedback"])
 

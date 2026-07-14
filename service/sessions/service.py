@@ -6,9 +6,11 @@ composition layer.
 """
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from service.sessions.presentation import build_render_metadata
 from service.sessions.repository import SessionRepository
 
 
@@ -16,15 +18,7 @@ from service.sessions.repository import SessionRepository
 class SessionWorkflowAdapters:
     run_pipeline: Callable
     save_pair_mid: Callable
-    explain_pairs: Callable
-    region_box: Callable
-    annotate_pairs: Callable
-    assemble_frames: Callable
-    build_montage: Callable
-    build_report: Callable
-    build_video: Callable
-    build_pair_frames: Callable
-    build_key_frames: Callable
+    render_artifacts: Callable
     publish_session: Callable
 
 
@@ -36,6 +30,8 @@ class SessionOutcome:
     pair_mids: dict
     key_urls: dict
     sampling: dict
+    csq: dict | None
+    qa_degraded: bool
 
 
 class RunSession:
@@ -53,84 +49,44 @@ class RunSession:
             emit_pair(pair, mid_url)
 
         result = a.run_pipeline(key_arrays, eng, on_pair=on_pair)
-        explanations = (
-            a.explain_pairs(result, vlm_struct_fn=eng.vlm_struct_fn,
-                            softness_fn=eng.softness_fn)
-            if eng.vlm_struct_fn is not None else {}
+        rendered = a.render_artifacts(
+            result,
+            key_arrays,
+            session_dir,
+            cadence_fps=cfg.cadence_fps,
+            smoothness=cfg.smoothness,
+            output_fps=cfg.fps,
+            mid_engine=eng.rife_engine,
+            vlm_struct_fn=eng.vlm_struct_fn,
+            softness_fn=eng.softness_fn,
         )
-
-        regions = {}
-        if explanations and key_arrays:
-            height, width = key_arrays[0].shape[:2]
-            for index, explanation in explanations.items():
-                pixel_box = a.region_box(explanation["region"], width, height)
-                regions[index] = pixel_box
-                if pixel_box and width and height:
-                    x0, y0, x1, y1 = pixel_box
-                    explanation["box"] = [
-                        x0 / width, y0 / height,
-                        (x1 - x0) / width, (y1 - y0) / height,
-                    ]
-
-        for index, filename in a.annotate_pairs(
-                result, explanations, session_dir).items():
-            explanations[index]["annotated_url"] = f"/session/{sid}/{filename}"
-
-        mid_engine = eng.rife_engine
-        frames = a.assemble_frames(
-            result, factor=cfg.smoothness, mid_engine=mid_engine)
-        duration = len(frames) / cfg.fps
-
-        a.build_montage(result, key_arrays, session_dir, regions=regions or None)
-        a.build_report(
-            result, session_dir, cadence_fps=cfg.cadence_fps,
-            smoothness=cfg.smoothness, output_fps=cfg.fps, duration=duration,
-        )
-        a.build_video(
-            result, session_dir, fps=cfg.fps, factor=cfg.smoothness,
-            mid_engine=mid_engine, frames=frames,
-        )
-        pair_files = a.build_pair_frames(result, session_dir)
-        key_files = a.build_key_frames(key_arrays, session_dir)
-
+        metadata = build_render_metadata(
+            sid, rendered, cfg, eng, base_sampling=sampling)
+        persisted_explanations = copy.deepcopy(metadata.explanations)
+        persisted_sampling = dict(metadata.sampling)
         self.repository.save_state(sid, {
             "keys": key_arrays,
             "eng": eng,
             "cfg": cfg,
             "result": result,
             "rev": 0,
-            "explanations": explanations,
-            "qa_degraded": bool(eng.vlm_status.get("degraded")),
-        })
-
-        pair_mids = {
-            str(index): f"/session/{sid}/{filename}"
-            for index, filename in pair_files.items()
-        }
-        key_urls = {
-            str(index): f"/session/{sid}/{filename}"
-            for index, filename in key_files.items()
-        }
-        artifact_urls = {
-            "montage": f"/session/{sid}/montage.png",
-            "report": f"/session/{sid}/report.md",
-            "video": f"/session/{sid}/reconstructed.mp4",
-        }
-        sampling_payload = dict(sampling or {})
-        sampling_payload.update({
-            "cadence_fps": cfg.cadence_fps,
-            "smoothness": cfg.smoothness,
-            "output_fps": cfg.fps,
-            "duration": round(duration, 3),
+            "explanations": persisted_explanations,
+            "qa_degraded": metadata.qa_degraded,
+            "sampling": persisted_sampling,
         })
         return SessionOutcome(
             result=result,
-            artifact_urls=artifact_urls,
-            explanations=explanations,
-            pair_mids=pair_mids,
-            key_urls=key_urls,
-            sampling=sampling_payload,
+            artifact_urls=metadata.artifact_urls,
+            explanations=metadata.explanations,
+            pair_mids=metadata.pair_mids,
+            key_urls=metadata.key_urls,
+            sampling=metadata.sampling,
+            csq=metadata.csq,
+            qa_degraded=metadata.qa_degraded,
         )
 
     def publish(self, sid: int, session_dir: str, result) -> dict:
-        return self.adapters.publish_session(sid, session_dir, result) or {}
+        return self.adapters.publish_session(
+            sid, session_dir, result,
+            owner_sub=self.repository.owner_for(sid),
+        ) or {}

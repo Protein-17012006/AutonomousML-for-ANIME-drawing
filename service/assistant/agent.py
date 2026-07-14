@@ -8,6 +8,7 @@ import json
 import re
 from service.assistant.ask import build_session_context, fallback_answer
 from service.assistant.glossary import GLOSSARY
+from service.core.json_tools import first_json_object
 from service.memory.models import MemoryItem, render_confirmed_memories
 
 _ALLOWED_CADENCE = {24, 12, 8}
@@ -94,7 +95,9 @@ def _decide_from_raw(state: dict, raw: str, ctx: str) -> dict:
         return {"say": fallback_answer(ctx), "grounded": False, "action": None,
                 "followups": []}
     try:
-        doc = json.loads(raw[raw.index("{"):raw.rindex("}") + 1])
+        doc = first_json_object(raw)
+        if doc is None:
+            raise ValueError("model reply contains no JSON object")
         say  = str(doc.get("say") or "").strip()
         tool = doc.get("tool")
         args = doc.get("args") or {}

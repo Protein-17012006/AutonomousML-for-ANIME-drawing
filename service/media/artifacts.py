@@ -13,7 +13,7 @@ from typing import List
 import numpy as np
 from PIL import Image, ImageDraw
 
-from inbetween_copilot.pipeline.copilot import CopilotResult
+from inbetween_copilot.pipeline.models import CopilotResult
 from inbetween_copilot.reporting.depth import expand_pair
 from inbetween_copilot.reporting.report import summarize
 
@@ -38,15 +38,12 @@ def _tint_color(pair) -> tuple:
 
 
 def build_report(result: CopilotResult, out_dir: str, *,
-                 cadence_fps: "int | None" = None, smoothness: "int | None" = None,
-                 output_fps: "int | None" = None, duration: "float | None" = None) -> str:
+                 cadence_fps: int, smoothness: int,
+                 output_fps: int, duration: float) -> str:
     """Write report.md to *out_dir* and return the path.
 
-    ``cadence_fps``/``smoothness``/``output_fps``/``duration`` (Smoothness Control,
-    Task 7) are optional headline-badge fields. When ``output_fps`` is given, a
-    ``*smoothness ×N · on-Ms → Ffps · Ds*`` line is inserted right after the
-    ``**{summary}**`` line. Left at the default (None), the report is unchanged —
-    back-compat with existing callers/tests."""
+    Sampling metadata is required so every generation, including review
+    rerenders, retains the same smoothness headline contract."""
     keys_drawn = len(result.pairs) + 1   # n pairs -> n+1 keys
     rep = summarize(result, keys_drawn)
 
@@ -66,9 +63,12 @@ def build_report(result: CopilotResult, out_dir: str, *,
         "| pair | action | route | QA | reason |\n",
         "|---|---|---|---|---|\n",
     ]
-    if output_fps is not None:
-        onN = {24: "on-1s", 12: "on-2s", 8: "on-3s"}.get(cadence_fps, f"{cadence_fps}fps-keys")
-        lines.insert(2, f"*smoothness ×{smoothness} · {onN} → {output_fps}fps · {duration:.1f}s*\n")
+    onN = {24: "on-1s", 12: "on-2s", 8: "on-3s"}.get(
+        cadence_fps, f"{cadence_fps}fps-keys")
+    lines.insert(
+        2,
+        f"*smoothness ×{smoothness} · {onN} → {output_fps}fps · {duration:.1f}s*\n",
+    )
     for p in result.pairs:
         qa_s  = p.qa.status if p.qa else "-"
         qa_r  = p.qa.reason if p.qa else "-"
@@ -215,9 +215,9 @@ def build_video(result: CopilotResult, out_dir: str, fps: int = 24, *,
     Control display depth); defaults reproduce today's output unchanged.
 
     ``frames`` (M2 fix): when the caller has ALREADY assembled the display frames
-    (e.g. `_stream_session` needs them to compute the duration badge too), pass
-    them here to reuse that list instead of re-assembling — at smoothness=4,
-    `_assemble_frames` re-runs the (GPU) `mid_engine` per rife pair, so assembling
+    (the session artifact renderer needs them to compute the duration badge too),
+    pass them here to reuse that list instead of re-assembling. At higher display
+    factors, `_assemble_frames` re-runs the (GPU) `mid_engine` per RIFE pair, so assembling
     twice per session doubled that work for no reason. Left at the default
     (``None``) this assembles internally exactly as before — full back-compat."""
     import imageio

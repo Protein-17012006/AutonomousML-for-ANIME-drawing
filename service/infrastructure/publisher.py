@@ -6,33 +6,39 @@ installs it; the box-free suite injects fake clients."""
 from __future__ import annotations
 
 import json
-import os
 import pathlib
 import time
 import uuid
+
+from service.core.auth import auth_required
+from service.core.config import PublisherSettings
 
 _ARTIFACT_SUFFIXES = {".png", ".md", ".mp4"}
 
 
 def aws_enabled() -> bool:
-    return os.environ.get("AWS_PUBLISH") == "1"
+    return PublisherSettings.from_env(validate_required=False).enabled
 
 
-def publish_session(sid, session_dir, result, *, clients=None, pid=None):
+def publish_session(sid, session_dir, result, *, owner_sub=None, clients=None, pid=None):
     """Upload the session's artifacts + write one DynamoDB item. Returns
     {"published", "pid", "s3_keys", "error"}; NEVER raises."""
-    if not aws_enabled():
-        return {"published": False, "pid": None, "s3_keys": [], "error": None}
     s3_keys: list = []
     try:
-        bucket = os.environ["AWS_ARTIFACT_BUCKET"]
-        table = os.environ["AWS_SESSIONS_TABLE"]
-        region = os.environ.get("AWS_REGION", "ap-southeast-1")
+        settings = PublisherSettings.from_env(require_owner=auth_required())
+        if not settings.enabled:
+            return {"published": False, "pid": None, "s3_keys": [], "error": None}
+        if settings.require_owner and not owner_sub:
+            raise RuntimeError("refusing to publish an ownerless authenticated session")
+        # PublisherSettings validates both values whenever publishing is enabled.
+        bucket = settings.artifact_bucket
+        table = settings.sessions_table
         if clients is None:
             import boto3
-            clients = {"s3": boto3.client("s3", region_name=region),
-                       "ddb": boto3.client("dynamodb", region_name=region)}
-        pid = pid or uuid.uuid4().hex     # unguessable: /artifacts/* skips ALB auth by design
+            clients = {"s3": boto3.client("s3", region_name=settings.region),
+                       "ddb": boto3.client("dynamodb", region_name=settings.region)}
+        # Opaque storage namespace; durable objects have no public download path.
+        pid = pid or uuid.uuid4().hex
         base = pathlib.Path(session_dir)
         for f in sorted(base.iterdir()):
             if f.is_file() and f.suffix.lower() in _ARTIFACT_SUFFIXES:
@@ -43,7 +49,7 @@ def publish_session(sid, session_dir, result, *, clients=None, pid=None):
         # Derive needs_key indices from pair actions (CopilotResult has no needs_key field)
         needs_key = [getattr(p, "index", i) for i, p in enumerate(r.pairs)
                      if getattr(p, "action", None) == "needs_key"]
-        clients["ddb"].put_item(TableName=table, Item={
+        item = {
             "pid": {"S": pid},
             "sid": {"N": str(sid)},
             "ts": {"N": str(int(time.time()))},
@@ -55,7 +61,10 @@ def publish_session(sid, session_dir, result, *, clients=None, pid=None):
             "needs_key": {"S": json.dumps(needs_key)},
             "keys_requested_total": {"N": str(r.keys_requested_total)},
             "artifact_keys": {"S": json.dumps(s3_keys)},
-        })
+        }
+        if owner_sub:
+            item["owner_sub"] = {"S": owner_sub}
+        clients["ddb"].put_item(TableName=table, Item=item)
         return {"published": True, "pid": pid, "s3_keys": s3_keys, "error": None}
     except Exception as exc:   # noqa: BLE001 — by contract this function never raises
         print(f"[publisher] WARN publish failed (session continues): {exc}", flush=True)

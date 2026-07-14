@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from decimal import Decimal
-import os
 import threading
 
 from service.memory.models import MAX_MEMORIES_PER_USER, MemoryItem
@@ -46,13 +45,12 @@ class DynamoMemoryStore:
                  region: str | None = None):
         if table is None:
             import boto3
-            name = table_name or os.environ.get("COPILOT_MEMORY_TABLE", "")
-            if not name:
-                raise RuntimeError("COPILOT_MEMORY_TABLE is required for DynamoDB memory")
+            if not table_name:
+                raise RuntimeError("table_name is required for DynamoDB memory")
             table = boto3.resource(
                 "dynamodb",
-                region_name=region or os.environ.get("COPILOT_COGNITO_REGION"),
-            ).Table(name)
+                region_name=region,
+            ).Table(table_name)
         self.table = table
 
     @staticmethod

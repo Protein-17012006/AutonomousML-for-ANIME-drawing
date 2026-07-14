@@ -4,9 +4,10 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 
-from service.core.config import smoothness_x4_enabled
+from inbetween_copilot.thresholds import TAU_GATE, TAU_SOFT
+from service.core.config import default_engine
 
 # FALLBACK ONLY (P2+D 2026-07-08): FrameQA now carries typed p_error/u fields and
 # from_pair prefers them; this regex over the reason string ("csq:… p=… u=…") only
@@ -16,11 +17,11 @@ _PU_RE = re.compile(r"p=([0-9.]+).*?u=([0-9.]+)")
 
 
 class SessionCfg(BaseModel):
-    tau_gate: float = 0.017
-    tau_soft: float = 0.15
-    engines: str = "stub"
+    tau_gate: float = TAU_GATE
+    tau_soft: float = TAU_SOFT
+    engines: str = Field(default_factory=default_engine)
     cadence_fps: int = 12      # nominal rate of the artist's keys (on-1s 24 / on-2s 12 / on-3s 8)
-    smoothness: int = 2        # display depth: 1 Off / 2 Standard / 4 Extra
+    smoothness: int = 2        # display depth: 1 Off / 2 Standard
     fps: Optional[int] = None  # reconstructed-video playback rate; derived = cadence_fps*smoothness unless passed
     # optional show/series tag — the per-show axis of flag-feedback calibration data
     # (H3). Free-form short string; None = untagged pool.
@@ -28,12 +29,15 @@ class SessionCfg(BaseModel):
 
     @model_validator(mode="after")
     def _derive_fps(self):
-        if self.smoothness not in (1, 2, 4):
-            raise ValueError(f"smoothness must be 1, 2, or 4 (got {self.smoothness})")
-        if self.smoothness == 4 and not smoothness_x4_enabled():
-            raise ValueError("smoothness=4 (Extra) is gated; set COPILOT_SMOOTHNESS_X4 after the CSQ probe passes")
+        if self.cadence_fps <= 0:
+            raise ValueError(
+                f"cadence_fps must be greater than 0 (got {self.cadence_fps})")
+        if self.smoothness not in (1, 2):
+            raise ValueError(f"smoothness must be 1 or 2 (got {self.smoothness})")
         if self.fps is None:
             object.__setattr__(self, "fps", self.cadence_fps * self.smoothness)
+        elif self.fps <= 0:
+            raise ValueError(f"fps must be greater than 0 (got {self.fps})")
         if self.show is not None:
             s = self.show.strip()[:64]
             object.__setattr__(self, "show", s or None)
@@ -45,6 +49,7 @@ class PairEvent(BaseModel):
     action: str
     qa: Optional[str] = None
     route: Optional[str] = None
+    regime: Optional[str] = None
     keys_requested: int
     reason: Optional[str] = None
     verdict_prob: Optional[float] = None    # P(error) from the calibrated QA (for a confidence meter)
@@ -83,6 +88,7 @@ class PairEvent(BaseModel):
             action=pair.action,
             qa=qa_status,
             route=pair.route,
+            regime=getattr(pair, "regime", None),
             keys_requested=pair.keys_requested,
             reason=reason,
             verdict_prob=p_err,
@@ -112,9 +118,9 @@ class ResultEvent(BaseModel):
     # calibrated abstain band for the confidence dial: {tau_pass, tau_flag, u_edges, u_max}
     # (per-u-bin thresholds on p_error). None when no CSQ calibrator is wired (e.g. stub engines).
     csq: Optional[dict] = None
-    # True when the served VLM was unreachable during the run: QA degraded to the
-    # softness/gate signals only — verdicts are NOT the full calibrated QA (audit
-    # 2026-07-02 finding #6: the failure used to be invisible to the client).
+    # True when the served VLM was unreachable during the run. Any pair whose
+    # required VLM channel is absent is forced to abstain with maximum
+    # uncertainty; this flag also makes the degraded session visible to clients.
     qa_degraded: bool = False
 
     @classmethod
