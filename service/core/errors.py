@@ -13,5 +13,13 @@ class InvalidGapIndex(ServiceError):
     pass
 
 
+class InvalidKeyImage(ServiceError):
+    pass
+
+
 class UnknownEngine(ServiceError):
+    pass
+
+
+class RuntimeBusy(ServiceError):
     pass

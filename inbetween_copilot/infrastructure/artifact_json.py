@@ -39,3 +39,18 @@ class CSQArtifactJsonStore:
             sharp_mode=document.get("sharp_mode", "absolute"),
             meta=document.get("meta", {}),
         )
+
+
+def save_artifact(artifact: CSQArtifact, path: str) -> None:
+    """Convenience entry point owned by the JSON adapter module."""
+
+    CSQArtifactJsonStore().save(artifact, path)
+
+
+def load_artifact(path: str) -> CSQArtifact:
+    """Load a CSQ artifact without making QA depend on infrastructure."""
+
+    return CSQArtifactJsonStore().load(path)
+
+
+__all__ = ["CSQArtifactJsonStore", "load_artifact", "save_artifact"]

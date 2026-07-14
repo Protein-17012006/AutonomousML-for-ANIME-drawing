@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from inbetween_copilot.pipeline.copilot import CopilotResult
+from inbetween_copilot.pipeline.models import CopilotResult
 
 
 @dataclass

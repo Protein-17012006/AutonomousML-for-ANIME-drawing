@@ -17,7 +17,6 @@ import base64
 import glob
 import json
 import os
-import re
 import sys
 import urllib.request
 
@@ -32,10 +31,11 @@ from inbetween_copilot.qa.perception import PERCEPTION_PROMPT, perceive
 from inbetween_copilot.signals.sharpness import frame_sharpness
 from inbetween_copilot.signals.softness import interp_softness
 from service.media.annotate import annotate_frame
+from service.core.json_tools import first_json_object
 
 ROOT = os.getcwd()          # run from the repo root
 VLM_URL = os.environ.get("VISION_BASE_URL_CHECK",
-                         "http://100.71.161.102:8001/v1").rstrip("/") + "/chat/completions"
+                         "http://127.0.0.1:8001/v1").rstrip("/") + "/chat/completions"
 VISION_MODEL = os.environ.get("VISION_MODEL_CHECK", "qwen3vl-anime")
 OUT = os.path.join(ROOT, ".scratch", "annotated_demo")
 
@@ -54,8 +54,7 @@ def _post_vlm(prompt, frames):
                                  headers={"Content-Type": "application/json"})
     txt = json.loads(urllib.request.urlopen(req, timeout=180).read()
                      )["choices"][0]["message"]["content"]
-    m = re.search(r"\{.*\}", txt, re.S)
-    return json.loads(m.group(0)) if m else {}
+    return first_json_object(txt) or {}
 
 
 def vlm_struct_fn(frames):

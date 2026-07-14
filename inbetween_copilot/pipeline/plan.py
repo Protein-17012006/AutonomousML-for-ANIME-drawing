@@ -6,22 +6,10 @@ to draw one more breakdown key. keys_needed names the *minimum* extra keys.
 """
 from __future__ import annotations
 
+from inbetween_copilot.domain.states import PlanAction
 from inbetween_copilot.pipeline.plan_models import KeyPlan, PairPlan
-from inbetween_copilot.pipeline.states import PlanAction
-
-
-# Interpolable-gate threshold on gap_score: gap < TAU_GATE -> RIFE can interpolate;
-# gap >= TAU_GATE -> ask the artist for a key (RIFE would ghost).
-# RECALIBRATED 2026-06-22 (0.18 -> 0.017). A per-pair (gap_score, RIFE-mid-PSNR) study
-# across 3 shows (E11 action / silent-witch on-2s / JJK high-motion; "ghost" = RIFE-PSNR
-# < 30 dB) found gap_score predicts ghosting at AUC 0.89-0.95, but the old default 0.18
-# caught only ~1% of ghosts -> shipped 32-48% RIFE-ghosts mislabelled "interpolable".
-# Best per-regime tau was 0.010-0.025 (near-global, spread 0.015); 0.017 gives ghost-recall
-# 0.86-0.94 at spec ~0.78 (reject-rate ~half = the genuinely-hard pairs).
-# The exact value tracks the quality bar (30 dB) and the acceptable reject-rate -> tune
-# per deployment; pass an explicit tau_gate to override. (Drivers: .scratch/copilot/
-# {stress_perpair,analyze_gate_calib}.py)
-TAU_GATE = 0.017
+# Canonical value + full recalibration history live in inbetween_copilot.thresholds.
+from inbetween_copilot.thresholds import TAU_GATE
 
 
 def _default_keys_needed(gap: float, *, tau_gate: float = TAU_GATE) -> int:

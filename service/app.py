@@ -9,21 +9,29 @@ GET /session/{sid}/{name} — download a session artifact.
 """
 from __future__ import annotations
 
-import os
-
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from service.assistant import api as assistant_routes
-from service.core.dependencies import session_repository_for
+from service.composition.session_runtime import (
+    build_review_http_runtime,
+    build_session_http_runtime,
+)
 from service.feedback import api as feedback_routes
 from service.media import api as demo_routes
 from service.memory import api as memory_routes
 from service.review import api as review_routes
 from service.sessions import api as session_routes
+from service.sessions.http_dependencies import session_repository_for
+from service.core.config import AuthSettings, WebSettings
 
 app = FastAPI(title="In-Between Co-pilot Service")
+# Validate security flags/config at process startup; malformed production env
+# must fail the launch rather than silently disabling authentication.
+app.state.auth_settings = AuthSettings.from_env()
 app.state.session_repository = session_repository_for()
+app.state.session_http_runtime = build_session_http_runtime()
+app.state.review_http_runtime = build_review_http_runtime()
 
 
 @app.middleware("http")
@@ -34,11 +42,21 @@ async def _cognito_session_gate(request: Request, call_next):
     bearer token on every GPU/session route without re-introducing ALB's second
     interactive login.  The flag defaults off for local stub development.
     """
-    from service.core.auth import auth_required, authenticate_request
+    from service.core.auth import (alb_oidc_enabled, auth_required,
+                                   authenticate_request, authorize_session_access)
 
+    path = request.url.path
+    protected_route = (
+        path == "/session" or path.startswith("/session/")
+        or path == "/demo" or path.startswith("/demo/")
+    )
     has_bearer = request.headers.get("Authorization", "").lower().startswith("bearer ")
-    if ((auth_required() or has_bearer) and request.method != "OPTIONS"
-            and request.url.path.startswith("/session")):
+    has_trusted_alb_claims = (
+        alb_oidc_enabled() and bool(request.headers.get("x-amzn-oidc-data", "").strip())
+    )
+    if ((auth_required() or has_bearer or has_trusted_alb_claims)
+            and request.method != "OPTIONS"
+            and protected_route):
         try:
             request.state.user = authenticate_request(request)
         except Exception as exc:
@@ -55,15 +73,24 @@ async def _cognito_session_gate(request: Request, call_next):
     # to everyone else — same 404 wording as an unknown sid so strangers cannot
     # even confirm it exists. Enforced here (not per-route) so every current and
     # future /session/{sid}/* route inherits the isolation.
-    segments = request.url.path.strip("/").split("/")
-    if (request.method != "OPTIONS" and len(segments) >= 2
-            and segments[0] == "session" and segments[1].isdigit()):
-        owner = session_repository_for(request.app).owner_for(int(segments[1]))
-        if owner is not None:
-            user = getattr(request.state, "user", None)
-            if user is None or user.sub != owner:
-                return JSONResponse(status_code=404,
-                                    content={"detail": "Unknown session (or no result yet)"})
+    segments = path.strip("/").split("/")
+    sid = None
+    if len(segments) >= 2 and segments[0] == "session":
+        try:
+            sid = int(segments[1])
+        except ValueError:
+            pass
+    if request.method != "OPTIONS" and sid is not None:
+        try:
+            authorize_session_access(
+                request, session_repository_for(request.app), sid)
+        except Exception as exc:
+            from fastapi import HTTPException
+            if isinstance(exc, HTTPException):
+                return JSONResponse(status_code=exc.status_code,
+                                    content={"detail": exc.detail},
+                                    headers=exc.headers)
+            raise
     return await call_next(request)
 
 
@@ -100,9 +127,6 @@ from fastapi.staticfiles import StaticFiles  # noqa: E402
 # frontend instead — the box launches with COPILOT_WEB_DIR=dist, where dist is the
 # TEAM's canonical Next.js static export (in the export repo, deployed separately;
 # this repo no longer carries a frontend build).
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_WEB_DIR = os.environ.get("COPILOT_WEB_DIR") or "web"
-if not os.path.isabs(_WEB_DIR):
-    _WEB_DIR = os.path.join(_ROOT, _WEB_DIR)
-if os.path.isdir(_WEB_DIR):
-    app.mount("/", StaticFiles(directory=_WEB_DIR, html=True), name="web")
+_WEB_DIR = WebSettings.from_env().directory
+if _WEB_DIR.is_dir():
+    app.mount("/", StaticFiles(directory=str(_WEB_DIR), html=True), name="web")

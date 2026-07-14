@@ -23,7 +23,7 @@ class EngineBundle(CopilotPorts):
     """Service runtime bundle extending the core-owned co-pilot port contract."""
 
     # --- service-only (never reach run_copilot) ---
-    rife_engine: "object | None" = None      # raw [a, mid, b] (demo + smoothness x4)
+    rife_engine: "object | None" = None      # raw [a, mid, b] (demo + display depth)
     vlm_struct_fn: "object | None" = None    # explainability layer
     csq_calibrator: "dict | None" = None       # UI trust dial (box only)
     vlm_status: dict = dataclasses.field(default_factory=dict)  # degraded-QA flag

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from decimal import Decimal
-import os
 import threading
 
 from service.feedback.models import FeedbackRecord
@@ -38,13 +37,12 @@ class DynamoFeedbackStore:
                  region: str | None = None):
         if table is None:
             import boto3
-            name = table_name or os.environ.get("COPILOT_FEEDBACK_TABLE", "")
-            if not name:
-                raise RuntimeError("COPILOT_FEEDBACK_TABLE is required for DynamoDB feedback")
+            if not table_name:
+                raise RuntimeError("table_name is required for DynamoDB feedback")
             table = boto3.resource(
                 "dynamodb",
-                region_name=region or os.environ.get("COPILOT_COGNITO_REGION"),
-            ).Table(name)
+                region_name=region,
+            ).Table(table_name)
         self.table = table
 
     @staticmethod

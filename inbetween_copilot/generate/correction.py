@@ -8,9 +8,9 @@ injected (mirrors benchmark.repair.cascade.repair_cut) -- no torch/cv2/net.
 """
 from __future__ import annotations
 
+from inbetween_copilot.domain.states import CorrectionStatus
 from inbetween_copilot.generate.commands import CorrectionCommands
 from inbetween_copilot.generate.models import CorrectionResult, CorrectionRound
-from inbetween_copilot.pipeline.states import CorrectionStatus
 
 
 def correct_inbetween(frames, a, b, *, perceive_fn, localize_fn, decide_fn,

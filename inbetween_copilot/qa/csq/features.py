@@ -11,8 +11,8 @@ from inbetween_copilot.qa.csq.confidence import aggregate
 from inbetween_copilot.qa.csq.perturb import perturb_views, flip_rates
 from inbetween_copilot.signals.softness import interp_softness
 from inbetween_copilot.signals.sharpness import clip_score, SPATIAL_THRESH
+from inbetween_copilot.thresholds import TAU_SOFT
 
-TAU_SOFT = 0.15
 TAU_SHARP_REL = 0.25      # soft_worst fires threshold (relative sharpness channel)
 
 

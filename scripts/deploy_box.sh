@@ -13,7 +13,7 @@
 set -euo pipefail
 
 BOX_USER="${BOX_USER:-long}"
-BOX_HOST="${BOX_HOST:-100.71.161.102}"      # tailscale IP (matches box_engines default)
+BOX_HOST="${BOX_HOST:?set BOX_HOST to the inference box tailnet IP or DNS name}"
 BOX_DIR="${BOX_DIR:-~/copilot_svc}"
 PORT="${PORT:-8000}"
 DEST="${BOX_USER}@${BOX_HOST}"
@@ -53,7 +53,7 @@ if [[ "${1:-}" == "--restart" ]]; then
   echo "   curl -s -o /dev/null -w 'HTTP %{http_code}\\n' http://${BOX_HOST}:${PORT}/"
 else
   echo ">> files synced. Re-run with --restart to bounce the service, or restart manually:"
-  echo "   ssh ${DEST} \"cd ${BOX_DIR} && COPILOT_ENGINES=box uvicorn service.app:app --host 0.0.0.0 --port ${PORT}\""
+  echo "   ssh ${DEST} \"bash ${BOX_DIR}/box_start_service.sh ${PORT}\""
 fi
 
 echo ">> to build the side-by-side comparison video on the box:"

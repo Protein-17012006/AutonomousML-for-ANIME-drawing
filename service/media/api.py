@@ -3,23 +3,28 @@ from __future__ import annotations
 
 from typing import List
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 
-from service.core.dependencies import get_session_repository
-from service.core.errors import UnknownEngine
+from service.core.auth import request_user_sub
+from service.core.config import default_engine
+from service.core.errors import RuntimeBusy, UnknownEngine
+from service.core.http import model_or_422
+from service.infrastructure.admission import engine_admission
 from service.infrastructure.engines import resolve
 from service.media.demo import build_demo_videos
 from service.media.ingest import _load_keys
 from service.sessions.repository import SessionRepository
-from service.sessions.streaming import _session_cfg_or_422
+from service.sessions.http_dependencies import get_session_repository
+from service.sessions.schemas import SessionCfg
 
 router = APIRouter()
 
 
 @router.post("/demo")
 def post_demo(
+    request: Request,
     frames: List[UploadFile] = File(...),
-    engines: str = Form("stub"),
+    engines: str | None = Form(None),
     cadence: int = Form(12),
     smoothness: int = Form(2),
     repository: SessionRepository = Depends(get_session_repository),
@@ -35,22 +40,46 @@ def post_demo(
         raise HTTPException(status_code=400, detail="Need >= 3 frames for the decimate-vs-GT demo")
     full = _load_keys(frames)
 
-    cfg = _session_cfg_or_422(engines=engines, cadence_fps=cadence, smoothness=smoothness)
+    selected_engine = engines or default_engine()
+    cfg = model_or_422(
+        SessionCfg,
+        engines=selected_engine,
+        cadence_fps=cadence,
+        smoothness=smoothness,
+    )
     try:
-        eng = resolve(engines, cfg)
+        controller = engine_admission(selected_engine)
     except UnknownEngine as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    rife = eng.rife_engine
-    if rife is None:
-        raise HTTPException(status_code=400, detail=f"engines {engines!r} has no rife_engine")
+    try:
+        lease = controller.acquire()
+    except RuntimeBusy as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    sid, session_dir = repository.create("copilot_demo")
-    build_demo_videos(full, rife, session_dir, fps=cfg.fps)
-    return {
-        "video": f"/session/{sid}/compare.mp4",          # side-by-side fallback
-        "video_orig": f"/session/{sid}/original.mp4",    # the two separate cuts the
-        "video_rife": f"/session/{sid}/recon.mp4",        # client before/after wipe needs
-        "frames": len(full),
-        "src": len(full[0::2]),
-        "gt": len(full[1::2]),
-    }
+    sid = None
+    try:
+        eng = resolve(selected_engine)
+        rife = eng.rife_engine
+        if rife is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"engines {selected_engine!r} has no rife_engine",
+            )
+
+        sid, session_dir = repository.create("copilot_demo", pin=True)
+        owner_sub = request_user_sub(request)
+        if owner_sub:
+            repository.set_owner(sid, owner_sub)
+        build_demo_videos(full, rife, session_dir, fps=cfg.fps)
+        return {
+            "video": f"/session/{sid}/compare.mp4",
+            "video_orig": f"/session/{sid}/original.mp4",
+            "video_rife": f"/session/{sid}/recon.mp4",
+            "frames": len(full),
+            "src": len(full[0::2]),
+            "gt": len(full[1::2]),
+        }
+    finally:
+        if sid is not None:
+            repository.unpin(sid)
+        lease.release()

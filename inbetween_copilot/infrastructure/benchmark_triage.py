@@ -9,12 +9,12 @@ from benchmark.triage.aggregate import ClipTriage
 from inbetween_copilot.qa.csq.confidence import aggregate
 from inbetween_copilot.qa.csq.conformal import Calibrator, fit
 from inbetween_copilot.qa.csq.verdict import ChannelScore, Decision
+from inbetween_copilot.thresholds import TAU_SOFT
 
 BASE_AUC = {
     "timing": 0.85, "identity": 0.85, "lineart": 0.85,
     "softness": 0.90, "sharpness": 0.70,
 }
-TAU_SOFT = 0.15
 _VLM_LENSES = ("timing", "identity", "lineart")
 _SCORE = {"flag": 1.0, "clean": 0.0, "unsure": 0.5}
 

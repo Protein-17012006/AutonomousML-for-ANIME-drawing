@@ -16,6 +16,7 @@ from inbetween_copilot.qa.csq.confidence import aggregate
 from inbetween_copilot.qa.csq.perturb import flip_rates, perturb_views
 from inbetween_copilot.qa.csq.verdict import Decision
 from inbetween_copilot.qa.models import QAVerdict
+from inbetween_copilot.thresholds import TAU_SOFT, TAU_SRC_MOTION
 
 _VALID_TYPES = {"ghost", "blur", "flicker", "morph", "identity_drift", "scene_break", "none"}
 _VALID_HINTS = {"tl", "tc", "tr", "ml", "mc", "mr", "bl", "bc", "br", "whole", "none"}
@@ -46,7 +47,7 @@ BINARY_PROMPT = (
 
 
 def perceive(frames, *, vlm_fn, softness_fn, holdfix_fn=None,
-             tau_soft: float = 0.15) -> QAVerdict:
+             tau_soft: float = TAU_SOFT) -> QAVerdict:
     soft = float(softness_fn(frames))
     try:
         hf = float(holdfix_fn(frames)) if holdfix_fn is not None else 0.0
@@ -74,7 +75,7 @@ def perceive(frames, *, vlm_fn, softness_fn, holdfix_fn=None,
 def perceive_calibrated(frames, *, channel_fns, base_auc, calibrator,
                         transforms=None, k: int = 4, lam: float = 0.5,
                         stillness_fn=None, tau_still: float = 0.6,
-                        source_motion_fn=None, tau_motion: float = 0.017) -> QAVerdict:
+                        source_motion_fn=None, tau_motion: float = TAU_SRC_MOTION) -> QAVerdict:
     scores = channel_scores(frames, channel_fns=channel_fns)
     views = perturb_views(frames, k=k, transforms=transforms)
     fr = flip_rates(frames, views, channel_fns=channel_fns)
