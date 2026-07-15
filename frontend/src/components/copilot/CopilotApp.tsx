@@ -2,7 +2,9 @@
 // Co-pilot app shell — owns all session state and switches the chat ⇄ board surfaces.
 // The presentational pieces were split out into ./components/* and the logic into ./lib/*
 // (this file used to be a ~1360-line monolith holding all of them).
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { fetchUserAttributes, getCurrentUser, signOut } from "aws-amplify/auth";
 import type { PairEvent, ResultEvent, DemoResult, InputMode } from "./types";
 import {
   runSession,
@@ -22,12 +24,30 @@ import { Compare } from "./components/review/Compare";
 import { Toast } from "./components/review/Toast";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { AppSidebar } from "@/components/common/AppSidebar";
+import { AppSidebar, type SidebarAccount } from "@/components/common/AppSidebar";
+import { authHeaders, getIdentityId } from "@/lib/amplify";
+import {
+  createConversation,
+  getConversationState,
+  listConversations,
+  makeConversationMeta,
+  newConversationId,
+  persistSessionImages,
+  putConversationState,
+  updateConversationMeta,
+} from "@/lib/chatStore";
+import type { ConversationMeta, ConversationState, SessionKind } from "@/models/conversation";
 
 /* cadence value → human "shoot on Ns" label, shared by the upload bubble + the result sampling badge */
 const CADENCE_LABEL: Record<string, string> = { "24": "on-1s", "12": "on-2s", "8": "on-3s" };
 
+function sidFromResult(r: ResultEvent | null) {
+  const ref = r?.artifacts?.montage || r?.artifacts?.video;
+  return ref?.startsWith("/session/") ? ref.split("/")[2] ?? null : null;
+}
+
 export default function App() {
+  const router = useRouter();
   const keys = useFileSet();
   const demo = useFileSet();
   const [engines, setEngines] = useState("box");
@@ -67,6 +87,43 @@ export default function App() {
   const [boardFocus, setBoardFocus] = useState<number | null>(null);
   const [upload, setUpload] = useState<UserTurn | null>(null);
   const [qaTurns, setQaTurns] = useState<QaTurn[]>([]);
+  const [identityId, setIdentityId] = useState<string | null>(null);
+  const [account, setAccount] = useState<SidebarAccount | null>(null);
+  const [cid, setCid] = useState<string | null>(null);
+  const [liveSid, setLiveSid] = useState<string | null>(null);
+  const [conversations, setConversations] = useState<ConversationMeta[]>([]);
+  const [saving, setSaving] = useState(false);
+  const lastSavedRef = useRef<string | null>(null);
+  const lightSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const refreshConversations = useCallback(async (id = identityId) => {
+    if (!id) return;
+    setConversations(await listConversations(id));
+  }, [identityId]);
+
+  useEffect(() => {
+    let active = true;
+    Promise.all([getCurrentUser(), getIdentityId(), fetchUserAttributes()])
+      .then(([user, id, attrs]) => {
+        if (!active) return;
+        setIdentityId(id);
+        setAccount({
+          name: attrs.name || attrs.email || user.username,
+          email: attrs.email,
+        });
+        return listConversations(id);
+      })
+      .then((items) => {
+        if (active && items) setConversations(items);
+      })
+      .catch((err) => {
+        console.error("failed to load Cognito user:", err);
+        router.replace("/login");
+      });
+    return () => {
+      active = false;
+    };
+  }, [router]);
 
   // object URLs for the uploaded keys (key A/B of each pair = keyUrls[i], keyUrls[i+1]).
   const keyUrls = useMemo(
@@ -100,6 +157,9 @@ export default function App() {
     setUpload(null);
     setQaTurns([]);
     setView("chat");
+    setCid(null);
+    setLiveSid(null);
+    lastSavedRef.current = null;
   };
 
   // Switching input mode drops whatever the OTHER mode had staged, so `files` and `videoFile`
@@ -129,6 +189,9 @@ export default function App() {
     setResult(null);
     setVerdicts({});
     setQaTurns([]);
+    setCid(null);
+    setLiveSid(null);
+    lastSavedRef.current = null;
     setUpload({
       label: `${keys.files.length} keyframes · ${engines === "box" ? "Co-pilot (GPU)" : "Demo"} · ${CADENCE_LABEL[cadence] ?? cadence} · ×${smoothness}`,
       thumbs: keyUrls.slice(0, 6),
@@ -137,7 +200,10 @@ export default function App() {
     try {
       await runSession(keys.files, engines, cadence, smoothness, {
         onPair: (p) => setLog((prev) => [...prev, p]),
-        onResult: (r) => setResult(r),
+        onResult: (r) => {
+          setResult(r);
+          setLiveSid(sidFromResult(r));
+        },
         onError: (m) => setBanner(m),
       });
     } catch (err) {
@@ -156,6 +222,9 @@ export default function App() {
     setResult(null);
     setVerdicts({});
     setQaTurns([]);
+    setCid(null);
+    setLiveSid(null);
+    lastSavedRef.current = null;
     setUpload({
       label: `${videoFile.name} · stride ${stride} · ${engines === "box" ? "Co-pilot (GPU)" : "Demo"}`,
       thumbs: [],
@@ -164,7 +233,10 @@ export default function App() {
     try {
       await runVideoSession(videoFile, stride, cadence, smoothness, engines, {
         onPair: (p) => setLog((prev) => [...prev, p]),
-        onResult: (r) => setResult(r),
+        onResult: (r) => {
+          setResult(r);
+          setLiveSid(sidFromResult(r));
+        },
         onError: (m) => setBanner(m),
       });
     } catch (err) {
@@ -179,15 +251,14 @@ export default function App() {
   // draw-key loop: artist supplies a breakdown key for gap `index` → server targeted re-fill.
   // Insert the key at the SAME position client-side (no re-sort) so keyUrls stays index-aligned.
   const refillKey = async (index: number, file: File) => {
-    const ref = result?.artifacts?.montage || result?.artifacts?.video;
-    if (!ref) return;
-    const sid = ref.split("/")[2]; // /session/{sid}/montage.png[?r=n]
+    if (!liveSid) return;
     const fd = new FormData();
     fd.append("index", String(index));
     fd.append("key", file);
     try {
-      const resp = await fetch(`/session/${sid}/key`, {
+      const resp = await fetch(`/session/${liveSid}/key`, {
         method: "POST",
+        headers: await authHeaders(),
         body: fd,
       });
       if (!resp.ok) {
@@ -212,6 +283,7 @@ export default function App() {
       });
       setLog(d.pairs);
       setResult(d.result);
+      setLiveSid(sidFromResult(d.result));
     } catch (err) {
       console.error("add-key failed:", err);
       setBanner("Couldn't add your key — is the service running? Try again.");
@@ -243,13 +315,11 @@ export default function App() {
   // grounded session Q&A → POST /session/{sid}/ask (sid via the same artifact-URL
   // trick refillKey uses); the pending turn renders as a typing indicator.
   const onAsk = async (q: string) => {
-    const ref = result?.artifacts?.montage || result?.artifacts?.video;
-    const sid = ref ? ref.split("/")[2] : null;
-    if (!sid) return;
+    if (!liveSid) return;
     const n = qaTurns.length;
     setQaTurns((prev) => [...prev, { q, answer: null }]);
     try {
-      const r = await askQuestion(sid, q);
+      const r = await askQuestion(liveSid, q);
       setQaTurns((prev) =>
         prev.map((t, i) =>
           i === n ? { ...t, answer: r.answer, grounded: r.grounded } : t,
@@ -271,6 +341,156 @@ export default function App() {
     }
   };
 
+  const currentState = useCallback(
+    (): ConversationState => ({
+      schemaVersion: 1,
+      upload,
+      log,
+      result,
+      qaTurns,
+      verdicts,
+    }),
+    [upload, log, result, qaTurns, verdicts],
+  );
+
+  useEffect(() => {
+    if (!identityId || !result || running) return;
+    const marker = result.artifacts?.montage || result.artifacts?.video;
+    if (!marker || lastSavedRef.current === marker) return;
+
+    let cancelled = false;
+    async function saveCompletedRun() {
+      if (!identityId || !result || !upload) return;
+      setSaving(true);
+      try {
+        const nextCid = cid ?? newConversationId();
+        const persisted = await persistSessionImages({
+          cid: nextCid,
+          identityId,
+          state: currentState(),
+          keyFiles: keys.files,
+          videoFile,
+        });
+        if (cancelled) return;
+        const kind: SessionKind = videoFile ? "video" : "png";
+        const meta = makeConversationMeta({
+          identityId,
+          cid: nextCid,
+          title: upload.label,
+          kind,
+          engines,
+          fps: Number(cadence) || 12,
+          stride: Number(stride) || 2,
+          sid: liveSid,
+          uploadLabel: upload.label,
+          thumb: persisted.result?.artifacts?.montage ?? null,
+        });
+        if (cid) {
+          await updateConversationMeta(identityId, nextCid, {
+            title: meta.title,
+            kind: meta.kind,
+            engines: meta.engines,
+            fps: meta.fps,
+            stride: meta.stride,
+            sid: meta.sid,
+            uploadLabel: meta.uploadLabel,
+            thumb: meta.thumb,
+            updatedAt: meta.updatedAt,
+            schemaVersion: meta.schemaVersion,
+          });
+        } else {
+          await createConversation(meta);
+        }
+        if (cancelled) return;
+        setCid(nextCid);
+        lastSavedRef.current = marker ?? null;
+        await refreshConversations(identityId);
+      } catch (err) {
+        console.error("save conversation failed:", err);
+        if (!cancelled) setBanner("Session finished, but saving history failed.");
+      } finally {
+        if (!cancelled) setSaving(false);
+      }
+    }
+
+    void saveCompletedRun();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    cadence,
+    cid,
+    currentState,
+    engines,
+    identityId,
+    keys.files,
+    liveSid,
+    refreshConversations,
+    result,
+    running,
+    stride,
+    upload,
+    videoFile,
+  ]);
+
+  useEffect(() => {
+    if (!identityId || !cid || !result) return;
+    if (lightSaveTimer.current) clearTimeout(lightSaveTimer.current);
+    lightSaveTimer.current = setTimeout(() => {
+      setSaving(true);
+      putConversationState(identityId, cid, currentState())
+        .then(() =>
+          updateConversationMeta(identityId, cid, {
+            updatedAt: Date.now(),
+          }),
+        )
+        .then(() => refreshConversations(identityId))
+        .catch((err) => {
+          console.error("light save failed:", err);
+        })
+        .finally(() => setSaving(false));
+    }, 800);
+    return () => {
+      if (lightSaveTimer.current) clearTimeout(lightSaveTimer.current);
+    };
+  }, [cid, currentState, identityId, qaTurns, refreshConversations, result, verdicts]);
+
+  const openConversation = async (conversation: ConversationMeta) => {
+    if (!identityId) return;
+    setSaving(true);
+    try {
+      const state = await getConversationState(identityId, conversation.cid);
+      keys.clear();
+      setVideoFile(null);
+      setUpload(state.upload);
+      setLog(state.log);
+      setResult(state.result);
+      setQaTurns(state.qaTurns);
+      setVerdicts(state.verdicts);
+      setCid(conversation.cid);
+      setLiveSid(null);
+      lastSavedRef.current = state.result?.artifacts?.montage || `restore:${conversation.cid}`;
+      setView("chat");
+      setBanner(null);
+    } catch (err) {
+      console.error("open conversation failed:", err);
+      setBanner("Couldn't open that saved chat.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const startNewChat = () => {
+    clearAll();
+    setVideoFile(null);
+  };
+
+  const handleSignOut = async () => {
+    await signOut();
+    setConversations([]);
+    router.replace("/login");
+  };
+
   const msgs = useMemo(
     () => deriveMessages({ upload, log, result, running, banner, qa: qaTurns }),
     [upload, log, result, running, banner, qaTurns],
@@ -288,7 +508,15 @@ export default function App() {
     <TooltipProvider>
       {/* App shell — left sidebar rail + the main content column (.app). */}
       <SidebarProvider className="copilot-shell">
-        <AppSidebar />
+        <AppSidebar
+          conversations={conversations}
+          activeCid={cid}
+          saving={saving}
+          account={account}
+          onSelect={openConversation}
+          onNewChat={startNewChat}
+          onSignOut={handleSignOut}
+        />
         <div className="app">
           {view === "chat" ? (
         <div className="chat-page">
@@ -333,7 +561,7 @@ export default function App() {
             onRunVideo={runVideo}
             running={running}
             compact={running || log.length > 0}
-            askEnabled={!!result?.artifacts}
+            askEnabled={!!result?.artifacts && !!liveSid}
             onAsk={onAsk}
           />
         </div>

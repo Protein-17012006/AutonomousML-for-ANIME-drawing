@@ -1,9 +1,6 @@
 "use client";
 
-// App-shell left rail for the co-pilot. TEMPLATE + STYLES ONLY — the tabs, history and account
-// are static placeholders (no navigation/data/auth wiring yet). Built on the shadcn Sidebar
-// (collapsible="icon" → icons-only on desktop, off-canvas Sheet drawer on mobile). Themed to the
-// copilot ink palette via the --sidebar-* remap on .copilot-shell/body in copilot.css.
+import type { ConversationMeta } from "@/models/conversation";
 import {
   Sidebar,
   SidebarHeader,
@@ -17,39 +14,65 @@ import {
   SidebarRail,
   useSidebar,
 } from "@/components/ui/sidebar";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { BrandIcon } from "@/components/common/BrandIcon";
 import {
-  MessageSquare,
-  LayoutGrid,
   History,
+  LayoutGrid,
+  LogOut,
+  MessageSquare,
   PanelLeftClose,
   PanelLeftOpen,
+  Plus,
 } from "lucide-react";
 
-// Static placeholder history — real sessions get wired in later.
-const SESSIONS: { id: string; title: string }[] = [
-  { id: "s1", title: "Genga pair 03 · walk cycle" },
-  { id: "s2", title: "Hair overlap · 12 keys" },
-  { id: "s3", title: "Clip: run_test_final.mp4" },
-  { id: "s4", title: "Blink retime · stride 2" },
-  { id: "s5", title: "Cape sim cleanup" },
-];
+export interface SidebarAccount {
+  name: string;
+  email?: string;
+}
 
-export function AppSidebar() {
+interface AppSidebarProps {
+  conversations: ConversationMeta[];
+  activeCid: string | null;
+  saving: boolean;
+  account: SidebarAccount | null;
+  onSelect: (conversation: ConversationMeta) => void;
+  onNewChat: () => void;
+  onSignOut: () => void;
+}
+
+function initials(account: SidebarAccount | null) {
+  const source = account?.name || account?.email || "Animator";
+  return source
+    .split(/\s|@/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("");
+}
+
+export function AppSidebar({
+  conversations,
+  activeCid,
+  saving,
+  account,
+  onSelect,
+  onNewChat,
+  onSignOut,
+}: AppSidebarProps) {
   const { state, isMobile, toggleSidebar } = useSidebar();
-  // Only the DESKTOP icon-rail turns the brand into a hover-to-expand control. Inside the mobile
-  // Sheet drawer (isMobile) the brand stays a plain, non-hovering logo.
   const collapsedRail = state === "collapsed" && !isMobile;
 
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
-        {/* Brand + desktop collapse toggle. When collapsed to icons the title and the collapse
-            toggle fold away, so the brand mark itself becomes the click target to EXPAND
-            (the thin rail / ⌘B still work too). When expanded it's a plain, non-focusable logo —
-            the dedicated toggle on the right handles collapsing. */}
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <button
@@ -66,8 +89,6 @@ export function AppSidebar() {
             >
               {collapsedRail ? (
                 <>
-                  {/* collapsed rail: the brand IS the expand control. Show the BrandIcon by
-                      default; on hover flip it to the collapsible icon to signal the click. */}
                   <span className="flex group-hover/brand:hidden">
                     <BrandIcon />
                   </span>
@@ -77,8 +98,6 @@ export function AppSidebar() {
                 <BrandIcon />
               )}
             </button>
-            {/* whitespace-nowrap: keep the title on one line so it doesn't wrap/jump while the
-                rail animates its width open. */}
             <span className="font-display text-sm whitespace-nowrap text-washi group-data-[collapsible=icon]:hidden">
               In-Between Co-pilot
             </span>
@@ -96,7 +115,6 @@ export function AppSidebar() {
       </SidebarHeader>
 
       <SidebarContent>
-        {/* Working tabs — icons remain when collapsed; the tooltip labels them on hover. */}
         <SidebarGroup>
           <SidebarMenu>
             <SidebarMenuItem>
@@ -114,15 +132,27 @@ export function AppSidebar() {
           </SidebarMenu>
         </SidebarGroup>
 
-        {/* Session history — hidden when collapsed (per-item titles are meaningless as icons). */}
         <SidebarGroup className="group-data-[collapsible=icon]:hidden">
-          <SidebarGroupLabel>History</SidebarGroupLabel>
+          <div className="flex items-center justify-between gap-2">
+            <SidebarGroupLabel>History</SidebarGroupLabel>
+            {saving && <span className="text-xs text-ash">Saving...</span>}
+          </div>
           <SidebarMenu>
-            {SESSIONS.map((s) => (
-              <SidebarMenuItem key={s.id}>
-                <SidebarMenuButton className="text-ash">
+            <SidebarMenuItem>
+              <SidebarMenuButton onClick={onNewChat} className="text-washi">
+                <Plus />
+                <span>New chat</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            {conversations.map((conversation) => (
+              <SidebarMenuItem key={conversation.cid}>
+                <SidebarMenuButton
+                  isActive={conversation.cid === activeCid}
+                  onClick={() => onSelect(conversation)}
+                  className="text-ash"
+                >
                   <History />
-                  <span className="truncate">{s.title}</span>
+                  <span className="truncate">{conversation.title}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             ))}
@@ -131,20 +161,31 @@ export function AppSidebar() {
       </SidebarContent>
 
       <SidebarFooter>
-        {/* Account — collapses to just the avatar. */}
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton size="lg">
-              <Avatar className="h-8 w-8">
-                <AvatarFallback>AN</AvatarFallback>
-              </Avatar>
-              <div className="flex flex-col gap-0.5 group-data-[collapsible=icon]:hidden">
-                <span className="truncate text-sm text-washi">Animator</span>
-                <Badge variant="outline" className="border-line text-ash">
-                  Free
-                </Badge>
-              </div>
-            </SidebarMenuButton>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <SidebarMenuButton size="lg">
+                  <Avatar className="h-8 w-8">
+                    <AvatarFallback>{initials(account)}</AvatarFallback>
+                  </Avatar>
+                  <div className="flex flex-col gap-0.5 group-data-[collapsible=icon]:hidden">
+                    <span className="truncate text-sm text-washi">
+                      {account?.name || "Animator"}
+                    </span>
+                    <Badge variant="outline" className="border-line text-ash">
+                      {account?.email || "Signed in"}
+                    </Badge>
+                  </div>
+                </SidebarMenuButton>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent side="top" align="start">
+                <DropdownMenuItem onClick={onSignOut}>
+                  <LogOut />
+                  Sign out
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarFooter>

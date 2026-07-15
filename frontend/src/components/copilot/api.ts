@@ -1,5 +1,6 @@
 // API layer — talks to the FastAPI co-pilot service (same contract as the old web/app.js).
 import type { PairEvent, ResultEvent, DemoResult } from "./types";
+import { authHeaders } from "@/lib/amplify";
 
 interface SSEEvent {
   name: string;
@@ -64,7 +65,11 @@ export async function runSession(
   fd.append("cadence", cadence || "12");
   fd.append("smoothness", smoothness || "2");
 
-  const resp = await fetch("/session", { method: "POST", body: fd });
+  const resp = await fetch("/session", {
+    method: "POST",
+    headers: await authHeaders(),
+    body: fd,
+  });
   if (!resp.ok || !resp.body) {
     h.onError(`POST /session failed: ${resp.status}`);
     return;
@@ -92,7 +97,11 @@ export async function runVideoSession(
   fd.append("cadence", cadence || "12");
   fd.append("smoothness", smoothness || "2");
 
-  const resp = await fetch("/session/video", { method: "POST", body: fd });
+  const resp = await fetch("/session/video", {
+    method: "POST",
+    headers: await authHeaders(),
+    body: fd,
+  });
   if (!resp.ok || !resp.body) {
     let detail = `POST /session/video failed: ${resp.status}`;
     if (resp.status === 413) {
@@ -118,7 +127,7 @@ export async function runVideoSession(
 export type PlantedCase = { id: string; title: string; planted_type: string };
 
 export async function fetchPlantedCases(): Promise<PlantedCase[]> {
-  const resp = await fetch("/session/planted/cases");
+  const resp = await fetch("/session/planted/cases", { headers: await authHeaders() });
   if (!resp.ok) return [];
   return ((await resp.json()) as { cases: PlantedCase[] }).cases ?? [];
 }
@@ -135,7 +144,11 @@ export async function runPlantedSession(
   fd.append("engines", engines);
   fd.append("cadence", cadence || "12");
   fd.append("smoothness", smoothness || "2");
-  const resp = await fetch("/session/planted", { method: "POST", body: fd });
+  const resp = await fetch("/session/planted", {
+    method: "POST",
+    headers: await authHeaders(),
+    body: fd,
+  });
   if (!resp.ok || !resp.body) {
     h.onError(`POST /session/planted failed: ${resp.status}`);
     return;
@@ -151,7 +164,7 @@ export async function askQuestion(
 ): Promise<{ answer: string; grounded: boolean }> {
   const resp = await fetch(`/session/${sid}/ask`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
     body: JSON.stringify({ question }),
   });
   if (!resp.ok) throw new Error(`/ask failed: ${resp.status}`);
@@ -164,7 +177,11 @@ export async function runDemo(files: File[], engines: string, fps: string): Prom
   for (const f of files) fd.append("frames", f);
   fd.append("engines", engines);
   fd.append("fps", fps || "48");
-  const resp = await fetch("/demo", { method: "POST", body: fd });
+  const resp = await fetch("/demo", {
+    method: "POST",
+    headers: await authHeaders(),
+    body: fd,
+  });
   if (!resp.ok) throw new Error(`/demo failed: ${resp.status}`);
   return (await resp.json()) as DemoResult;
 }

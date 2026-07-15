@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { ThemeProvider } from "@/components/ThemeProvider";
+import { AmplifyBoot } from "@/components/AmplifyBoot";
 import "./globals.css";
 import {
   Geist,
@@ -53,14 +54,16 @@ export default function RootLayout({ children }: Readonly<RootLayoutProps>) {
     >
       <head></head>
       <body>
-        <ThemeProvider
-          attribute="class"
-          defaultTheme="system"
-          enableSystem
-          disableTransitionOnChange
-        >
-          {children}
-        </ThemeProvider>
+        <AmplifyBoot>
+          <ThemeProvider
+            attribute="class"
+            defaultTheme="system"
+            enableSystem
+            disableTransitionOnChange
+          >
+            {children}
+          </ThemeProvider>
+        </AmplifyBoot>
       </body>
     </html>
   );

@@ -1,9 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ArrowLeft, Check } from "lucide-react";
 import { REGEXP_ONLY_DIGITS } from "input-otp";
+import { autoSignIn, confirmSignUp, resendSignUpCode } from "aws-amplify/auth";
 import { Button } from "@/components/ui/button";
 import {
   InputOTP,
@@ -11,22 +13,54 @@ import {
   InputOTPSeparator,
   InputOTPSlot,
 } from "@/components/ui/input-otp";
+import { configureAmplify } from "@/lib/amplify";
 
-// Email confirmation-code form. TEMPLATE ONLY — submit is a client-side stub (preventDefault); the
-// code is not checked against anything. Stage 3 wires this to the real verification call. Uses the
-// shadcn `input-otp` component (6 digits, split 3-3) for accessible type/paste/keyboard handling.
-// Shares AuthShell with the other auth pages.
 const CODE_LENGTH = 6;
 
 export function VerifyEmailForm() {
+  const router = useRouter();
   const [value, setValue] = useState("");
+  const email = useSyncExternalStore(
+    () => () => undefined,
+    () => sessionStorage.getItem("copilot:pendingEmail") ?? "",
+    () => "",
+  );
   const [verified, setVerified] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
-  const complete = value.length === CODE_LENGTH;
+  const complete = value.length === CODE_LENGTH && !!email;
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (complete) setVerified(true);
+    if (!complete) return;
+    configureAmplify();
+    setError(null);
+    setSubmitting(true);
+    try {
+      await confirmSignUp({ username: email, confirmationCode: value });
+      try {
+        await autoSignIn();
+        router.replace("/copilot");
+      } catch {
+        setVerified(true);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Verification failed.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function resend() {
+    if (!email) return;
+    configureAmplify();
+    setError(null);
+    try {
+      await resendSignUpCode({ username: email });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not resend the code.");
+    }
   }
 
   if (verified) {
@@ -48,6 +82,11 @@ export function VerifyEmailForm() {
 
   return (
     <div className="flex flex-col gap-5">
+      {!email && (
+        <p className="text-center text-sm text-muted-foreground">
+          Start from signup or sign in again so we know which email to verify.
+        </p>
+      )}
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
         <div className="flex justify-center">
           <InputOTP
@@ -73,17 +112,19 @@ export function VerifyEmailForm() {
 
         <Button
           type="submit"
-          disabled={!complete}
+          disabled={!complete || submitting}
           className="h-10 w-full border-0 bg-linear-to-r from-purple-500 to-pink-500 text-white hover:opacity-90"
         >
-          Verify email
+          {submitting ? "Verifying..." : "Verify email"}
         </Button>
+        {error && <p className="text-sm text-destructive">{error}</p>}
       </form>
 
       <p className="text-center font-body text-sm text-muted-foreground">
         Didn&apos;t get a code?{" "}
         <button
           type="button"
+          onClick={resend}
           className="font-medium text-foreground hover:underline"
         >
           Resend

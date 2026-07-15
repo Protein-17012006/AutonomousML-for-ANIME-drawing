@@ -1,20 +1,49 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { ArrowLeft, Check } from "lucide-react";
+import { confirmResetPassword } from "aws-amplify/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { configureAmplify } from "@/lib/amplify";
 
-// New-password form (landed on from a reset link). TEMPLATE ONLY — submit is a client-side stub
-// (preventDefault); nothing is saved. Stage 3 wires this to Firebase Auth (confirmPasswordReset).
-// Plain <label> is used (no shadcn Label component installed). Shares AuthShell with the other auth pages.
 export function ResetPasswordForm() {
   const [done, setDone] = useState(false);
+  const pendingEmail = useSyncExternalStore(
+    () => () => undefined,
+    () => sessionStorage.getItem("copilot:pendingEmail") ?? "",
+    () => "",
+  );
+  const [code, setCode] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    setDone(true);
+    configureAmplify();
+    setError(null);
+    const form = new FormData(e.currentTarget);
+    const email = String(form.get("email") ?? "").trim();
+    const password = String(form.get("password") ?? "");
+    const confirm = String(form.get("confirm-password") ?? "");
+    if (password !== confirm) {
+      setError("Passwords do not match.");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await confirmResetPassword({
+        username: email,
+        confirmationCode: code,
+        newPassword: password,
+      });
+      setDone(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not reset password.");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   if (done) {
@@ -38,16 +67,46 @@ export function ResetPasswordForm() {
     <div className="flex flex-col gap-5">
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
         <div className="flex flex-col gap-2">
-          <label
-            htmlFor="password"
-            className="font-body text-sm font-medium text-foreground"
-          >
+          <label htmlFor="email" className="font-body text-sm font-medium text-foreground">
+            Email
+          </label>
+          <Input
+            id="email"
+            name="email"
+            type="email"
+            required
+            autoComplete="email"
+            defaultValue={pendingEmail}
+            placeholder="you@studio.com"
+            className="h-10"
+          />
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <label htmlFor="code" className="font-body text-sm font-medium text-foreground">
+            Reset code
+          </label>
+          <Input
+            id="code"
+            name="code"
+            required
+            inputMode="numeric"
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            placeholder="6-digit code"
+            className="h-10"
+          />
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <label htmlFor="password" className="font-body text-sm font-medium text-foreground">
             New password
           </label>
           <Input
             id="password"
             name="password"
             type="password"
+            required
             autoComplete="new-password"
             placeholder="At least 8 characters"
             className="h-10"
@@ -65,6 +124,7 @@ export function ResetPasswordForm() {
             id="confirm-password"
             name="confirm-password"
             type="password"
+            required
             autoComplete="new-password"
             placeholder="Re-enter your new password"
             className="h-10"
@@ -73,10 +133,12 @@ export function ResetPasswordForm() {
 
         <Button
           type="submit"
+          disabled={submitting}
           className="h-10 w-full border-0 bg-linear-to-r from-purple-500 to-pink-500 text-white hover:opacity-90"
         >
-          Reset password
+          {submitting ? "Resetting..." : "Reset password"}
         </Button>
+        {error && <p className="text-sm text-destructive">{error}</p>}
       </form>
 
       <Button asChild variant="ghost" className="h-9 w-full">

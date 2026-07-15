@@ -41,9 +41,10 @@ export function ReviewWorkbench({
   const [filter, setFilter] = useState<Filter>("all");
   const [focused, setFocused] = useState<number | null>(initialFocus ?? null);
   // re-entering the board from a different chat bubble refocuses that pair
-  // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional deep-link focus sync from a chat bubble
   useEffect(() => {
-    if (initialFocus != null) setFocused(initialFocus);
+    if (initialFocus == null) return;
+    const frame = requestAnimationFrame(() => setFocused(initialFocus));
+    return () => cancelAnimationFrame(frame);
   }, [initialFocus]);
   const [exported, setExported] = useState(false); // Export ⤓ → clean-cel ✓ morph
   const [glider, setGlider] = useState({ left: 0, width: 0 }); // sliding "current-cel" triage marker

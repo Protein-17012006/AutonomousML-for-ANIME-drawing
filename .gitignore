@@ -34,6 +34,9 @@ Vault/
 # Coding agents - Claude
 .claude/
 
+# Local agent instructions
+AGENTS.md
+
 # Coding agents - skills / agent tooling
 .agents/
 skills-lock.json
