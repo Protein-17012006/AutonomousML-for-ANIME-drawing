@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import secrets
 import tempfile
-from typing import Protocol
+import threading
+from contextlib import contextmanager
+from typing import ContextManager, Protocol
 
 from service.sessions.store import BoundedSessionStore
 
@@ -15,8 +17,11 @@ def _random_sids():
 
 
 class SessionRepository(Protocol):
-    def create(self, prefix: str = "copilot_session") -> tuple[int, str]: ...
+    def create(self, prefix: str = "copilot_session", *, pin: bool = False) -> tuple[int, str]: ...
     def register_path(self, sid: int, path: str) -> None: ...
+    def pin(self, sid: int) -> None: ...
+    def unpin(self, sid: int) -> None: ...
+    def session_transaction(self, sid: int) -> ContextManager[None]: ...
     def path_for(self, sid: int) -> str | None: ...
     def state_for(self, sid: int) -> dict | None: ...
     def save_state(self, sid: int, state: dict) -> None: ...
@@ -36,31 +41,70 @@ class InMemorySessionRepository:
         self.owners: dict[int, str] = {}
         self.paths = BoundedSessionStore(cap=cap, state=self.states)
         self.id_source = id_source or _random_sids()
+        self._lock = threading.RLock()
+        self._session_locks: dict[int, threading.RLock] = {}
 
-    def create(self, prefix: str = "copilot_session") -> tuple[int, str]:
-        sid = next(self.id_source)
-        path = tempfile.mkdtemp(prefix=f"{prefix}_{sid}_")
-        self.register_path(sid, path)
-        return sid, path
+    def create(self, prefix: str = "copilot_session", *, pin: bool = False) -> tuple[int, str]:
+        with self._lock:
+            sid = next(self.id_source)
+            path = tempfile.mkdtemp(prefix=f"{prefix}_{sid}_")
+            self.paths.add(sid, path, pin=pin)
+            self._prune_owners()
+            return sid, path
 
     def register_path(self, sid: int, path: str) -> None:
-        self.paths[sid] = path
+        with self._lock:
+            self.paths[sid] = path
+            self._prune_owners()
+
+    def pin(self, sid: int) -> None:
+        self.paths.pin(sid)
+
+    def unpin(self, sid: int) -> None:
+        with self._lock:
+            self.paths.unpin(sid)
+            self._prune_owners()
+
+    @contextmanager
+    def session_transaction(self, sid: int):
+        """Serialize one session mutation and keep its artifacts alive."""
+        with self._lock:
+            self.paths.pin(sid)
+            lock = self._session_locks.setdefault(sid, threading.RLock())
+        try:
+            with lock:
+                yield
+        finally:
+            self.unpin(sid)
 
     def path_for(self, sid: int) -> str | None:
-        return self.paths.get(sid)
+        with self._lock:
+            return self.paths.get(sid)
 
     def state_for(self, sid: int) -> dict | None:
-        return self.states.get(sid)
+        with self._lock:
+            return self.states.get(sid)
 
     def save_state(self, sid: int, state: dict) -> None:
-        if sid not in self.paths:
-            raise KeyError(f"session {sid} has no registered artifact path")
-        self.states[sid] = state
+        with self._lock:
+            if sid not in self.paths:
+                raise KeyError(f"session {sid} has no registered artifact path")
+            self.states[sid] = state
 
     def set_owner(self, sid: int, sub: str) -> None:
-        # prune owners of sessions the bounded store already evicted
-        self.owners = {s: o for s, o in self.owners.items() if s in self.paths}
-        self.owners[sid] = sub
+        with self._lock:
+            self._prune_owners()
+            self.owners[sid] = sub
 
     def owner_for(self, sid: int) -> str | None:
-        return self.owners.get(sid)
+        with self._lock:
+            return self.owners.get(sid)
+
+    def _prune_owners(self) -> None:
+        # Keep the same dictionary object: callers/tests may retain a reference.
+        for sid in tuple(self.owners):
+            if sid not in self.paths:
+                self.owners.pop(sid, None)
+        for sid in tuple(self._session_locks):
+            if sid not in self.paths:
+                self._session_locks.pop(sid, None)

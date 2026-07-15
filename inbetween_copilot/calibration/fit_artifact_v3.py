@@ -20,12 +20,13 @@ from inbetween_copilot.qa.csq.conformal import fit
 from inbetween_copilot.qa.csq.models import CSQArtifact
 from inbetween_copilot.infrastructure.artifact_json import CSQArtifactJsonStore
 from inbetween_copilot.qa.csq.features import clip_su
+from inbetween_copilot.thresholds import TAU_SOFT
 
 CALIB = "benchmark/suites/suite_csq_calibration/manifest.json"
 SMALLGAP = "benchmark/suites/suite_smallgap/clips"
 OUT = "inbetween_copilot/artifacts/csq_smallgap_v3.json"
 BASE_AUC = {"vlm": 0.90, "softness": 0.90, "sharpness": 0.70}
-TAU_SOFT, K = 0.15, 4
+K = 4
 ALPHA_MISS, U_MAX, N_BINS = 0.05, 0.6, 3
 
 

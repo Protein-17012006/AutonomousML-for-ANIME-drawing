@@ -69,8 +69,7 @@ def global_shift_fraction(a, b) -> float:
     return max(0.0, min(1.0, 1.0 - after / before))
 
 
-def classify_gap(a, b, *, gap: float, regime: str, has_cut: bool,
-                 tau_gate: float = 0.017) -> GapTriage:
+def classify_gap(a, b, *, gap: float, regime: str, has_cut: bool) -> GapTriage:
     shift = global_shift_fraction(a, b)
     ev = {"gap": round(float(gap), 4), "shift_frac": round(shift, 3), "regime": regime}
     if has_cut:

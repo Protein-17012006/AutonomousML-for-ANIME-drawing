@@ -4,15 +4,16 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from inbetween_copilot.domain.states import PairAction, Route
 from inbetween_copilot.pipeline.plan_models import KeyPlan, PairPlan
-from inbetween_copilot.pipeline.states import PairAction, Route
 from inbetween_copilot.qa.models import FrameQA
+from inbetween_copilot.thresholds import TAU_GATE, TAU_SOFT
 
 
 @dataclass(frozen=True)
 class CopilotCfg:
-    tau_gate: float = 0.017
-    tau_soft: float = 0.15
+    tau_gate: float = TAU_GATE
+    tau_soft: float = TAU_SOFT
 
 
 @dataclass
@@ -25,6 +26,7 @@ class PairResult:
     keys_requested: int
     correction: Any = None
     triage: Any = None
+    regime: str | None = None
 
     def __post_init__(self) -> None:
         self.action = PairAction(self.action)

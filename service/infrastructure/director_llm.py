@@ -11,16 +11,16 @@ do not import the quarantined legacy/*/llm/deepseek_client.py.
 from __future__ import annotations
 
 import json
-import os
-import re
 import sys
 import urllib.request
+
+from service.core.json_tools import first_json_object
+from service.core.config import ConfigurationError, DirectorSettings
 
 # DeepSeek CoT models spend max_tokens on hidden reasoning (ADR-0007): give the
 # JSON answer headroom or small caps get fully consumed by the CoT.
 _REASONING_MODELS = ("reasoner", "v4-pro")
 _REASONING_HEADROOM = 8000
-_JSON_RE = re.compile(r"\{.*\}", re.S)
 
 
 def _default_poster(url: str, body: bytes, headers: dict) -> str:
@@ -28,22 +28,43 @@ def _default_poster(url: str, body: bytes, headers: dict) -> str:
     return urllib.request.urlopen(req, timeout=120).read().decode("utf-8")
 
 
+def _client_config(api_key: str | None, base_url: str | None,
+                   model: str | None, max_tokens: int):
+    """Resolve the shared OpenAI-compatible endpoint contract once."""
+    settings = DirectorSettings.from_env()
+    key = (api_key if api_key is not None else settings.api_key or "").strip()
+    if not key:
+        return None
+    base = (base_url or settings.base_url).rstrip("/")
+    from urllib.parse import urlparse
+    parsed = urlparse(base)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ConfigurationError("DeepSeek base URL must be absolute http(s)")
+    selected_model = model or settings.model
+    effective_max = max_tokens + (
+        _REASONING_HEADROOM
+        if any(token in selected_model for token in _REASONING_MODELS) else 0
+    )
+    return {
+        "url": base + "/chat/completions",
+        "model": selected_model,
+        "max_tokens": effective_max,
+        "headers": {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {key}",
+        },
+    }
+
+
 def make_reason_fn(*, api_key: str | None = None, base_url: str | None = None,
                    model: str | None = None, max_tokens: int = 256, poster=None):
     """Build the director's reason_fn, or return None when unconfigured."""
-    api_key = (api_key if api_key is not None
-               else os.environ.get("DEEPSEEK_API_KEY", "")).strip()
-    if not api_key:
+    client = _client_config(api_key, base_url, model, max_tokens)
+    if client is None:
         return None
-    base = (base_url or os.environ.get("DEEPSEEK_BASE_URL")
-            or "https://api.deepseek.com/v1").rstrip("/")
-    model = model or os.environ.get("DEEPSEEK_MODEL", "").strip() or "deepseek-chat"
     post = poster or _default_poster
-    url = base + "/chat/completions"
-    eff_max = max_tokens + (_REASONING_HEADROOM
-                            if any(t in model for t in _REASONING_MODELS) else 0)
-    headers = {"Content-Type": "application/json",
-               "Authorization": f"Bearer {api_key}"}
+    url, model = client["url"], client["model"]
+    eff_max, headers = client["max_tokens"], client["headers"]
     _warned = []   # one-shot "director degraded" notice, mirrors _post_vlm
 
     def reason_fn(prompt: str) -> dict:
@@ -54,8 +75,7 @@ def make_reason_fn(*, api_key: str | None = None, base_url: str | None = None,
         try:
             reply = json.loads(post(url, body, headers))
             txt = reply["choices"][0]["message"]["content"] or ""
-            m = _JSON_RE.search(txt)
-            return json.loads(m.group(0)) if m else {}
+            return first_json_object(txt) or {}
         except Exception as e:
             if not _warned:
                 print(f"[director_llm] DeepSeek at {url} unavailable ({e!r}); "
@@ -73,19 +93,12 @@ def make_ask_fn(*, api_key: str | None = None, base_url: str | None = None,
     (vault 'Chat-First Copilot Surface' §3). Returns the reply TEXT; '' on any
     failure (the route then serves the deterministic fallback). None when no
     API key is configured."""
-    api_key = (api_key if api_key is not None
-               else os.environ.get("DEEPSEEK_API_KEY", "")).strip()
-    if not api_key:
+    client = _client_config(api_key, base_url, model, max_tokens)
+    if client is None:
         return None
-    base = (base_url or os.environ.get("DEEPSEEK_BASE_URL")
-            or "https://api.deepseek.com/v1").rstrip("/")
-    model = model or os.environ.get("DEEPSEEK_MODEL", "").strip() or "deepseek-chat"
     post = poster or _default_poster
-    url = base + "/chat/completions"
-    eff_max = max_tokens + (_REASONING_HEADROOM
-                            if any(t in model for t in _REASONING_MODELS) else 0)
-    headers = {"Content-Type": "application/json",
-               "Authorization": f"Bearer {api_key}"}
+    url, model = client["url"], client["model"]
+    eff_max, headers = client["max_tokens"], client["headers"]
     _warned = []
 
     def ask_fn(prompt: str) -> str:
@@ -119,19 +132,12 @@ def make_ask_stream_fn(*, api_key: str | None = None, base_url: str | None = Non
     that yields reply-text deltas from DeepSeek's SSE (`stream: true`). Yields
     nothing on any failure (the caller then serves the fallback decision);
     None when no API key is configured."""
-    api_key = (api_key if api_key is not None
-               else os.environ.get("DEEPSEEK_API_KEY", "")).strip()
-    if not api_key:
+    client = _client_config(api_key, base_url, model, max_tokens)
+    if client is None:
         return None
-    base = (base_url or os.environ.get("DEEPSEEK_BASE_URL")
-            or "https://api.deepseek.com/v1").rstrip("/")
-    model = model or os.environ.get("DEEPSEEK_MODEL", "").strip() or "deepseek-chat"
     op = opener or _default_stream_opener
-    url = base + "/chat/completions"
-    eff_max = max_tokens + (_REASONING_HEADROOM
-                            if any(t in model for t in _REASONING_MODELS) else 0)
-    headers = {"Content-Type": "application/json",
-               "Authorization": f"Bearer {api_key}"}
+    url, model = client["url"], client["model"]
+    eff_max, headers = client["max_tokens"], client["headers"]
     _warned = []
 
     def ask_stream_fn(prompt: str):

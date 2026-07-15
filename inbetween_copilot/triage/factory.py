@@ -1,7 +1,7 @@
 """Factory for the real (signals-based class + DeepSeek brief) triage_fn.
 
 Lives in inbetween_copilot/ (not service/) so both service.infrastructure.engines.box_engines
-(Task 8) and inbetween_copilot.pipeline.wiring.build_real_callables (Task 10)
+    (Task 8) and inbetween_copilot.composition.build_real_ports (Task 10)
 can wire the same triage_fn without an upward import from pipeline/ into
 service/. service.infrastructure.engines re-exports make_triage_fn at module level so
 `from service.infrastructure.engines import make_triage_fn` keeps working for callers/tests

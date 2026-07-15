@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from inbetween_copilot.generate.models import CorrectionAction, CorrectionActionKind
+from inbetween_copilot.generate.ports import AskKey, Escalate, Refill, SplitFill
 
 
 @dataclass(frozen=True)
@@ -15,10 +16,10 @@ class CommandOutcome:
 
 @dataclass(frozen=True)
 class CorrectionCommands:
-    refill_fn: object
-    escalate_fn: object
-    askkey_fn: object
-    split_fill_fn: object
+    refill_fn: Refill
+    escalate_fn: Escalate
+    askkey_fn: AskKey
+    split_fill_fn: SplitFill
 
     def execute(self, action: CorrectionAction, frames, a, b) -> CommandOutcome:
         handlers = {

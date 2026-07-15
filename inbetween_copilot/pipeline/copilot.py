@@ -9,11 +9,11 @@ is injected -- this module has no torch/cv2/network.
 """
 from __future__ import annotations
 
+from inbetween_copilot.domain.states import (CorrectionStatus, PairAction,
+                                              PlanAction, QAStatus, Route)
 from inbetween_copilot.pipeline.plan import build_key_plan, TAU_GATE
 from inbetween_copilot.pipeline.models import CopilotCfg, CopilotResult, PairResult
 from inbetween_copilot.pipeline.route import choose_route
-from inbetween_copilot.pipeline.states import (CorrectionStatus, PairAction,
-                                                PlanAction, QAStatus, Route)
 from inbetween_copilot.qa.gate import frame_qa, FrameQA
 from inbetween_copilot.qa.window import windows_for_run
 
@@ -100,14 +100,17 @@ def run_copilot(keys, *, gap_fn, regime_fn, interp_fn, qa_fn, softness_fn,
             n_keys = (tri["keys_suggested"] if isinstance(tri, dict)
                       and "keys_suggested" in tri else pp.keys_to_request)
             pairs.append(PairResult(pp.index, PairAction.NEEDS_KEY, None, None, None,
-                                    n_keys, triage=tri))
+                                    n_keys, triage=tri, regime=pp.regime))
             if on_pair is not None:
                 on_pair(pairs[-1])
             continue
         a, b = keys[pp.index], keys[pp.index + 1]
         qa_input = windows.get(pp.index, frames) if qa_window else frames
         qa = _qa_for(qa_input, qa_fn, softness_fn, qa3_fn, cfg.tau_soft)
-        pair = PairResult(pp.index, action, route, frames, qa, 0)   # pair.frames = triplet
+        pair = PairResult(
+            pp.index, action, route, frames, qa, 0,
+            regime=pp.regime,
+        )  # pair.frames = triplet
         if qa.status == QAStatus.FLAG and corrector is not None:
             corr = corrector(pair.frames, a, b)          # corrector on the TRIPLET
             pair.correction = corr
