@@ -11,6 +11,7 @@ import { ReviewPairRow } from "./ReviewPairRow";
 import { ChatWelcome } from "../chat/ChatWelcome";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { ArrowRight, ChevronDown, ChevronRight, Download, Keyboard, Play, Sparkles, TriangleAlert } from "lucide-react";
 
 type Filter = "offmodel" | "unsure" | "pass" | "all" | "needs_key";
 
@@ -45,7 +46,7 @@ export function ReviewWorkbench({
     const frame = requestAnimationFrame(() => setFocused(initialFocus));
     return () => cancelAnimationFrame(frame);
   }, [initialFocus]);
-  const [exported, setExported] = useState(false); // Export ⤓ → clean-cel ✓ morph
+  const [exported, setExported] = useState(false); // export button briefly confirms the saved bundle
   const [glider, setGlider] = useState({ left: 0, width: 0 }); // sliding "current-cel" triage marker
   const [reconOpen, setReconOpen] = useState(false); // the reconstructed-cut band (collapsed until invoked — payoff shouldn't steal the triage fold)
   const pickedRef = useRef(false); // did the artist choose a filter this run?
@@ -297,6 +298,7 @@ export function ReviewWorkbench({
       type="button"
       className={cn("chip hover:bg-transparent", `chip-${key}`, filter === key && "on")}
       title={title}
+      aria-pressed={filter === key}
       onClick={() => pick(key)}
     >
       {label} <b>{n}</b>
@@ -349,7 +351,7 @@ export function ReviewWorkbench({
                   className="border-ao bg-ao px-3.5 py-1.5 font-mono text-xs font-semibold tracking-[0.02em] text-on-ao hover:bg-ao/85 active:translate-y-px"
                   onClick={playCut}
                 >
-                  ▶ Play your cut
+                  <Play data-icon="inline-start" aria-hidden="true" /> Play your cut
                 </Button>
               )}
             </div>
@@ -431,8 +433,8 @@ export function ReviewWorkbench({
               {result && (
                 <>
                   {" "}
-                  · {result.n_autopass} pass · {result.flagged.length} flag ·{" "}
-                  {result.keys_requested_total} key
+                   · {result.n_autopass} on-model · {result.flagged.length} off-model ·{" "}
+                   {result.keys_requested_total} needs key
                 </>
               )}
             </span>
@@ -446,7 +448,7 @@ export function ReviewWorkbench({
               disabled={!result}
               title={
                 result
-                  ? "Download the reconstructed video + frames (.zip) AND your accept/reject review (review.json — the artist-κ data)"
+                  ? "Download the reconstructed video, frames, and your accept/reject review"
                   : "Run the co-pilot first"
               }
               onClick={() => {
@@ -456,13 +458,14 @@ export function ReviewWorkbench({
                 window.setTimeout(() => setExported(false), 1600);
               }}
             >
-              {exported ? "Exported ✓" : "Export ⤓"}
+              {exported ? "Exported" : <><Download data-icon="inline-start" aria-hidden="true" /> Export</>}
             </Button>
           </div>
           <div className="toolbar-foot">
             <p className="filter-desc">{filterDesc[filter]}</p>
             <p className="kbd-hint">
-              ⌨ J/K · A keep · X redraw · columns scroll-synced
+              <Keyboard className="mr-1 inline size-3" aria-hidden="true" />
+              J/K navigate · A keep · X redraw · columns stay synced
             </p>
           </div>
         </div>
@@ -482,28 +485,29 @@ export function ReviewWorkbench({
               className={`sampling-note${(samp.stride ?? 0) > (samp.requested_stride ?? 0) ? " warn" : ""}`}
             >
               {(samp.stride ?? 0) > (samp.requested_stride ?? 0)
-                ? `⚠ Long clip — auto-coarsened to 1 key every ${samp.stride} frames (kept ${samp.kept} of ${samp.source_frames}). This samples the cut, not every frame; trim to a single short cut for a faithful reconstruction.`
-                : `Decimated: kept ${samp.kept} keys of ${samp.source_frames} frames (1 every ${samp.stride}).`}
+                ? <><TriangleAlert className="mr-1 inline size-3.5" aria-hidden="true" />{`Long clip — sampled every ${samp.stride} frames (kept ${samp.kept} of ${samp.source_frames}). This samples the cut, not every frame; trim to a short cut for a faithful reconstruction.`}</>
+                : `Sampled ${samp.kept} keys from ${samp.source_frames} frames (every ${samp.stride}).`}
             </div>
           )}
           {video && (
             /* the reconstructed cut = the payoff, a full-width band above the columns (collapsible) */
             <div className={`recon-band${reconOpen ? "" : " is-collapsed"}`}>
-              <button
+              <Button
+                variant="ghost"
                 type="button"
-                className="recon-band-head"
+                className="recon-band-head rounded-none font-normal hover:bg-transparent"
                 aria-expanded={reconOpen}
                 onClick={() => setReconOpen((o) => !o)}
               >
                 <span className="recon-band-caret" aria-hidden="true">
-                  {reconOpen ? "▾" : "▸"}
+                  {reconOpen ? <ChevronDown data-icon="inline-start" /> : <ChevronRight data-icon="inline-start" />}
                 </span>
                 <span className="eyebrow">出力</span>
                 <span className="recon-band-title">Reconstructed cut</span>
                 {!reconOpen && (
-                  <span className="recon-band-hint">▶ play the filled cut</span>
+                  <span className="recon-band-hint"><Play data-icon="inline-start" aria-hidden="true" /> play the filled cut</span>
                 )}
-              </button>
+              </Button>
               {reconOpen && (
                 <div className="recon-band-body">
                   <ReconPlayer src={video} fps={fps} />
@@ -535,14 +539,17 @@ export function ReviewWorkbench({
                 <p className="log-empty">
                   Load two or more keyframes, then Run. The co-pilot fills what
                   it can and flags the rest — review the suspect in-betweens
-                  here (flip key&nbsp;→&nbsp;in-between&nbsp;→&nbsp;key), with
+                  here (flip the key, in-between, then key), with
                   the big frames synced on the right.
                 </p>
               ) : shown.length === 0 ? (
                 <p className="log-empty">
-                  {filter === "offmodel" || filter === "unsure"
-                    ? "Nothing here — the co-pilot is confident about every in-between. 🎉"
-                    : "No in-betweens in this view."}
+                  {filter === "offmodel" || filter === "unsure" ? (
+                    <>
+                      <Sparkles className="mr-1 inline size-3.5" aria-hidden="true" />
+                      Nothing here — the co-pilot is confident about every in-between.
+                    </>
+                  ) : "No in-betweens in this view."}
                 </p>
               ) : (
                 <ol className="log" key={filter}>
@@ -587,16 +594,17 @@ export function ReviewWorkbench({
 
               {gaps.length > 0 && filter !== "needs_key" && (
                 <div className="gaps">
-                  <button
+                  <Button
+                    variant="ghost"
                     type="button"
-                    className="gaps-head"
+                    className="gaps-head rounded-none font-normal hover:bg-[color-mix(in_oklab,var(--color-akaire)_7%,var(--color-sumi-2))]"
                     onClick={() => pick("needs_key")}
                   >
                     <span className="gaps-mark" aria-hidden="true" />
                     {gaps.length} gap{gaps.length > 1 ? "s" : ""} too large —
                     draw a key here
-                    <span className="gaps-toggle">view →</span>
-                  </button>
+                    <span className="gaps-toggle">view <ArrowRight data-icon="inline-end" aria-hidden="true" /></span>
+                  </Button>
                 </div>
               )}
             </section>

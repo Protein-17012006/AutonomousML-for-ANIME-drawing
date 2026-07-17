@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { ChevronLeft, ChevronRight, Pause, Play } from "lucide-react";
 
 /* eslint-disable @next/next/no-img-element -- review frames are dynamic session/object URLs. */
 
@@ -30,11 +31,11 @@ export function FlipPlayer({ frames }: { frames: Frame[] }) {
         <span className="flip-count">{pos + 1}/{seq.length}</span>
       </div>
       <div className="flip-ctl">
-        <Button type="button" variant="outline" size="sm" className="font-mono text-xs text-washi hover:border-ao hover:bg-sumi-3 hover:text-ao active:translate-y-px" onClick={() => step(-1)} aria-label="previous frame">◀</Button>
+        <Button type="button" variant="outline" size="sm" className="font-mono text-xs text-washi hover:border-ao hover:bg-sumi-3 hover:text-ao active:translate-y-px" onClick={() => step(-1)} aria-label="previous frame"><ChevronLeft className="size-3.5" aria-hidden="true" /></Button>
         <Button type="button" variant="outline" size="sm" className="font-mono text-xs text-washi hover:border-ao hover:bg-sumi-3 hover:text-ao active:translate-y-px" onClick={() => setPlaying((pl) => !pl)}>
-          {playing ? "❚❚ pause" : "▶ play"}
+          {playing ? <><Pause className="size-3.5" aria-hidden="true" /> Pause</> : <><Play className="size-3.5" aria-hidden="true" /> Play</>}
         </Button>
-        <Button type="button" variant="outline" size="sm" className="font-mono text-xs text-washi hover:border-ao hover:bg-sumi-3 hover:text-ao active:translate-y-px" onClick={() => step(1)} aria-label="next frame">▶</Button>
+        <Button type="button" variant="outline" size="sm" className="font-mono text-xs text-washi hover:border-ao hover:bg-sumi-3 hover:text-ao active:translate-y-px" onClick={() => step(1)} aria-label="next frame"><ChevronRight className="size-3.5" aria-hidden="true" /></Button>
         {frames.length > 2 && (
           <label className="inline-flex cursor-pointer items-center gap-1.5 font-mono text-[11px] tracking-[0.04em] text-ash uppercase">
             <Switch checked={showTween} onCheckedChange={setShowTween} aria-label="show in-between" />

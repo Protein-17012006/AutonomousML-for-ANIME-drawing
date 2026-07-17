@@ -2245,9 +2245,6 @@ h1 {
   font-size: 14px;
   line-height: 1;
 }
-.toast-mark::before {
-  content: "⚠";
-}
 .toast-msg {
   flex: 1;
   overflow-wrap: anywhere;

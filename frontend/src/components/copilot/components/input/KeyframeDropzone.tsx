@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/select";
 import type { InputMode } from "../../types";
 import { isPng, isVideoFile } from "../../lib/media";
+import { ChevronDown, ChevronRight, X } from "lucide-react";
 
 interface KeyframeDropzoneProps {
   files: File[];
@@ -161,7 +162,9 @@ export function KeyframeDropzone({
               aria-expanded={open}
               onClick={() => setOpen((o) => !o)}
             >
-              <span className="celstrip-caret">{open ? "▾" : "▸"}</span>{" "}
+              <span className="celstrip-caret" aria-hidden="true">
+                {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+              </span>{" "}
               {files.length} keyframes
             </button>
             <button type="button" className="cel-clear" onClick={onClear}>
@@ -178,13 +181,14 @@ export function KeyframeDropzone({
                     <button
                       type="button"
                       className="cel-x"
-                      title={`remove ${f.name}`}
+                      title={`Remove ${f.name}`}
+                      aria-label={`Remove ${f.name}`}
                       onClick={(e) => {
                         e.stopPropagation();
                         onRemove(f);
                       }}
                     >
-                      ×
+                      <X className="size-3" aria-hidden="true" />
                     </button>
                   </div>
                   <figcaption>{f.name}</figcaption>
@@ -205,7 +209,9 @@ export function KeyframeDropzone({
               aria-expanded={open}
               onClick={() => setOpen((o) => !o)}
             >
-              <span className="celstrip-caret">{open ? "▾" : "▸"}</span> video clip
+              <span className="celstrip-caret" aria-hidden="true">
+                {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+              </span> video clip
             </button>
             <button
               type="button"
@@ -229,13 +235,14 @@ export function KeyframeDropzone({
                   <button
                     type="button"
                     className="cel-x"
-                    title={`remove ${videoFile.name}`}
+                    title={`Remove ${videoFile.name}`}
+                    aria-label={`Remove ${videoFile.name}`}
                     onClick={(e) => {
                       e.stopPropagation();
                       onVideo(null);
                     }}
                   >
-                    ×
+                    <X className="size-3" aria-hidden="true" />
                   </button>
                 </div>
                 <figcaption>{videoFile.name}</figcaption>

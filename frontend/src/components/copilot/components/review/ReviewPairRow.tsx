@@ -1,9 +1,12 @@
 import type { CsqBand, Explanation, PairEvent } from "../../types";
-import { statusClass, statusGlyph, whyText } from "../../lib/pairView";
+import { statusClass, whyText } from "../../lib/pairView";
 import { actionLabel, errTypeLabel, qaLabel, regionLabel } from "../../labels";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import { ConfidenceMeter } from "./ConfidenceMeter";
 import { FlipPlayer, type Frame } from "./FlipPlayer";
+import { StatusGlyph } from "./StatusGlyph";
+import { Check, Pencil, X } from "lucide-react";
 
 interface ReviewPairRowProps {
   pair: PairEvent;
@@ -70,13 +73,13 @@ export function ReviewPairRow({
           className={cn("sglyph", `sglyph-${statusClass(pair)}`)}
           aria-hidden="true"
         >
-          {statusGlyph(pair)}
+          <StatusGlyph pair={pair} />
         </span>
         pair {pair.index} · {actionLabel(pair.action)}
         {pair.qa ? ` · ${qaLabel(pair.qa)}` : ""}
         {verdict && (
           <span className={`verdict-badge ${verdict}`}>
-            {verdict === "accept" ? "✓ kept" : "✗ redraw"}
+            {verdict === "accept" ? "kept" : "redraw"}
           </span>
         )}
       </div>
@@ -84,7 +87,8 @@ export function ReviewPairRow({
       {pair.qa !== "pass" && <ConfidenceMeter p={pair} band={csq} />}
       {explanation && (
         <div className="log-explain">
-          ✎ {errTypeLabel(explanation.err_type)}
+          <Pencil className="mr-1 inline size-3" aria-hidden="true" />
+          {errTypeLabel(explanation.err_type)}
           {regionLabel(explanation.region)
             ? `, ${regionLabel(explanation.region)}`
             : ""} — {explanation.explanation}
@@ -94,26 +98,40 @@ export function ReviewPairRow({
       {pair.action !== "needs_key" ? (
         <div className="verdict">
           <span className="verdict-label">Your call</span>
-          <button
+          <Button
+            variant="ghost"
             type="button"
-            className={cn("vbtn", "accept", verdict === "accept" && "on")}
+            className={cn(
+              "vbtn",
+              "accept",
+              verdict === "accept" && "on",
+              "hover:bg-transparent",
+            )}
             onClick={(event) => {
               event.stopPropagation();
               onVerdict(pair.index, "accept");
             }}
           >
-            ✓ Keep
-          </button>
-          <button
+            <Check data-icon="inline-start" aria-hidden="true" />
+            Keep
+          </Button>
+          <Button
+            variant="ghost"
             type="button"
-            className={cn("vbtn", "reject", verdict === "reject" && "on")}
+            className={cn(
+              "vbtn",
+              "reject",
+              verdict === "reject" && "on",
+              "hover:bg-transparent",
+            )}
             onClick={(event) => {
               event.stopPropagation();
               onVerdict(pair.index, "reject");
             }}
           >
-            ✗ Redraw
-          </button>
+            <X data-icon="inline-start" aria-hidden="true" />
+            Redraw
+          </Button>
         </div>
       ) : (
         <label className="group mt-[11px] inline-block cursor-pointer" onClick={(event) => event.stopPropagation()}>
@@ -127,7 +145,10 @@ export function ReviewPairRow({
               if (file) onRefill(pair.index, file);
             }}
           />
-          <span className="inline-block rounded-md border border-akaire bg-akaire/10 px-3.5 py-1.5 font-mono text-xs tracking-[0.02em] text-akaire-ink transition-all group-hover:bg-akaire group-hover:text-white group-active:translate-y-px">✎ Add my key</span>
+          <span className="inline-block rounded-md border border-akaire bg-akaire/10 px-3.5 py-1.5 font-mono text-xs tracking-[0.02em] text-akaire-ink transition-all group-hover:bg-akaire group-hover:text-white group-active:translate-y-px">
+            <Pencil className="mr-1 inline size-3.5" aria-hidden="true" />
+            Add my key
+          </span>
         </label>
       )}
     </li>

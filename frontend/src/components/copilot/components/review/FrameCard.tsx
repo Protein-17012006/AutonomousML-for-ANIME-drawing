@@ -3,11 +3,13 @@
 // cursor-craned, carrying the hero's grammar). Extracted from CopilotApp.tsx.
 import { useState } from "react";
 import type { Explanation, PairEvent } from "../../types";
-import { statusClass, statusGlyph } from "../../lib/pairView";
+import { statusClass } from "../../lib/pairView";
 import { actionLabel, errTypeLabel, qaLabel } from "../../labels";
 import { FlipPlayer, type Frame } from "./FlipPlayer";
+import { StatusGlyph } from "./StatusGlyph";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Pencil, Play, Square } from "lucide-react";
 
 /* eslint-disable @next/next/no-img-element -- review frames are dynamic session/object URLs. */
 
@@ -44,7 +46,7 @@ function FrameTrip({
     <>
       <figcaption>
         <span className={`sglyph sglyph-${statusClass(p)}`} aria-hidden="true">
-          {statusGlyph(p)}
+          <StatusGlyph pair={p} />
         </span>
         pair {p.index} · {actionLabel(p.action)}
         {p.qa ? ` · ${qaLabel(p.qa)}` : ""}
@@ -58,7 +60,15 @@ function FrameTrip({
               setPlay((v) => !v);
             }}
           >
-            {play ? "▦ frames" : "▶ play"}
+            {play ? (
+              <>
+                <Square className="mr-1 inline size-3" aria-hidden="true" /> Show frames
+              </>
+            ) : (
+              <>
+                <Play className="mr-1 inline size-3" aria-hidden="true" /> Play line-test
+              </>
+            )}
           </Button>
         )}
       </figcaption>
@@ -89,13 +99,17 @@ function FrameTrip({
                   }}
                 >
                   <span className="region-tag">
-                    ✎ {errTypeLabel(ex.err_type)}
+                    <Pencil className="mr-1 inline size-3" aria-hidden="true" />
+                    {errTypeLabel(ex.err_type)}
                   </span>
                 </span>
               )}
             </div>
           ) : p.action === "needs_key" ? (
-            <div className="fcell-draw">✎ draw a key here</div>
+            <div className="fcell-draw">
+              <Pencil className="mr-1 inline size-3.5" aria-hidden="true" />
+              draw a key here
+            </div>
           ) : (
             <div className="fcell-empty">in-between</div>
           )}

@@ -138,7 +138,7 @@ export function ChatComposer(p: {
           aria-expanded={gearOpen}
           aria-controls="composer-settings-panel"
           onClick={() => setGearOpen((o) => !o)}
-          title="run settings"
+          title="Run settings"
         >
           <Settings />
         </Button>
@@ -154,7 +154,7 @@ export function ChatComposer(p: {
           placeholder={
             p.askEnabled
               ? "Ask about this session — e.g. why was pair 3 flagged?"
-              : "Run a session first, then ask me anything about it"
+              : "Run a session to ask about its decisions"
           }
           disabled={!p.askEnabled}
           onChange={(e) => setQ(e.target.value)}

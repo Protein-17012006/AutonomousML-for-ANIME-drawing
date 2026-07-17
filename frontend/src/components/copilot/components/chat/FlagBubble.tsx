@@ -4,6 +4,8 @@
 // — grid-coarse (3×3 VLM region), honestly not a pixel mask (design §0.5).
 import type { Explanation, PairEvent } from "../../types";
 import { Button } from "@/components/ui/button";
+import { ArrowRight } from "lucide-react";
+import { errTypeLabel, qaLabel } from "../../labels";
 
 /* eslint-disable @next/next/no-img-element -- session artifacts and object URLs are dynamic. */
 
@@ -26,8 +28,8 @@ export function FlagBubble({ pair, ex, keyUrls, onReview }: {
   return (
     <div className="bubble agent flag">
       <div className="bubble-label">
-        <span className="flag-dot" aria-hidden="true" /> Pair {pair.index} flagged
-        {ex?.err_type ? ` — ${ex.err_type}` : ""}
+        <span className="flag-dot" aria-hidden="true" /> Pair {pair.index} · {qaLabel(pair.qa)}
+        {ex?.err_type ? ` — ${errTypeLabel(ex.err_type)}` : ""}
       </div>
       <div className="trip">
         {a ? <img src={a} alt={`key ${pair.index}`} draggable={false} /> : <span className="trip-hole" />}
@@ -51,7 +53,7 @@ export function FlagBubble({ pair, ex, keyUrls, onReview }: {
           {pair.correction.rounds.map((r, i) => (
             <li key={i}><code>{r.action}</code> — {r.reason || "…"}</li>
           ))}
-          <li className="trace-status">→ {pair.correction.status}</li>
+          <li className="trace-status"><ArrowRight className="mr-1 inline size-3" aria-hidden="true" />{pair.correction.status}</li>
         </ul>
       )}
       <Button type="button" variant="outline" className="font-mono text-[12.5px] tracking-[0.02em]" onClick={onReview}>Review this pair</Button>

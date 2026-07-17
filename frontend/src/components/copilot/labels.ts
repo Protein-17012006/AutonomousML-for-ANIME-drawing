@@ -10,9 +10,9 @@ const REGION: Record<string, string> = {
 };
 
 const ERR_TYPE: Record<string, string> = {
-  ghost: "ghosting", blur: "blur/soft", flicker: "flicker/pop",
-  morph: "warp/melt", identity_drift: "character drift",
-  scene_break: "broken arc", none: "",
+  ghost: "ghosting", blur: "softness/blur", flicker: "flicker",
+  morph: "shape warp", identity_drift: "character drift",
+  scene_break: "scene break", none: "",
 };
 
 const ACTION: Record<string, string> = {
@@ -22,11 +22,12 @@ const ACTION: Record<string, string> = {
 // the 3-state QA verdict in artist language (not the raw machine token).
 // pass = the co-pilot vouches; abstain = it won't vouch; flag = it thinks it's wrong.
 const QA: Record<string, string> = {
-  pass: "on-model", abstain: "unsure", flag: "off-model",
+  pass: "On-model", abstain: "Unsure", flag: "Off-model",
 };
 
 export const regionLabel = (r?: string): string => (r ? REGION[r] ?? r : "");
-export const errTypeLabel = (e?: string): string => (e ? ERR_TYPE[e] ?? e : "");
+export const errTypeLabel = (e?: string): string =>
+  (e ? ERR_TYPE[e] ?? e.replace(/_/g, " ") : "");
 export const actionLabel = (a?: string): string => (a ? ACTION[a] ?? a.replace(/_/g, " ") : "");
 export const qaLabel = (q?: string | null): string => (q ? QA[q] ?? q : "");
 

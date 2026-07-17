@@ -9,7 +9,6 @@ import {
   abstainZone,
   clamp01,
   statusClass,
-  statusGlyph,
 } from "../../lib/pairView";
 import {
   errTypeLabel,
@@ -18,6 +17,8 @@ import {
   regionLabel,
 } from "../../labels";
 import { cn } from "@/lib/utils";
+import { KeyRound, Pencil } from "lucide-react";
+import { StatusGlyph } from "./StatusGlyph";
 
 export function QAPanel({
   p,
@@ -39,7 +40,7 @@ export function QAPanel({
       <div className="qapanel qapanel-needskey">
         <div className="qap-head">
           <span className="sglyph sglyph-needs_key" aria-hidden="true">
-            ✎
+            <KeyRound className="size-3" strokeWidth={2.5} aria-hidden="true" />
           </span>
           pair {p.index} · needs a key
         </div>
@@ -59,7 +60,7 @@ export function QAPanel({
     <div className={cn("qapanel", `qapanel-${tone}`)}>
       <div className="qap-head">
         <span className={cn("sglyph", `sglyph-${statusClass(p)}`)} aria-hidden="true">
-          {statusGlyph(p)}
+          <StatusGlyph pair={p} />
         </span>
         pair {p.index} · {qaLabel(p.qa)}
       </div>
@@ -119,7 +120,8 @@ export function QAPanel({
       </div>
       {ex && (
         <div className="qap-explain">
-          ✎ {errTypeLabel(ex.err_type)}
+          <Pencil className="mr-1 inline size-3" aria-hidden="true" />
+          {errTypeLabel(ex.err_type)}
           {regionLabel(ex.region) ? `, ${regionLabel(ex.region)}` : ""} —{" "}
           {ex.explanation}
         </div>

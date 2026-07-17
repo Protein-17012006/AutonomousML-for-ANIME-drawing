@@ -2,6 +2,7 @@
 // Extracted from CopilotApp.tsx.
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { ChevronLeft, ChevronRight, Pause, Play } from "lucide-react";
 
 export function ReconPlayer({ src, fps }: { src: string; fps: number }) {
   const vref = useRef<HTMLVideoElement>(null);
@@ -64,11 +65,11 @@ export function ReconPlayer({ src, fps }: { src: string; fps: number }) {
         onClick={toggle}
       />
       <div className="rplayer-ctl">
-        <Button type="button" variant="outline" size="sm" className="font-mono text-[11px] text-washi hover:border-ao hover:bg-sumi-2 hover:text-ao active:translate-y-px" onClick={() => step(-1)} aria-label="previous frame">◀</Button>
+        <Button type="button" variant="outline" size="sm" className="font-mono text-[11px] text-washi hover:border-ao hover:bg-sumi-2 hover:text-ao active:translate-y-px" onClick={() => step(-1)} aria-label="previous frame"><ChevronLeft className="size-3.5" aria-hidden="true" /></Button>
         <Button type="button" variant="outline" size="sm" className="min-w-9 font-mono text-[11px] text-washi hover:border-ao hover:bg-sumi-2 hover:text-ao active:translate-y-px" onClick={toggle} aria-label={playing ? "pause" : "play"}>
-          {playing ? "❚❚" : "▶"}
+          {playing ? <Pause className="size-3.5" aria-hidden="true" /> : <Play className="size-3.5" aria-hidden="true" />}
         </Button>
-        <Button type="button" variant="outline" size="sm" className="font-mono text-[11px] text-washi hover:border-ao hover:bg-sumi-2 hover:text-ao active:translate-y-px" onClick={() => step(1)} aria-label="next frame">▶</Button>
+        <Button type="button" variant="outline" size="sm" className="font-mono text-[11px] text-washi hover:border-ao hover:bg-sumi-2 hover:text-ao active:translate-y-px" onClick={() => step(1)} aria-label="next frame"><ChevronRight className="size-3.5" aria-hidden="true" /></Button>
         <div
           className="rplayer-rail"
           ref={railRef}
