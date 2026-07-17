@@ -21,12 +21,12 @@ interface AuthShellProps {
 
 export function AuthShell({ title, description, children }: AuthShellProps) {
   return (
-    <div className="flex min-h-screen flex-col bg-background">
+    <div className="flex min-h-screen flex-col bg-sumi">
       <header className="flex justify-center px-6 py-4">
         <div className="flex w-full max-w-6xl items-center justify-between">
           <Link
             href="/"
-            className="flex items-center gap-2 font-body text-sm text-muted-foreground transition-colors hover:text-foreground"
+            className="flex items-center gap-2 font-body text-sm text-ash transition-colors hover:text-washi"
           >
             <ArrowLeft className="size-4" />
             Back to home
@@ -39,7 +39,7 @@ export function AuthShell({ title, description, children }: AuthShellProps) {
         <Card className="w-full max-w-md">
           <CardHeader className="flex flex-col items-center gap-2 text-center">
             <BrandIcon />
-            <CardTitle className="font-display text-2xl text-foreground">
+            <CardTitle className="font-display text-2xl text-washi">
               {title}
             </CardTitle>
             <CardDescription>{description}</CardDescription>

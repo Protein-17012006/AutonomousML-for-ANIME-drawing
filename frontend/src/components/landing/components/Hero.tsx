@@ -14,13 +14,13 @@ export function Hero() {
     >
       <div className="flex w-full max-w-3xl flex-col items-center gap-6 text-center">
         <span className="inline-flex items-center gap-2 rounded-full border border-border bg-muted/50 px-3 py-1 font-mono text-xs text-muted-foreground">
-          <Sparkles className="size-3.5 text-purple-500" />
+          <Sparkles className="size-3.5 text-ao" />
           Calibrated self-QA for anime in-betweens
         </span>
 
         <h1 className="font-display text-4xl leading-tight font-bold text-foreground sm:text-5xl lg:text-6xl">
           Draw the keys. We fill — and{" "}
-          <span className="bg-linear-to-r from-purple-500 to-pink-500 bg-clip-text text-transparent">
+          <span className="text-ao">
             verify
           </span>{" "}
           the in-betweens.
@@ -35,7 +35,7 @@ export function Hero() {
         <div className="flex flex-col gap-3 sm:flex-row">
           <Button
             asChild
-            className="h-11 border-0 bg-linear-to-r from-purple-500 to-pink-500 px-6 text-sm text-white hover:opacity-90 sm:text-base"
+            className="h-11 px-6 text-sm sm:text-base"
           >
             <Link href="/copilot">
               Create now

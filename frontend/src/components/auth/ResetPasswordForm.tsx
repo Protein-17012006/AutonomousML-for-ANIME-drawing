@@ -52,12 +52,12 @@ export function ResetPasswordForm() {
     return (
       <div className="flex flex-col gap-5">
         <Alert>
-          <Check className="mt-0.5 size-4 shrink-0 text-emerald-500" />
+          <Check className="mt-0.5 size-4 shrink-0 text-pass" />
           <AlertDescription>Your password has been updated. You can sign in now.</AlertDescription>
         </Alert>
         <Button
           asChild
-          className="h-10 w-full border-0 bg-linear-to-r from-purple-500 to-pink-500 text-white hover:opacity-90"
+          className="h-10 w-full"
         >
           <Link href="/login">Continue to sign in</Link>
         </Button>
@@ -134,7 +134,7 @@ export function ResetPasswordForm() {
         <Button
           type="submit"
           disabled={submitting}
-          className="h-10 w-full border-0 bg-linear-to-r from-purple-500 to-pink-500 text-white hover:opacity-90"
+          className="h-10 w-full"
         >
           {submitting ? "Resetting..." : "Reset password"}
         </Button>

@@ -68,7 +68,7 @@ export function LoginForm() {
             <FieldLabel htmlFor="password">Password</FieldLabel>
             <Link
               href="/forgot-password"
-              className="font-body text-xs text-muted-foreground transition-colors hover:text-foreground"
+              className="font-body text-xs text-ash transition-colors hover:text-washi"
             >
               Forgot password?
             </Link>
@@ -89,7 +89,7 @@ export function LoginForm() {
         <Button
           type="submit"
           disabled={submitting}
-          className="h-10 w-full border-0 bg-linear-to-r from-purple-500 to-pink-500 text-white hover:opacity-90"
+          className="h-10 w-full"
         >
           {submitting ? "Signing in..." : "Sign in"}
         </Button>
@@ -103,7 +103,7 @@ export function LoginForm() {
 
       <div className="flex items-center gap-3">
         <Separator className="flex-1" />
-        <span className="font-mono text-xs whitespace-nowrap text-muted-foreground">
+        <span className="font-mono text-xs whitespace-nowrap text-ash">
           or continue with
         </span>
         <Separator className="flex-1" />
@@ -111,9 +111,9 @@ export function LoginForm() {
 
       <SocialAuthButtons />
 
-      <p className="text-center font-body text-sm text-muted-foreground">
+      <p className="text-center font-body text-sm text-ash">
         Don&apos;t have an account?{" "}
-        <Link href="/signup" className="font-medium text-foreground hover:underline">
+        <Link href="/signup" className="font-medium text-washi hover:underline">
           Sign up
         </Link>
       </p>

@@ -1,6 +1,6 @@
 # Design System and Landing Page Review
 
-Use `$ui-ux-pro-max`, `$frontend-design-direction`, and `$tailwind-design-system` to review and improve the application's visual system and synchronize it across all pages.
+Use `$ui-ux-pro-max`, `$frontend-design-direction`, and `$tailwind-design-system` skills to review and improve the application's visual system and synchronize it across all pages.
 
 ## Phase 1 — Font System Review
 

@@ -67,7 +67,7 @@ export function FeatureShowcase() {
                   className={cn(
                     "flex items-start gap-3 rounded-xl border p-4 text-left transition-colors",
                     isActive
-                      ? "border-transparent bg-linear-to-r from-purple-500/10 to-pink-500/10 ring-1 ring-purple-500/30"
+                      ? "border-ao bg-muted ring-1 ring-ao/30"
                       : "border-border hover:bg-muted/50",
                   )}
                 >
@@ -75,7 +75,7 @@ export function FeatureShowcase() {
                     className={cn(
                       "flex size-9 shrink-0 items-center justify-center rounded-lg",
                       isActive
-                        ? "bg-linear-to-br from-purple-500 to-pink-500 text-white"
+                        ? "bg-primary text-primary-foreground"
                         : "bg-muted text-muted-foreground",
                     )}
                   >
@@ -97,7 +97,7 @@ export function FeatureShowcase() {
           {/* Preview */}
           <div className="flex flex-1 flex-col gap-4 rounded-2xl border border-border bg-card p-6">
             <div className="flex items-center gap-3">
-              <div className="flex size-10 items-center justify-center rounded-xl bg-linear-to-br from-purple-500 to-pink-500 text-white">
+              <div className="flex size-10 items-center justify-center rounded-xl bg-primary text-primary-foreground">
                 <CurrentIcon className="size-5" />
               </div>
               <h3 className="font-display text-xl font-semibold text-foreground">

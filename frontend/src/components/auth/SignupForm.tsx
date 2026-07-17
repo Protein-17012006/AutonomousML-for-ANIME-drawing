@@ -102,7 +102,7 @@ export function SignupForm() {
         <Button
           type="submit"
           disabled={submitting}
-          className="h-10 w-full border-0 bg-linear-to-r from-purple-500 to-pink-500 text-white hover:opacity-90"
+          className="h-10 w-full"
         >
           {submitting ? "Creating..." : "Create account"}
         </Button>
@@ -116,7 +116,7 @@ export function SignupForm() {
 
       <div className="flex items-center gap-3">
         <Separator className="flex-1" />
-        <span className="font-mono text-xs whitespace-nowrap text-muted-foreground">
+        <span className="font-mono text-xs whitespace-nowrap text-ash">
           or continue with
         </span>
         <Separator className="flex-1" />
@@ -124,9 +124,9 @@ export function SignupForm() {
 
       <SocialAuthButtons />
 
-      <p className="text-center font-body text-sm text-muted-foreground">
+      <p className="text-center font-body text-sm text-ash">
         Already have an account?{" "}
-        <Link href="/login" className="font-medium text-foreground hover:underline">
+        <Link href="/login" className="font-medium text-washi hover:underline">
           Sign in
         </Link>
       </p>

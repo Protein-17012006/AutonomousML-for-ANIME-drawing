@@ -26,6 +26,7 @@ BUILD_EXPORT=1 npm run build     # -> out/  (static, trailingSlash)
 the old Vite `dist/`) — so no rewrites are needed in prod (relative `/session` fetches hit
 the same origin). Deployed live on the box `:8000`.
 
-> Deploy note: `scripts/deploy_box.sh` still does `cd frontend && npm run build` expecting a
-> Vite `dist/`. For this app, build with `BUILD_EXPORT=1 npm run build` and ship `out/`
-> (→ `COPILOT_WEB_DIR`). Update the script when wiring the Next flow into deploy tooling.
+> Deploy note: `scripts/deploy_box.sh` intentionally syncs service code only; it does not deploy
+> the canonical frontend export. Build with `BUILD_EXPORT=1 npm run build`, publish the contents
+> of `out/` to the configured box web directory (`~/copilot_svc/dist` by default), then restart the
+> service with `scripts/deploy_box.sh --restart` when service code also changed.

@@ -142,11 +142,19 @@ The exported site is served same-origin with the FastAPI API.
 
 ### Deploy to the GPU box
 
-    cd frontend && npm run build
+    cd frontend
+    $env:BUILD_EXPORT="1"; npm run build
+
+The export is written to `frontend/out/`. Publish its **contents** to the web directory configured on
+the box (the production launcher defaults to `~/copilot_svc/dist`), then deploy/restart the service:
+
+    # Run from a shell with access to the GPU box; this is a separate frontend publication step.
+    rsync -av --delete frontend/out/ long@<box-host>:~/copilot_svc/dist/
     bash scripts/deploy_box.sh --restart
 
-This syncs the service to the box and restarts it. The vision-language detector must be served on
-the box before a session that uses it, otherwise self-QA calls fail with a connection error.
+`scripts/deploy_box.sh` syncs service code and deliberately does **not** overwrite the canonical
+frontend export. The vision-language detector must be served on the box before a session that uses
+it, otherwise self-QA calls fail with a connection error.
 
 
 ## Configuration
@@ -157,7 +165,8 @@ Configuration is read from environment variables (kept in a local `.env`, which 
 - `VISION_MODEL_SPEC`, `VISION_MODEL_CHECK`, `VISION_MODEL_ESCALATE` and the matching
   `VISION_BASE_URL_*`   the tiered vision seam; the served detector is the "check" tier. When a base
   URL is unset, the corresponding tier falls back to a hosted vision model.
-- `COPILOT_WEB_DIR`   directory of the static UI to serve (set to `frontend/out` after an export build).
+- `COPILOT_WEB_DIR`   directory of the static UI to serve. Locally it can be `frontend/out`; the box
+  launcher defaults to `~/copilot_svc/dist`, which must contain the published export.
 
 
 ## Notes and limitations

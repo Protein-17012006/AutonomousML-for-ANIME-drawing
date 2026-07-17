@@ -51,7 +51,7 @@ export function Newsletter() {
 
           {subscribed ? (
             <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/50 px-3 py-2 font-body text-sm text-foreground">
-              <Check className="size-4 text-emerald-500" />
+              <Check className="size-4 text-pass" />
               Thanks — you&apos;re on the list.
             </div>
           ) : (
@@ -77,7 +77,7 @@ export function Newsletter() {
               <Button
                 type="submit"
                 disabled={submitting}
-                className="h-11 border-0 bg-linear-to-r from-purple-500 to-pink-500 px-5 text-white hover:opacity-90"
+                className="h-11 px-5"
               >
                 {submitting ? "Subscribing..." : "Subscribe"}
                 <Send />

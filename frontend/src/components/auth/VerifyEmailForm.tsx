@@ -72,12 +72,12 @@ export function VerifyEmailForm() {
     return (
       <div className="flex flex-col gap-5">
         <Alert>
-          <Check className="mt-0.5 size-4 shrink-0 text-emerald-500" />
+          <Check className="mt-0.5 size-4 shrink-0 text-pass" />
           <AlertDescription>Your email is verified. You can sign in now.</AlertDescription>
         </Alert>
         <Button
           asChild
-          className="h-10 w-full border-0 bg-linear-to-r from-purple-500 to-pink-500 text-white hover:opacity-90"
+          className="h-10 w-full"
         >
           <Link href="/login">Continue to sign in</Link>
         </Button>
@@ -88,7 +88,7 @@ export function VerifyEmailForm() {
   return (
     <div className="flex flex-col gap-5">
       {!email && (
-        <p className="text-center text-sm text-muted-foreground">
+        <p className="text-center text-sm text-ash">
           Start from signup or sign in again so we know which email to verify.
         </p>
       )}
@@ -120,7 +120,7 @@ export function VerifyEmailForm() {
         <Button
           type="submit"
           disabled={!complete || submitting}
-          className="h-10 w-full border-0 bg-linear-to-r from-purple-500 to-pink-500 text-white hover:opacity-90"
+          className="h-10 w-full"
         >
           {submitting ? "Verifying..." : "Verify email"}
         </Button>
@@ -131,13 +131,13 @@ export function VerifyEmailForm() {
         )}
       </form>
 
-      <p className="text-center font-body text-sm text-muted-foreground">
+      <p className="text-center font-body text-sm text-ash">
         Didn&apos;t get a code?{" "}
         <button
           type="button"
           onClick={resend}
           disabled={!email || resending}
-          className="font-medium text-foreground hover:underline"
+          className="font-medium text-washi hover:underline"
         >
           {resending ? "Sending..." : "Resend"}
         </button>

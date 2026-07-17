@@ -38,7 +38,7 @@ export function ForgotPasswordForm() {
     return (
       <div className="flex flex-col gap-5">
         <Alert>
-          <Check className="mt-0.5 size-4 shrink-0 text-emerald-500" />
+          <Check className="mt-0.5 size-4 shrink-0 text-pass" />
           <AlertDescription>
             If an account exists for <span className="font-medium">{email}</span>, a reset code is on
             its way.
@@ -47,7 +47,7 @@ export function ForgotPasswordForm() {
         <Button
           type="button"
           onClick={() => router.push("/reset-password")}
-          className="h-10 w-full border-0 bg-linear-to-r from-purple-500 to-pink-500 text-white hover:opacity-90"
+          className="h-10 w-full"
         >
           Enter reset code
         </Button>
@@ -85,7 +85,7 @@ export function ForgotPasswordForm() {
         <Button
           type="submit"
           disabled={submitting}
-          className="h-10 w-full border-0 bg-linear-to-r from-purple-500 to-pink-500 text-white hover:opacity-90"
+          className="h-10 w-full"
         >
           {submitting ? "Sending..." : "Send reset code"}
         </Button>
@@ -97,9 +97,9 @@ export function ForgotPasswordForm() {
         </FieldGroup>
       </form>
 
-      <p className="text-center font-body text-sm text-muted-foreground">
+      <p className="text-center font-body text-sm text-ash">
         Remember your password?{" "}
-        <Link href="/login" className="font-medium text-foreground hover:underline">
+        <Link href="/login" className="font-medium text-washi hover:underline">
           Sign in
         </Link>
       </p>

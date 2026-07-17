@@ -39,7 +39,7 @@ export function About() {
               className="flex w-32 flex-col items-center gap-2 rounded-xl border border-border bg-card p-4 text-center"
             >
               <Avatar size="lg">
-                <AvatarFallback className="bg-linear-to-br from-purple-500/20 to-pink-500/20 font-display font-medium text-foreground">
+                <AvatarFallback className="bg-muted font-display font-medium text-ao">
                   {member.initials}
                 </AvatarFallback>
               </Avatar>
