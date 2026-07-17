@@ -7,6 +7,7 @@ import { ArrowLeft, Check } from "lucide-react";
 import { REGEXP_ONLY_DIGITS } from "input-otp";
 import { autoSignIn, confirmSignUp, resendSignUpCode } from "aws-amplify/auth";
 import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   InputOTP,
   InputOTPGroup,
@@ -70,10 +71,10 @@ export function VerifyEmailForm() {
   if (verified) {
     return (
       <div className="flex flex-col gap-5">
-        <div className="flex items-start gap-2 rounded-lg border border-border bg-muted/50 px-3 py-2 font-body text-sm text-foreground">
+        <Alert>
           <Check className="mt-0.5 size-4 shrink-0 text-emerald-500" />
-          <span>Your email is verified. You can sign in now.</span>
-        </div>
+          <AlertDescription>Your email is verified. You can sign in now.</AlertDescription>
+        </Alert>
         <Button
           asChild
           className="h-10 w-full border-0 bg-linear-to-r from-purple-500 to-pink-500 text-white hover:opacity-90"
@@ -123,7 +124,11 @@ export function VerifyEmailForm() {
         >
           {submitting ? "Verifying..." : "Verify email"}
         </Button>
-        {error && <p className="text-sm text-destructive">{error}</p>}
+        {error && (
+          <Alert id="verify-email-error" variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
       </form>
 
       <p className="text-center font-body text-sm text-muted-foreground">

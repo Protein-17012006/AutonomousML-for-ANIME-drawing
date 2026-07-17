@@ -1,6 +1,7 @@
 // toast: a correction-stamp slide-in for run errors (akaire body, draining ao timer).
 // Extracted from CopilotApp.tsx.
 import { useEffect, useRef } from "react";
+import { Button } from "@/components/ui/button";
 
 export function Toast({ message, onClose }: { message: string; onClose: () => void }) {
   const closeRef = useRef(onClose);
@@ -15,7 +16,7 @@ export function Toast({ message, onClose }: { message: string; onClose: () => vo
     <div className="toast" role="alert">
       <span className="toast-mark" aria-hidden="true" />
       <span className="toast-msg">{message}</span>
-      <button type="button" className="toast-x" onClick={onClose} aria-label="dismiss">×</button>
+      <Button type="button" variant="ghost" size="icon-xs" className="shrink-0 text-washi/60 hover:bg-transparent hover:text-white" onClick={onClose} aria-label="dismiss">×</Button>
       <span className="toast-timer" aria-hidden="true" />
     </div>
   );

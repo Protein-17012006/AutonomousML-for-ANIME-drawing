@@ -4,24 +4,6 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* FONT DEFINITION */
-@font-face {
-  font-family: Roboto;
-  src: url("../assets/fonts/roboto/Roboto-VariableFont_wdth\,wght.ttf")
-    format("truetype");
-  font-weight: 100 900;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: Inter;
-  src: url("../assets/fonts/inter/Inter-VariableFont_opsz\,wght.ttf")
-    format("truetype");
-  font-weight: 100 900;
-  font-style: normal;
-  font-display: swap;
-}
-
 :root {
   /* COLOR DEFINITION */
   /* BASE COLOR */

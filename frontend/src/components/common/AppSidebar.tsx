@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { BrandIcon } from "@/components/common/BrandIcon";
 import {
   History,
@@ -75,17 +76,15 @@ export function AppSidebar({
       <SidebarHeader>
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
-            <button
+            <Button
+              variant="ghost"
+              size={collapsedRail ? "icon" : "default"}
               type="button"
               onClick={collapsedRail ? toggleSidebar : undefined}
               aria-label={collapsedRail ? "Expand sidebar" : undefined}
               title={collapsedRail ? "Expand sidebar" : undefined}
               tabIndex={collapsedRail ? 0 : -1}
-              className={
-                collapsedRail
-                  ? "group/brand flex h-8 w-8 items-center justify-center"
-                  : "flex items-center"
-              }
+              className={collapsedRail ? "group/brand" : "px-0 hover:bg-transparent"}
             >
               {collapsedRail ? (
                 <>
@@ -97,20 +96,22 @@ export function AppSidebar({
               ) : (
                 <BrandIcon />
               )}
-            </button>
+            </Button>
             <span className="font-display text-sm whitespace-nowrap text-washi group-data-[collapsible=icon]:hidden">
               In-Between Co-pilot
             </span>
           </div>
-          <button
+          <Button
+            variant="ghost"
+            size="icon-sm"
             type="button"
             onClick={toggleSidebar}
             aria-label="Collapse sidebar"
             title="Collapse sidebar"
-            className="flex items-center text-ash transition-colors hover:text-washi group-data-[collapsible=icon]:hidden"
+            className="text-ash transition-colors hover:text-washi group-data-[collapsible=icon]:hidden"
           >
-            <PanelLeftClose className="h-4 w-4" />
-          </button>
+            <PanelLeftClose />
+          </Button>
         </div>
       </SidebarHeader>
 
@@ -166,7 +167,7 @@ export function AppSidebar({
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <SidebarMenuButton size="lg">
-                  <Avatar className="h-8 w-8">
+                  <Avatar size="default">
                     <AvatarFallback>{initials(account)}</AvatarFallback>
                   </Avatar>
                   <div className="flex flex-col gap-0.5 group-data-[collapsible=icon]:hidden">

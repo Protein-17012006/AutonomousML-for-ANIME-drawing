@@ -19,6 +19,7 @@ import { Compare } from "./components/review/Compare";
 import { Toast } from "./components/review/Toast";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { Button } from "@/components/ui/button";
 import {
   AppSidebar,
   type SidebarAccount,
@@ -590,13 +591,14 @@ export default function App() {
           ) : (
             <>
               <div className="board-bar">
-                <button
+                <Button
+                  variant="outline"
                   type="button"
-                  className="btn btn-ghost"
+                  className="font-mono text-[12.5px] tracking-[0.02em]"
                   onClick={() => setView("chat")}
                 >
                   ← Back to chat
-                </button>
+                </Button>
               </div>
               <ReviewWorkbench
                 log={log}

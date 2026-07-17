@@ -7,6 +7,7 @@ import { statusClass, statusGlyph } from "../../lib/pairView";
 import { actionLabel, errTypeLabel, qaLabel } from "../../labels";
 import { FlipPlayer, type Frame } from "./FlipPlayer";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 
 /* eslint-disable @next/next/no-img-element -- review frames are dynamic session/object URLs. */
 
@@ -48,16 +49,17 @@ function FrameTrip({
         pair {p.index} · {actionLabel(p.action)}
         {p.qa ? ` · ${qaLabel(p.qa)}` : ""}
         {canPlay && (
-          <button
+          <Button
+            variant="link"
             type="button"
-            className="trip-play"
+            className="ml-auto h-auto p-0 font-mono text-[11px] tracking-[0.04em] text-ao hover:bg-transparent hover:text-washi"
             onClick={(e) => {
               e.stopPropagation();
               setPlay((v) => !v);
             }}
           >
             {play ? "▦ frames" : "▶ play"}
-          </button>
+          </Button>
         )}
       </figcaption>
       {play && frames.length >= 2 ? (

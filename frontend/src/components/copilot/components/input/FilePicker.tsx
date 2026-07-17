@@ -1,3 +1,5 @@
+import { Button } from "@/components/ui/button";
+
 export function FilePicker({ id, label, onAdd }: { id: string; label: string; onAdd: (files: File[]) => void }) {
   return (
     <>
@@ -6,7 +8,7 @@ export function FilePicker({ id, label, onAdd }: { id: string; label: string; on
         id={id}
         accept="image/png"
         multiple
-        className="visually-hidden"
+        className="sr-only"
         onChange={(e) => {
           // Snapshot the files NOW: in Chromium, resetting input.value="" empties the
           // live FileList, so handing it to a deferred setState updater loses everything
@@ -16,7 +18,9 @@ export function FilePicker({ id, label, onAdd }: { id: string; label: string; on
           onAdd(picked);
         }}
       />
-      <label htmlFor={id} className="btn btn-ghost">{label}</label>
+      <Button asChild variant="outline" className="font-mono text-[12.5px] tracking-[0.02em]">
+        <label htmlFor={id}>{label}</label>
+      </Button>
     </>
   );
 }

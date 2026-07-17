@@ -2,6 +2,7 @@
 // inline reply dropzone (the collaborative-loop turn made conversational).
 import { useRef, useState } from "react";
 import type { PairEvent } from "../../types";
+import { Button } from "@/components/ui/button";
 
 export function KeyAskBubble({ pair, resolved, onRefill }: {
   pair: PairEvent;
@@ -25,12 +26,12 @@ export function KeyAskBubble({ pair, resolved, onRefill }: {
       <p>{text}</p>
       {!resolved && (
         <>
-          <input ref={inputRef} type="file" accept="image/png" className="visually-hidden"
+          <input ref={inputRef} type="file" accept="image/png" className="sr-only"
             onChange={(e) => { const f = e.currentTarget.files?.[0] ?? null; e.currentTarget.value = ""; void send(f); }} />
-          <button type="button" className="btn btn-primary" disabled={busy}
+          <Button type="button" className="border-ao bg-ao font-mono text-[12.5px] font-semibold tracking-[0.02em] text-on-ao hover:bg-ao/85" disabled={busy}
             onClick={() => inputRef.current?.click()}>
             {busy ? "Splicing…" : "Upload a key PNG"}
-          </button>
+          </Button>
         </>
       )}
     </div>

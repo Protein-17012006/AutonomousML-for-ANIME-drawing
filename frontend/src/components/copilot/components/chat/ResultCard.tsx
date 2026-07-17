@@ -1,5 +1,6 @@
 // Final agent message: session stats + artifacts + board handoff + exports.
 import type { ResultEvent } from "../../types";
+import { Button } from "@/components/ui/button";
 
 /* cadence_fps → "shoot on Ns" label; falls back to a plain "Nfps" for an unrecognized rate */
 function cadenceLabel(cadenceFps?: number): string {
@@ -48,8 +49,8 @@ export function ResultCard({ result, keyUrls, onOpenBoard, onExport }: {
         </p>
       )}
       <div className="result-actions">
-        <button type="button" className="btn btn-primary" onClick={onOpenBoard}>Open review board</button>
-        <button type="button" className="btn btn-ghost" onClick={() => onExport(result)}>Export bundle ⤓</button>
+        <Button type="button" className="border-ao bg-ao font-mono text-[12.5px] font-semibold tracking-[0.02em] text-on-ao hover:bg-ao/85" onClick={onOpenBoard}>Open review board</Button>
+        <Button type="button" variant="outline" className="font-mono text-[12.5px] tracking-[0.02em]" onClick={() => onExport(result)}>Export bundle ⤓</Button>
       </div>
       {flaggedKeys.length > 0 && (
         <p className="result-flagged-keys">

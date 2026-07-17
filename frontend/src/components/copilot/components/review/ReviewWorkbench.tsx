@@ -10,6 +10,7 @@ import { FrameCard } from "./FrameCard";
 import { ReviewPairRow } from "./ReviewPairRow";
 import { ChatWelcome } from "../chat/ChatWelcome";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 
 type Filter = "offmodel" | "unsure" | "pass" | "all" | "needs_key";
 
@@ -291,14 +292,15 @@ export function ReviewWorkbench({
     setFilter(f);
   };
   const chip = (key: Filter, label: string, n: number, title: string) => (
-    <button
+    <Button
+      variant="ghost"
       type="button"
-      className={cn("chip", `chip-${key}`, filter === key && "on")}
+      className={cn("chip hover:bg-transparent", `chip-${key}`, filter === key && "on")}
       title={title}
       onClick={() => pick(key)}
     >
       {label} <b>{n}</b>
-    </button>
+    </Button>
   );
   const filterDesc: Record<Filter, string> = {
     offmodel:
@@ -341,13 +343,14 @@ export function ReviewWorkbench({
             <div className="headline">
               <span className="headline-text">{headline}</span>
               {video && (
-                <button
+                <Button
+                  variant="default"
                   type="button"
-                  className="headline-play"
+                  className="border-ao bg-ao px-3.5 py-1.5 font-mono text-xs font-semibold tracking-[0.02em] text-on-ao hover:bg-ao/85 active:translate-y-px"
                   onClick={playCut}
                 >
                   ▶ Play your cut
-                </button>
+                </Button>
               )}
             </div>
           )}
@@ -433,9 +436,13 @@ export function ReviewWorkbench({
                 </>
               )}
             </span>
-            <button
+            <Button
+              variant="outline"
               type="button"
-              className={`export-btn${exported ? " done" : ""}`}
+              className={cn(
+                "font-mono text-[11px] tracking-[0.04em] uppercase hover:border-ao hover:bg-sumi-3 hover:text-ao active:translate-y-px",
+                exported && "border-pass text-pass shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--color-pass)_32%,transparent)]",
+              )}
               disabled={!result}
               title={
                 result
@@ -450,7 +457,7 @@ export function ReviewWorkbench({
               }}
             >
               {exported ? "Exported ✓" : "Export ⤓"}
-            </button>
+            </Button>
           </div>
           <div className="toolbar-foot">
             <p className="filter-desc">{filterDesc[filter]}</p>

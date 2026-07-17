@@ -6,6 +6,8 @@ import { ArrowLeft, Check } from "lucide-react";
 import { confirmResetPassword } from "aws-amplify/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { configureAmplify } from "@/lib/amplify";
 
 export function ResetPasswordForm() {
@@ -49,10 +51,10 @@ export function ResetPasswordForm() {
   if (done) {
     return (
       <div className="flex flex-col gap-5">
-        <div className="flex items-start gap-2 rounded-lg border border-border bg-muted/50 px-3 py-2 font-body text-sm text-foreground">
+        <Alert>
           <Check className="mt-0.5 size-4 shrink-0 text-emerald-500" />
-          <span>Your password has been updated. You can sign in now.</span>
-        </div>
+          <AlertDescription>Your password has been updated. You can sign in now.</AlertDescription>
+        </Alert>
         <Button
           asChild
           className="h-10 w-full border-0 bg-linear-to-r from-purple-500 to-pink-500 text-white hover:opacity-90"
@@ -65,11 +67,10 @@ export function ResetPasswordForm() {
 
   return (
     <div className="flex flex-col gap-5">
-      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-        <div className="flex flex-col gap-2">
-          <label htmlFor="email" className="font-body text-sm font-medium text-foreground">
-            Email
-          </label>
+      <form onSubmit={handleSubmit}>
+        <FieldGroup className="gap-4">
+        <Field data-invalid={!!error}>
+          <FieldLabel htmlFor="email">Email</FieldLabel>
           <Input
             id="email"
             name="email"
@@ -79,13 +80,13 @@ export function ResetPasswordForm() {
             defaultValue={pendingEmail}
             placeholder="you@studio.com"
             className="h-10"
+            aria-invalid={!!error}
+            aria-describedby={error ? "reset-password-error" : undefined}
           />
-        </div>
+        </Field>
 
-        <div className="flex flex-col gap-2">
-          <label htmlFor="code" className="font-body text-sm font-medium text-foreground">
-            Reset code
-          </label>
+        <Field data-invalid={!!error}>
+          <FieldLabel htmlFor="code">Reset code</FieldLabel>
           <Input
             id="code"
             name="code"
@@ -95,13 +96,13 @@ export function ResetPasswordForm() {
             onChange={(e) => setCode(e.target.value)}
             placeholder="6-digit code"
             className="h-10"
+            aria-invalid={!!error}
+            aria-describedby={error ? "reset-password-error" : undefined}
           />
-        </div>
+        </Field>
 
-        <div className="flex flex-col gap-2">
-          <label htmlFor="password" className="font-body text-sm font-medium text-foreground">
-            New password
-          </label>
+        <Field data-invalid={!!error}>
+          <FieldLabel htmlFor="password">New password</FieldLabel>
           <Input
             id="password"
             name="password"
@@ -110,16 +111,13 @@ export function ResetPasswordForm() {
             autoComplete="new-password"
             placeholder="At least 8 characters"
             className="h-10"
+            aria-invalid={!!error}
+            aria-describedby={error ? "reset-password-error" : undefined}
           />
-        </div>
+        </Field>
 
-        <div className="flex flex-col gap-2">
-          <label
-            htmlFor="confirm-password"
-            className="font-body text-sm font-medium text-foreground"
-          >
-            Confirm new password
-          </label>
+        <Field data-invalid={!!error}>
+          <FieldLabel htmlFor="confirm-password">Confirm new password</FieldLabel>
           <Input
             id="confirm-password"
             name="confirm-password"
@@ -128,8 +126,10 @@ export function ResetPasswordForm() {
             autoComplete="new-password"
             placeholder="Re-enter your new password"
             className="h-10"
+            aria-invalid={!!error}
+            aria-describedby={error ? "reset-password-error" : undefined}
           />
-        </div>
+        </Field>
 
         <Button
           type="submit"
@@ -138,7 +138,12 @@ export function ResetPasswordForm() {
         >
           {submitting ? "Resetting..." : "Reset password"}
         </Button>
-        {error && <p className="text-sm text-destructive">{error}</p>}
+        {error && (
+          <Alert id="reset-password-error" variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+        </FieldGroup>
       </form>
 
       <Button asChild variant="ghost" className="h-9 w-full">

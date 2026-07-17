@@ -7,6 +7,8 @@ import { signUp } from "aws-amplify/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { SocialAuthButtons } from "./SocialAuthButtons";
 import { configureAmplify } from "@/lib/amplify";
 
@@ -50,11 +52,10 @@ export function SignupForm() {
 
   return (
     <div className="flex flex-col gap-5">
-      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-        <div className="flex flex-col gap-2">
-          <label htmlFor="email" className="font-body text-sm font-medium text-foreground">
-            Email
-          </label>
+      <form onSubmit={handleSubmit}>
+        <FieldGroup className="gap-4">
+        <Field data-invalid={!!error}>
+          <FieldLabel htmlFor="email">Email</FieldLabel>
           <Input
             id="email"
             name="email"
@@ -63,13 +64,13 @@ export function SignupForm() {
             autoComplete="email"
             placeholder="you@studio.com"
             className="h-10"
+            aria-invalid={!!error}
+            aria-describedby={error ? "signup-error" : undefined}
           />
-        </div>
+        </Field>
 
-        <div className="flex flex-col gap-2">
-          <label htmlFor="password" className="font-body text-sm font-medium text-foreground">
-            Password
-          </label>
+        <Field data-invalid={!!error}>
+          <FieldLabel htmlFor="password">Password</FieldLabel>
           <Input
             id="password"
             name="password"
@@ -78,16 +79,13 @@ export function SignupForm() {
             autoComplete="new-password"
             placeholder="At least 8 characters"
             className="h-10"
+            aria-invalid={!!error}
+            aria-describedby={error ? "signup-error" : undefined}
           />
-        </div>
+        </Field>
 
-        <div className="flex flex-col gap-2">
-          <label
-            htmlFor="confirm-password"
-            className="font-body text-sm font-medium text-foreground"
-          >
-            Confirm password
-          </label>
+        <Field data-invalid={!!error}>
+          <FieldLabel htmlFor="confirm-password">Confirm password</FieldLabel>
           <Input
             id="confirm-password"
             name="confirm-password"
@@ -96,8 +94,10 @@ export function SignupForm() {
             autoComplete="new-password"
             placeholder="Re-enter your password"
             className="h-10"
+            aria-invalid={!!error}
+            aria-describedby={error ? "signup-error" : undefined}
           />
-        </div>
+        </Field>
 
         <Button
           type="submit"
@@ -106,7 +106,12 @@ export function SignupForm() {
         >
           {submitting ? "Creating..." : "Create account"}
         </Button>
-        {error && <p className="text-sm text-destructive">{error}</p>}
+        {error && (
+          <Alert id="signup-error" variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+        </FieldGroup>
       </form>
 
       <div className="flex items-center gap-3">

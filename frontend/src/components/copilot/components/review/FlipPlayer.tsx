@@ -1,5 +1,7 @@
 // per-pair line-test (flip key_A → in-between → key_B). Extracted from CopilotApp.tsx.
 import { useEffect, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 
 /* eslint-disable @next/next/no-img-element -- review frames are dynamic session/object URLs. */
 
@@ -28,14 +30,14 @@ export function FlipPlayer({ frames }: { frames: Frame[] }) {
         <span className="flip-count">{pos + 1}/{seq.length}</span>
       </div>
       <div className="flip-ctl">
-        <button type="button" className="flip-btn" onClick={() => step(-1)} aria-label="previous frame">◀</button>
-        <button type="button" className="flip-btn" onClick={() => setPlaying((pl) => !pl)}>
+        <Button type="button" variant="outline" size="sm" className="font-mono text-xs text-washi hover:border-ao hover:bg-sumi-3 hover:text-ao active:translate-y-px" onClick={() => step(-1)} aria-label="previous frame">◀</Button>
+        <Button type="button" variant="outline" size="sm" className="font-mono text-xs text-washi hover:border-ao hover:bg-sumi-3 hover:text-ao active:translate-y-px" onClick={() => setPlaying((pl) => !pl)}>
           {playing ? "❚❚ pause" : "▶ play"}
-        </button>
-        <button type="button" className="flip-btn" onClick={() => step(1)} aria-label="next frame">▶</button>
+        </Button>
+        <Button type="button" variant="outline" size="sm" className="font-mono text-xs text-washi hover:border-ao hover:bg-sumi-3 hover:text-ao active:translate-y-px" onClick={() => step(1)} aria-label="next frame">▶</Button>
         {frames.length > 2 && (
-          <label className="flip-toggle">
-            <input type="checkbox" checked={showTween} onChange={(e) => setShowTween(e.target.checked)} />
+          <label className="inline-flex cursor-pointer items-center gap-1.5 font-mono text-[11px] tracking-[0.04em] text-ash uppercase">
+            <Switch checked={showTween} onCheckedChange={setShowTween} aria-label="show in-between" />
             show in-between
           </label>
         )}

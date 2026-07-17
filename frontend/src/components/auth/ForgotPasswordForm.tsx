@@ -7,6 +7,8 @@ import { ArrowLeft, Check } from "lucide-react";
 import { resetPassword } from "aws-amplify/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { configureAmplify } from "@/lib/amplify";
 
 export function ForgotPasswordForm() {
@@ -35,13 +37,13 @@ export function ForgotPasswordForm() {
   if (sent) {
     return (
       <div className="flex flex-col gap-5">
-        <div className="flex items-start gap-2 rounded-lg border border-border bg-muted/50 px-3 py-2 font-body text-sm text-foreground">
+        <Alert>
           <Check className="mt-0.5 size-4 shrink-0 text-emerald-500" />
-          <span>
+          <AlertDescription>
             If an account exists for <span className="font-medium">{email}</span>, a reset code is on
             its way.
-          </span>
-        </div>
+          </AlertDescription>
+        </Alert>
         <Button
           type="button"
           onClick={() => router.push("/reset-password")}
@@ -61,11 +63,10 @@ export function ForgotPasswordForm() {
 
   return (
     <div className="flex flex-col gap-5">
-      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-        <div className="flex flex-col gap-2">
-          <label htmlFor="email" className="font-body text-sm font-medium text-foreground">
-            Email
-          </label>
+      <form onSubmit={handleSubmit}>
+        <FieldGroup className="gap-4">
+        <Field data-invalid={!!error}>
+          <FieldLabel htmlFor="email">Email</FieldLabel>
           <Input
             id="email"
             name="email"
@@ -76,8 +77,10 @@ export function ForgotPasswordForm() {
             onChange={(e) => setEmail(e.target.value)}
             placeholder="you@studio.com"
             className="h-10"
+            aria-invalid={!!error}
+            aria-describedby={error ? "forgot-password-error" : undefined}
           />
-        </div>
+        </Field>
 
         <Button
           type="submit"
@@ -86,7 +89,12 @@ export function ForgotPasswordForm() {
         >
           {submitting ? "Sending..." : "Send reset code"}
         </Button>
-        {error && <p className="text-sm text-destructive">{error}</p>}
+        {error && (
+          <Alert id="forgot-password-error" variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+        </FieldGroup>
       </form>
 
       <p className="text-center font-body text-sm text-muted-foreground">

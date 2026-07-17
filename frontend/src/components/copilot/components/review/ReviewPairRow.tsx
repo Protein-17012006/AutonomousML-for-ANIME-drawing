@@ -116,18 +116,18 @@ export function ReviewPairRow({
           </button>
         </div>
       ) : (
-        <label className="addkey" onClick={(event) => event.stopPropagation()}>
+        <label className="group mt-[11px] inline-block cursor-pointer" onClick={(event) => event.stopPropagation()}>
           <input
             type="file"
             accept="image/png"
-            className="visually-hidden"
+            className="sr-only"
             onChange={(event) => {
               const file = event.currentTarget.files?.[0];
               event.currentTarget.value = "";
               if (file) onRefill(pair.index, file);
             }}
           />
-          <span className="btn-addkey">✎ Add my key</span>
+          <span className="inline-block rounded-md border border-akaire bg-akaire/10 px-3.5 py-1.5 font-mono text-xs tracking-[0.02em] text-akaire-ink transition-all group-hover:bg-akaire group-hover:text-white group-active:translate-y-px">✎ Add my key</span>
         </label>
       )}
     </li>

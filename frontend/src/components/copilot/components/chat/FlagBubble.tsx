@@ -3,6 +3,7 @@
 // The overlay uses the EXISTING server-computed fractional box (service/app.py region_box)
 // — grid-coarse (3×3 VLM region), honestly not a pixel mask (design §0.5).
 import type { Explanation, PairEvent } from "../../types";
+import { Button } from "@/components/ui/button";
 
 /* eslint-disable @next/next/no-img-element -- session artifacts and object URLs are dynamic. */
 
@@ -53,7 +54,7 @@ export function FlagBubble({ pair, ex, keyUrls, onReview }: {
           <li className="trace-status">→ {pair.correction.status}</li>
         </ul>
       )}
-      <button type="button" className="btn btn-ghost" onClick={onReview}>Review this pair</button>
+      <Button type="button" variant="outline" className="font-mono text-[12.5px] tracking-[0.02em]" onClick={onReview}>Review this pair</Button>
     </div>
   );
 }

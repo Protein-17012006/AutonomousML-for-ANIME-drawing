@@ -2,6 +2,14 @@
 
 import { useState, useRef, useEffect, useMemo } from "react";
 import { BrandIcon } from "../../../common/BrandIcon";
+import { Field, FieldLabel } from "@/components/ui/field";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import type { InputMode } from "../../types";
 import { isPng, isVideoFile } from "../../lib/media";
 
@@ -70,16 +78,18 @@ export function KeyframeDropzone({
     <div className="dropzone-wrap">
       <div className="flex flex-col gap-2">
         {/* MODE SELECTOR — sits outside the clickable box so it never opens the file dialog */}
-        <label className="field self-start">
-          input
-          <select
-            value={mode}
-            onChange={(e) => handleModeChange(e.target.value)}
-          >
-            <option value="frames">Frames (PNG)</option>
-            <option value="video">Video (MP4)</option>
-          </select>
-        </label>
+        <Field orientation="horizontal" className="inline-flex w-auto items-center gap-1.5 self-start font-mono text-[11px] tracking-[0.08em] text-ash uppercase">
+          <FieldLabel className="font-mono text-[11px] tracking-[0.08em] text-ash uppercase">input</FieldLabel>
+          <Select value={mode} onValueChange={handleModeChange}>
+            <SelectTrigger size="sm" className="w-auto font-mono text-[13px] text-washi">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="frames">Frames (PNG)</SelectItem>
+              <SelectItem value="video">Video (MP4)</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
         {/* DROP BOX */}
         <div
           className={`dropzone${over ? " is-over" : ""}`}
@@ -109,7 +119,7 @@ export function KeyframeDropzone({
             type="file"
             accept={isVideo ? "video/mp4,video/*" : "image/png"}
             multiple={!isVideo}
-            className="visually-hidden"
+            className="sr-only"
             onChange={(e) => {
               // snapshot before resetting value (the load→clear→load bug; see FilePicker)
               if (isVideo) {
