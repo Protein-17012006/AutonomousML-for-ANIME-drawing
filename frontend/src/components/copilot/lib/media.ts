@@ -5,4 +5,7 @@
 export const isPng = (f: File) =>
   f.type === "image/png" || f.name.toLowerCase().endsWith(".png");
 
-export const isVideoFile = (f: File) => f.type.startsWith("video/");
+const VIDEO_EXTENSIONS = /\.(mp4|webm|mov|m4v|avi|mkv)$/i;
+
+export const isVideoFile = (f: File) =>
+  f.type.startsWith("video/") || VIDEO_EXTENSIONS.test(f.name);

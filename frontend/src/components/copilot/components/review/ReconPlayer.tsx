@@ -77,8 +77,10 @@ export function ReconPlayer({ src, fps }: { src: string; fps: number }) {
           aria-valuemin={0}
           aria-valuemax={total}
           tabIndex={0}
-          onPointerDown={(e) => { (e.target as Element).setPointerCapture?.(e.pointerId); seek(e.clientX); }}
+          onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); seek(e.clientX); }}
           onPointerMove={(e) => { if (e.buttons) seek(e.clientX); }}
+          onPointerUp={(e) => { e.currentTarget.releasePointerCapture?.(e.pointerId); }}
+          onPointerCancel={(e) => { e.currentTarget.releasePointerCapture?.(e.pointerId); }}
           onKeyDown={(e) => { if (e.key === "ArrowLeft") { e.preventDefault(); step(-1); } else if (e.key === "ArrowRight") { e.preventDefault(); step(1); } }}
         >
           <span className="rplayer-fill" style={{ width: `${pct}%` }} />

@@ -17,6 +17,7 @@ import {
   readableReason,
   regionLabel,
 } from "../../labels";
+import { cn } from "@/lib/utils";
 
 export function QAPanel({
   p,
@@ -51,13 +52,13 @@ export function QAPanel({
   const tone =
     p.qa === "pass" ? "pass" : p.qa === "abstain" ? "abstain" : "flag";
   const hasDial = p.verdict_prob != null;
-  const clean = hasDial ? clamp01(1 - (p.verdict_prob as number)) : 0;
+  const clean = clamp01(1 - (p.verdict_prob ?? 0));
   const zone = abstainZone(p, band);
   const rigor = readableReason(p.reason);
   return (
-    <div className={`qapanel qapanel-${tone}`}>
+    <div className={cn("qapanel", `qapanel-${tone}`)}>
       <div className="qap-head">
-        <span className={`sglyph sglyph-${statusClass(p)}`} aria-hidden="true">
+        <span className={cn("sglyph", `sglyph-${statusClass(p)}`)} aria-hidden="true">
           {statusGlyph(p)}
         </span>
         pair {p.index} · {qaLabel(p.qa)}

@@ -28,6 +28,7 @@ export function VerifyEmailForm() {
   const [verified, setVerified] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [resending, setResending] = useState(false);
 
   const complete = value.length === CODE_LENGTH && !!email;
 
@@ -53,13 +54,16 @@ export function VerifyEmailForm() {
   }
 
   async function resend() {
-    if (!email) return;
+    if (!email || resending) return;
     configureAmplify();
     setError(null);
+    setResending(true);
     try {
       await resendSignUpCode({ username: email });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not resend the code.");
+    } finally {
+      setResending(false);
     }
   }
 
@@ -90,6 +94,8 @@ export function VerifyEmailForm() {
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
         <div className="flex justify-center">
           <InputOTP
+            id="verification-code"
+            aria-label="Verification code"
             maxLength={CODE_LENGTH}
             value={value}
             onChange={setValue}
@@ -125,9 +131,10 @@ export function VerifyEmailForm() {
         <button
           type="button"
           onClick={resend}
+          disabled={!email || resending}
           className="font-medium text-foreground hover:underline"
         >
-          Resend
+          {resending ? "Sending..." : "Resend"}
         </button>
       </p>
 

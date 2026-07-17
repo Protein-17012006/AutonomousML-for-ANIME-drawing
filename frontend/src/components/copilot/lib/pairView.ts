@@ -35,6 +35,11 @@ export const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
  *  uncertainty bin. "forced" = the hard u_max gate makes it always-abstain. */
 export function abstainZone(p: PairEvent, band?: CsqBand | null): { from: number; to: number } | "forced" | null {
   if (!band) return null;
+  if (
+    band.u_edges.length < 2 ||
+    band.tau_pass.length !== band.u_edges.length - 1 ||
+    band.tau_flag.length !== band.u_edges.length - 1
+  ) return null;
   const u = p.uncertainty ?? 0;
   if (u > band.u_max) return "forced";
   const e = band.u_edges;

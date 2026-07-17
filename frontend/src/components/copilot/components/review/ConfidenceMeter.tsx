@@ -5,6 +5,7 @@
 import type { CsqBand, PairEvent } from "../../types";
 import { ARC, abstainZone, clamp01 } from "../../lib/pairView";
 import { readableReason } from "../../labels";
+import { cn } from "@/lib/utils";
 
 export function ConfidenceMeter({
   p,
@@ -21,7 +22,7 @@ export function ConfidenceMeter({
   const zone = abstainZone(p, band);
   return (
     <div
-      className={`confgauge confgauge-${tone}`}
+      className={cn("confgauge", `confgauge-${tone}`)}
       title={readableReason(p.reason)}
     >
       <svg className="confgauge-dial" viewBox="0 0 44 26" aria-hidden="true">

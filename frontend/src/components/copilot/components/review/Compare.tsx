@@ -22,6 +22,8 @@ export function Compare(p: CompareProps) {
       <button
         type="button"
         className="compare-head"
+        aria-expanded={open}
+        aria-controls="frame-comparison-body"
         onClick={() => setOpen((o) => !o)}
       >
         <span className="eyebrow">Frame Comparison</span>
@@ -29,7 +31,7 @@ export function Compare(p: CompareProps) {
         <span className="compare-toggle">{open ? "hide" : "show"}</span>
       </button>
       {open && (
-        <div className="compare-body">
+        <div id="frame-comparison-body" className="compare-body">
           <p className="hint">
             Upload a <b>full cut</b> (every frame, named 0000.png, 0001.png…).
             The system drops every other frame, then RIFE reconstructs them —{" "}

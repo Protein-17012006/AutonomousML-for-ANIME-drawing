@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { signInWithRedirect } from "aws-amplify/auth";
 import { Button } from "@/components/ui/button";
 import { GoogleIcon } from "@/components/common/icons/GoogleIcon";
@@ -14,9 +15,19 @@ const PROVIDERS = [
 ] as const;
 
 export function SocialAuthButtons() {
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   async function googleSignIn() {
     configureAmplify();
-    await signInWithRedirect({ provider: "Google" });
+    setError(null);
+    setSubmitting(true);
+    try {
+      await signInWithRedirect({ provider: "Google" });
+    } catch (err) {
+      setSubmitting(false);
+      setError(err instanceof Error ? err.message : "Could not continue with Google.");
+    }
   }
 
   return (
@@ -26,7 +37,7 @@ export function SocialAuthButtons() {
           key={name}
           type="button"
           variant="outline"
-          disabled={!enabled}
+          disabled={!enabled || submitting}
           onClick={enabled ? googleSignIn : undefined}
           className="h-10 w-full justify-center gap-2"
         >
@@ -35,6 +46,11 @@ export function SocialAuthButtons() {
           {!enabled && <span className="text-xs text-muted-foreground">(coming soon)</span>}
         </Button>
       ))}
+      {error && (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      )}
     </div>
   );
 }

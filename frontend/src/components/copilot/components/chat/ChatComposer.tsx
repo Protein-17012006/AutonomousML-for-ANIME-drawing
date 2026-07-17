@@ -124,7 +124,11 @@ export function ChatComposer(p: {
           <Settings />
         </Button>
         {/* USER PROMPT INPUT */}
+        <label htmlFor="session-question" className="visually-hidden">
+          Ask about this session
+        </label>
         <input
+          id="session-question"
           className="flex-1 min-w-[180px] rounded-full border border-line bg-sumi-3 px-3.5 py-[9px] font-body text-[0.86rem] text-washi focus:outline-2 focus:outline-offset-1 focus:outline-ao disabled:opacity-[0.55]"
           type="text"
           value={q}

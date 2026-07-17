@@ -5,14 +5,36 @@ import { Check, Mail, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
-// Newsletter sign-up. Template only — submit is a client-side stub (preventDefault), no backend.
+const NEWSLETTER_ENDPOINT = process.env.NEXT_PUBLIC_NEWSLETTER_ENDPOINT;
+
 export function Newsletter() {
   const [email, setEmail] = useState("");
   const [subscribed, setSubscribed] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (email.trim()) setSubscribed(true);
+    setError(null);
+    if (!NEWSLETTER_ENDPOINT) {
+      setError("Newsletter sign-up is not available yet.");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const response = await fetch(NEWSLETTER_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim() }),
+      });
+      if (!response.ok) throw new Error("Newsletter sign-up failed.");
+      setSubscribed(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Newsletter sign-up failed.");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -37,9 +59,15 @@ export function Newsletter() {
               onSubmit={handleSubmit}
               className="flex flex-col gap-3 sm:flex-row"
             >
+              <label htmlFor="newsletter-email" className="sr-only">
+                Email address
+              </label>
               <Input
+                id="newsletter-email"
                 type="email"
                 required
+                name="email"
+                autoComplete="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@studio.com"
@@ -48,12 +76,18 @@ export function Newsletter() {
               />
               <Button
                 type="submit"
+                disabled={submitting}
                 className="h-11 border-0 bg-linear-to-r from-purple-500 to-pink-500 px-5 text-white hover:opacity-90"
               >
-                Subscribe
+                {submitting ? "Subscribing..." : "Subscribe"}
                 <Send />
               </Button>
             </form>
+          )}
+          {error && (
+            <p role="alert" className="text-sm text-destructive">
+              {error}
+            </p>
           )}
         </div>
 

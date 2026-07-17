@@ -79,19 +79,23 @@ export function ChatWelcome({
           }}
         />
 
-        <Button
-          className="btn btn-primary flex-1"
-          onClick={() => framesInputRef.current?.click()}
-        >
-          Import Keyframes
-        </Button>
+        {onImportFrames && (
+          <Button
+            className="btn btn-primary flex-1"
+            onClick={() => framesInputRef.current?.click()}
+          >
+            Import Keyframes
+          </Button>
+        )}
 
-        <Button
-          className="btn btn-ghost flex-1"
-          onClick={() => videoInputRef.current?.click()}
-        >
-          Import Video
-        </Button>
+        {onImportVideo && (
+          <Button
+            className="btn btn-ghost flex-1"
+            onClick={() => videoInputRef.current?.click()}
+          >
+            Import Video
+          </Button>
+        )}
       </CardContent>
     </Card>
   );

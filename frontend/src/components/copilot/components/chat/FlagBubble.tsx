@@ -4,6 +4,8 @@
 // — grid-coarse (3×3 VLM region), honestly not a pixel mask (design §0.5).
 import type { Explanation, PairEvent } from "../../types";
 
+/* eslint-disable @next/next/no-img-element -- session artifacts and object URLs are dynamic. */
+
 function puLine(p: PairEvent): string {
   const bits: string[] = [];
   if (p.verdict_prob != null) bits.push(`P(error) ${p.verdict_prob.toFixed(2)}`);

@@ -1,6 +1,8 @@
 // per-pair line-test (flip key_A → in-between → key_B). Extracted from CopilotApp.tsx.
 import { useEffect, useState } from "react";
 
+/* eslint-disable @next/next/no-img-element -- review frames are dynamic session/object URLs. */
+
 export type Frame = { url: string; label: string };
 
 export function FlipPlayer({ frames }: { frames: Frame[] }) {

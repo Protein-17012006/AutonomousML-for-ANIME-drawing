@@ -1,21 +1,21 @@
-// Wire types — mirror the FastAPI service SSE schema (service/schemas.py).
+// Wire types mirror the FastAPI service SSE schema.
 
 export type QA = "pass" | "abstain" | "flag";
-
-// composer input mode: staged keyframes (→ /session) vs a single video clip (→ /session/video)
+export type PairAction = "needs_key" | "filled" | "generated";
+export type PairRoute = "hold" | "rife" | "snap_preserve" | "generative";
+export type RegionBox = [number, number, number, number];
 export type InputMode = "frames" | "video";
 
 export interface PairEvent {
   index: number;
-  action: string;            // "needs_key" | "filled" | "fill" | ...
+  action: PairAction;
   qa?: QA | null;
-  route?: string | null;     // "hold" | "rife" | "snap_preserve" — cadence engine for a filled pair
+  route?: PairRoute | null;
   keys_requested?: number;
   reason?: string;
-  verdict_prob?: number | null;   // P(error), calibrated — drives the confidence meter + abstain band
-  uncertainty?: number | null;    // CSQ uncertainty u — selects the abstain-band threshold bin
-  mid_url?: string | null;   // in-between PNG url, streamed live with each pair
-  // correction-loop trace (director decisions) — mirrors PairEvent.correction in schemas.py
+  verdict_prob?: number | null;
+  uncertainty?: number | null;
+  mid_url?: string | null;
   correction?: {
     status: string;
     keys_used: number;
@@ -23,7 +23,6 @@ export interface PairEvent {
   } | null;
 }
 
-// calibrated abstain band for the confidence dial: per-u-bin thresholds on p_error
 export interface CsqBand {
   tau_pass: number[];
   tau_flag: number[];
@@ -35,8 +34,8 @@ export interface Explanation {
   err_type: string;
   region: string;
   explanation: string;
-  box?: number[];   // fractional [x, y, w, h] (0..1) of the defect region, for the overlay
-  annotated_url?: string;   // server-burned circle+label PNG (preferred over the CSS overlay)
+  box?: RegionBox;
+  annotated_url?: string;
 }
 
 export interface ResultEvent {
@@ -47,29 +46,29 @@ export interface ResultEvent {
   keys_requested_total: number;
   artifacts?: { montage: string; video: string; report?: string };
   explanations?: Record<string, Explanation>;
-  pair_mids?: Record<string, string>;   // pair index -> in-between PNG url (for the line-test)
-  key_urls?: Record<string, string>;    // key index -> key PNG url (drop-a-video flow: keys are server-side)
-  sampling?: {                          // drop-a-video decimation summary (null for PNG upload)
+  pair_mids?: Record<string, string>;
+  key_urls?: Record<string, string>;
+  sampling?: {
     source_frames?: number;
     requested_stride?: number;
-    stride?: number;                    // > requested_stride when the clip was auto-fit (coarser)
+    stride?: number;
     kept?: number;
-    cadence_fps?: number;               // shoot-on-Ns cadence the artist selected (24/12/8)
-    smoothness?: number;                // in-between multiplier applied (1=off, 2=standard, 4=extra)
-    output_fps?: number;                // cadence_fps × smoothness — the delivered playback rate
-    duration?: number;                  // reconstructed cut length, seconds
-    planted?: string;                   // planted-error DEMO session: case id — dormant field,
-    planted_type?: string;              //   the seeded error class (ghost/morph/drift/…) — no
-    planted_src?: string;               //   suite/clip the bad mid came from — production path posts this
+    cadence_fps?: number;
+    smoothness?: number;
+    output_fps?: number;
+    duration?: number;
+    planted?: string;
+    planted_type?: string;
+    planted_src?: string;
   } | null;
-  csq?: CsqBand | null;                 // calibrated abstain band for the dial (box engines only)
-  qa_degraded?: boolean;                // true when the served VLM was unreachable during the run
+  csq?: CsqBand | null;
+  qa_degraded?: boolean;
 }
 
 export interface DemoResult {
-  video: string;          // side-by-side fallback
-  video_orig?: string;    // ORIGINAL cut (src + hidden GT) — for the before/after wipe
-  video_rife?: string;    // RECON cut (src + RIFE mids) — wiped against the original
+  video: string;
+  video_orig?: string;
+  video_rife?: string;
   frames: number;
   src: number;
   gt: number;

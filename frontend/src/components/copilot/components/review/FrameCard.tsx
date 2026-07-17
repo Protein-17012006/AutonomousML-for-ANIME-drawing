@@ -6,6 +6,9 @@ import type { Explanation, PairEvent } from "../../types";
 import { statusClass, statusGlyph } from "../../lib/pairView";
 import { actionLabel, errTypeLabel, qaLabel } from "../../labels";
 import { FlipPlayer, type Frame } from "./FlipPlayer";
+import { cn } from "@/lib/utils";
+
+/* eslint-disable @next/next/no-img-element -- review frames are dynamic session/object URLs. */
 
 /* static key·in-between·key, or a big line-test on play */
 function FrameTrip({
@@ -133,8 +136,17 @@ export function FrameCard({
       id={`frow-${p.index}`}
       data-pair={p.index}
       style={{ "--i": Math.min(i, 12) } as React.CSSProperties}
-      className={`frameset ${statusClass(p)}${focused ? " focused" : ""}`}
+      className={cn("frameset", statusClass(p), focused && "focused")}
+      role="button"
+      tabIndex={0}
       onClick={onFocus}
+      onKeyDown={(event) => {
+        if (event.target !== event.currentTarget) return;
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onFocus();
+        }
+      }}
     >
       <FrameTrip p={p} a={a} b={b} mid={mid} ex={ex} />
     </figure>

@@ -39,9 +39,10 @@ export function CompareWipe({ orig, rife }: { orig: string; rife: string }) {
       className="cmpwipe"
       ref={stageRef}
       style={{ "--pos": `${pos}%` } as React.CSSProperties}
-      onPointerDown={(e) => { dragging.current = true; (e.target as Element).setPointerCapture?.(e.pointerId); moveTo(e.clientX); }}
+      onPointerDown={(e) => { dragging.current = true; e.currentTarget.setPointerCapture(e.pointerId); moveTo(e.clientX); }}
       onPointerMove={(e) => { if (dragging.current) moveTo(e.clientX); }}
-      onPointerUp={() => { dragging.current = false; }}
+      onPointerUp={(e) => { dragging.current = false; e.currentTarget.releasePointerCapture?.(e.pointerId); }}
+      onPointerCancel={() => { dragging.current = false; }}
       onPointerLeave={() => { dragging.current = false; }}
     >
       <video ref={aRef} className="cmpwipe-a" src={orig} autoPlay muted loop playsInline />

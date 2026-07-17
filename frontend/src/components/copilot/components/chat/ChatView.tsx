@@ -6,6 +6,8 @@ import { FlagBubble } from "./FlagBubble";
 import { KeyAskBubble } from "./KeyAskBubble";
 import { ResultCard } from "./ResultCard";
 
+/* eslint-disable @next/next/no-img-element -- streamed previews are browser-local URLs. */
+
 export function ChatView({
   msgs,
   keyUrls,
@@ -22,7 +24,9 @@ export function ChatView({
   const endRef = useRef<HTMLDivElement>(null);
   // follow the conversation as bubbles stream in (like any chat client)
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    // Pair events arrive in quick succession over SSE; instant scrolling avoids
+    // queuing a separate smooth-scroll animation for every event.
+    endRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
   }, [msgs.length]);
 
   return (

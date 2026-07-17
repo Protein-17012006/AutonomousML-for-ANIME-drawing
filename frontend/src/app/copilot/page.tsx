@@ -29,6 +29,14 @@ export default function CopilotPage() {
     };
   }, [router]);
 
-  if (!allowed) return null;
+  if (!allowed) {
+    return (
+      <main className="grid min-h-screen place-items-center bg-background text-foreground">
+        <p role="status" className="text-sm text-muted-foreground">
+          Checking your session...
+        </p>
+      </main>
+    );
+  }
   return <CopilotApp />;
 }

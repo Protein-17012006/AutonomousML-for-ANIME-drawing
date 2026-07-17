@@ -21,8 +21,14 @@ const LINK_COLUMNS = [
   {
     heading: "Resources",
     links: [
-      { label: "Documentation", href: "#" },
-      { label: "Contact", href: "#" },
+      {
+        label: "Documentation",
+        href: "https://github.com/Protein-17012006/AutonomousML-for-ANIME-drawing#readme",
+      },
+      {
+        label: "Contact",
+        href: "https://github.com/Protein-17012006/AutonomousML-for-ANIME-drawing/issues",
+      },
     ],
   },
 ] as const;

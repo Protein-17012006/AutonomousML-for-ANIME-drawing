@@ -62,6 +62,9 @@ export function KeyframeDropzone({
     if (f) onVideo(f);
   };
   const isVideo = mode === "video";
+  const handleModeChange = (value: string) => {
+    if (value === "frames" || value === "video") onModeChange(value);
+  };
 
   return (
     <div className="dropzone-wrap">
@@ -71,7 +74,7 @@ export function KeyframeDropzone({
           input
           <select
             value={mode}
-            onChange={(e) => onModeChange(e.target.value as InputMode)}
+            onChange={(e) => handleModeChange(e.target.value)}
           >
             <option value="frames">Frames (PNG)</option>
             <option value="video">Video (MP4)</option>
