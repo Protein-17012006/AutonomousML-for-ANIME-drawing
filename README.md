@@ -90,7 +90,7 @@ This repository contains the runtime code for the live product only.
   `benchmark/smallgap/` Signal, scoring, and interpolation code that the pipeline imports at
                         runtime. These are runtime dependencies, not just research scaffolding.
 - `vision_common/`      Shared vision-language-model client and palette utilities.
-- `frontend/`           React, Vite, TypeScript, and Tailwind single-page app (the live UI).
+- `frontend/`           Next.js 16, React 19, TypeScript, and Tailwind application (the live UI).
 - `scripts/`            Deployment and box-start scripts.
 - `requirements-dev.txt`  Python dependencies (runtime and development combined).
 
@@ -132,14 +132,13 @@ The service exposes:
     npm install
     npm run dev
 
-The dev server runs on port 5173 and proxies API calls to the service (configure the target with
-`VITE_API_TARGET`). For a production build:
+The dev server runs on port 3000 and proxies API calls to the service (configure the target with
+`NEXT_PUBLIC_API_TARGET`). For a production build:
 
-    npm run build      # outputs frontend/dist
+    $env:BUILD_EXPORT="1"; npm run build      # outputs frontend/out
 
-To have the backend serve the built UI, start the service with `COPILOT_WEB_DIR=frontend/dist`.
-(This export omits the vanilla fallback UI, so without that variable the API runs but does not serve
-a static page at `/`.)
+To have the backend serve the built UI, start the service with `COPILOT_WEB_DIR=frontend/out`.
+The exported site is served same-origin with the FastAPI API.
 
 ### Deploy to the GPU box
 
@@ -158,7 +157,7 @@ Configuration is read from environment variables (kept in a local `.env`, which 
 - `VISION_MODEL_SPEC`, `VISION_MODEL_CHECK`, `VISION_MODEL_ESCALATE` and the matching
   `VISION_BASE_URL_*`   the tiered vision seam; the served detector is the "check" tier. When a base
   URL is unset, the corresponding tier falls back to a hosted vision model.
-- `COPILOT_WEB_DIR`   directory of the static UI to serve (set to `frontend/dist` after building).
+- `COPILOT_WEB_DIR`   directory of the static UI to serve (set to `frontend/out` after an export build).
 
 
 ## Notes and limitations
@@ -173,6 +172,6 @@ Configuration is read from environment variables (kept in a local `.env`, which 
 ## Tech stack
 
 - Backend: Python, FastAPI, Uvicorn, NumPy, Pillow, OpenCV, imageio.
-- Frontend: React, Vite, TypeScript, Tailwind CSS.
+- Frontend: Next.js 16, React 19, TypeScript, Tailwind CSS, Cognito/Amplify authentication.
 - Models and engines: RIFE-4.25 (interpolation), AniSora V3.1 (generative interpolation),
   Qwen3-VL-32B with a QLoRA adapter (perception and QA), DeepSeek (director).

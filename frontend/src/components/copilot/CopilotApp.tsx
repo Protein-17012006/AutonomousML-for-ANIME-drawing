@@ -6,12 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { fetchUserAttributes, getCurrentUser, signOut } from "aws-amplify/auth";
 import type { PairEvent, ResultEvent, DemoResult, InputMode } from "./types";
-import {
-  runSession,
-  runDemo,
-  runVideoSession,
-  askQuestion,
-} from "./api";
+import { runSession, runDemo, runVideoSession, askQuestion } from "./api";
 import { deriveMessages, type QaTurn, type UserTurn } from "./lib/chatModel";
 import { useFileSet } from "./lib/useFileSet";
 import { downloadBundle } from "./lib/exportSession";
@@ -24,7 +19,10 @@ import { Compare } from "./components/review/Compare";
 import { Toast } from "./components/review/Toast";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { AppSidebar, type SidebarAccount } from "@/components/common/AppSidebar";
+import {
+  AppSidebar,
+  type SidebarAccount,
+} from "@/components/common/AppSidebar";
 import { authHeaders, getIdentityId } from "@/lib/amplify";
 import {
   createConversation,
@@ -36,14 +34,22 @@ import {
   putConversationState,
   updateConversationMeta,
 } from "@/lib/chatStore";
-import type { ConversationMeta, ConversationState, SessionKind } from "@/models/conversation";
+import type {
+  ConversationMeta,
+  ConversationState,
+  SessionKind,
+} from "@/models/conversation";
 
 /* cadence value → human "shoot on Ns" label, shared by the upload bubble + the result sampling badge */
-const CADENCE_LABEL: Record<string, string> = { "24": "on-1s", "12": "on-2s", "8": "on-3s" };
+const CADENCE_LABEL: Record<string, string> = {
+  "24": "on-1s",
+  "12": "on-2s",
+  "8": "on-3s",
+};
 
 function sidFromResult(r: ResultEvent | null) {
   const ref = r?.artifacts?.montage || r?.artifacts?.video;
-  return ref?.startsWith("/session/") ? ref.split("/")[2] ?? null : null;
+  return ref?.startsWith("/session/") ? (ref.split("/")[2] ?? null) : null;
 }
 
 export default function App() {
@@ -87,6 +93,8 @@ export default function App() {
   const [boardFocus, setBoardFocus] = useState<number | null>(null);
   const [upload, setUpload] = useState<UserTurn | null>(null);
   const [qaTurns, setQaTurns] = useState<QaTurn[]>([]);
+
+  // Auth
   const [identityId, setIdentityId] = useState<string | null>(null);
   const [account, setAccount] = useState<SidebarAccount | null>(null);
   const [cid, setCid] = useState<string | null>(null);
@@ -96,10 +104,13 @@ export default function App() {
   const lastSavedRef = useRef<string | null>(null);
   const lightSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const refreshConversations = useCallback(async (id = identityId) => {
-    if (!id) return;
-    setConversations(await listConversations(id));
-  }, [identityId]);
+  const refreshConversations = useCallback(
+    async (id = identityId) => {
+      if (!id) return;
+      setConversations(await listConversations(id));
+    },
+    [identityId],
+  );
 
   useEffect(() => {
     let active = true;
@@ -211,8 +222,9 @@ export default function App() {
       setBanner(
         "Couldn't reach the co-pilot — is the service running? Press Run to retry.",
       );
+    } finally {
+      setRunning(false);
     }
-    setRunning(false);
   };
 
   const runVideo = async () => {
@@ -407,7 +419,8 @@ export default function App() {
         await refreshConversations(identityId);
       } catch (err) {
         console.error("save conversation failed:", err);
-        if (!cancelled) setBanner("Session finished, but saving history failed.");
+        if (!cancelled)
+          setBanner("Session finished, but saving history failed.");
       } finally {
         if (!cancelled) setSaving(false);
       }
@@ -453,7 +466,15 @@ export default function App() {
     return () => {
       if (lightSaveTimer.current) clearTimeout(lightSaveTimer.current);
     };
-  }, [cid, currentState, identityId, qaTurns, refreshConversations, result, verdicts]);
+  }, [
+    cid,
+    currentState,
+    identityId,
+    qaTurns,
+    refreshConversations,
+    result,
+    verdicts,
+  ]);
 
   const openConversation = async (conversation: ConversationMeta) => {
     if (!identityId) return;
@@ -469,7 +490,8 @@ export default function App() {
       setVerdicts(state.verdicts);
       setCid(conversation.cid);
       setLiveSid(null);
-      lastSavedRef.current = state.result?.artifacts?.montage || `restore:${conversation.cid}`;
+      lastSavedRef.current =
+        state.result?.artifacts?.montage || `restore:${conversation.cid}`;
       setView("chat");
       setBanner(null);
     } catch (err) {
@@ -519,89 +541,97 @@ export default function App() {
         />
         <div className="app">
           {view === "chat" ? (
-        <div className="chat-page">
-          <ChatHeader />
-          {/* Middle region — welcome XOR transcript, never both (see hasSession). */}
-          {hasSession ? (
-            <ChatView
-              msgs={msgs}
-              keyUrls={effKeyUrls}
-              onOpenBoard={openBoard}
-              onRefill={refillKey}
-              onExport={downloadBundle}
-            />
-          ) : (
-            <ChatWelcome
-              onImportFrames={importFrames}
-              onImportVideo={importVideo}
-            />
-          )}
-          <ChatComposer
-            files={keys.files}
-            fileUrls={keyUrls}
-            onAdd={keys.add}
-            onRemove={keys.remove}
-            onClear={() => {
-              clearAll();
-              setVideoFile(null);
-            }}
-            mode={mode}
-            onModeChange={changeMode}
-            engines={engines}
-            setEngines={setEngines}
-            cadence={cadence}
-            setCadence={setCadence}
-            smoothness={smoothness}
-            setSmoothness={setSmoothness}
-            videoFile={videoFile}
-            onVideo={setVideoFile}
-            stride={stride}
-            setStride={setStride}
-            onRun={run}
-            onRunVideo={runVideo}
-            running={running}
-            compact={running || log.length > 0}
-            askEnabled={!!result?.artifacts && !!liveSid}
-            onAsk={onAsk}
-          />
-        </div>
-      ) : (
-        <>
-          <div className="board-bar">
-            <button
-              type="button"
-              className="btn btn-ghost"
-              onClick={() => setView("chat")}
-            >
-              ← Back to chat
-            </button>
-          </div>
-          <ReviewWorkbench
-            log={log}
-            result={result}
-            running={running}
-            keyUrls={effKeyUrls}
-            verdicts={verdicts}
-            onVerdict={setVerdict}
-            onRefill={refillKey}
-            fps={result?.sampling?.output_fps || Number(cadence) * Number(smoothness) || 24}
-            initialFocus={boardFocus}
-            compareSlot={
-              <Compare
-                files={demo.files}
-                onAdd={demo.add}
-                onClear={clearDemo}
-                onBuild={buildDemo}
-                building={demoBuilding}
-                banner={demoBanner}
-                result={demoResult}
+            <div className="chat-page">
+              <ChatHeader />
+              {/* Middle region — welcome XOR transcript, never both (see hasSession). */}
+              {hasSession ? (
+                <ChatView
+                  msgs={msgs}
+                  keyUrls={effKeyUrls}
+                  onOpenBoard={openBoard}
+                  onRefill={refillKey}
+                  onExport={downloadBundle}
+                />
+              ) : (
+                <ChatWelcome
+                  onImportFrames={importFrames}
+                  onImportVideo={importVideo}
+                />
+              )}
+              <ChatComposer
+                files={keys.files}
+                fileUrls={keyUrls}
+                onAdd={keys.add}
+                onRemove={keys.remove}
+                onClear={() => {
+                  clearAll();
+                  setVideoFile(null);
+                }}
+                mode={mode}
+                onModeChange={changeMode}
+                engines={engines}
+                setEngines={setEngines}
+                cadence={cadence}
+                setCadence={setCadence}
+                smoothness={smoothness}
+                setSmoothness={setSmoothness}
+                videoFile={videoFile}
+                onVideo={setVideoFile}
+                stride={stride}
+                setStride={setStride}
+                onRun={run}
+                onRunVideo={runVideo}
+                running={running}
+                compact={running || log.length > 0}
+                askEnabled={!!result?.artifacts && !!liveSid}
+                onAsk={onAsk}
               />
-            }
-          />
-        </>
-      )}
+            </div>
+          ) : (
+            <>
+              <div className="board-bar">
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => setView("chat")}
+                >
+                  ← Back to chat
+                </button>
+              </div>
+              <ReviewWorkbench
+                log={log}
+                result={result}
+                running={running}
+                keyUrls={effKeyUrls}
+                verdicts={verdicts}
+                onVerdict={setVerdict}
+                onRefill={refillKey}
+                fps={
+                  result?.sampling?.output_fps ||
+                  Number(cadence) * Number(smoothness) ||
+                  24
+                }
+                initialFocus={boardFocus}
+                compareSlot={
+                  <Compare
+                    files={demo.files}
+                    onAdd={demo.add}
+                    onClear={clearDemo}
+                    onBuild={buildDemo}
+                    building={demoBuilding}
+                    banner={demoBanner}
+                    result={demoResult}
+                  />
+                }
+              />
+            </>
+          )}
           {banner && (
-            <Toast key={banner} message={banner} onClose={() => setBanner(null)} />
+            <Toast
+              key={banner}
+              message={banner}
+              onClose={() => setBanner(null)}
+            />
           )}
         </div>
       </SidebarProvider>
