@@ -2,9 +2,8 @@
 // Co-pilot app shell — owns all session state and switches the chat ⇄ board surfaces.
 // The presentational pieces were split out into ./components/* and the logic into ./lib/*
 // (this file used to be a ~1360-line monolith holding all of them).
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { fetchUserAttributes, getCurrentUser, signOut } from "aws-amplify/auth";
 import type { PairEvent, ResultEvent, DemoResult, InputMode } from "./types";
 import { runSession, runDemo, runVideoSession, askQuestion } from "./api";
 import { deriveMessages, type QaTurn, type UserTurn } from "./lib/chatModel";
@@ -24,22 +23,11 @@ import {
   AppSidebar,
   type SidebarAccount,
 } from "@/components/common/AppSidebar";
-import { authHeaders, getIdentityId } from "@/lib/amplify";
 import {
-  createConversation,
-  getConversationState,
-  listConversations,
-  makeConversationMeta,
-  newConversationId,
-  persistSessionImages,
-  putConversationState,
-  updateConversationMeta,
-} from "@/lib/chatStore";
-import type {
-  ConversationMeta,
-  ConversationState,
-  SessionKind,
-} from "@/models/conversation";
+  authenticatedFetch,
+  getCookieSession,
+  logoutCookieSession,
+} from "@/lib/authenticatedApi";
 
 /* cadence value → human "shoot on Ns" label, shared by the upload bubble + the result sampling badge */
 const CADENCE_LABEL: Record<string, string> = {
@@ -96,40 +84,21 @@ export default function App() {
   const [qaTurns, setQaTurns] = useState<QaTurn[]>([]);
 
   // Auth
-  const [identityId, setIdentityId] = useState<string | null>(null);
   const [account, setAccount] = useState<SidebarAccount | null>(null);
-  const [cid, setCid] = useState<string | null>(null);
   const [liveSid, setLiveSid] = useState<string | null>(null);
-  const [conversations, setConversations] = useState<ConversationMeta[]>([]);
-  const [saving, setSaving] = useState(false);
-  const lastSavedRef = useRef<string | null>(null);
-  const lightSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const refreshConversations = useCallback(
-    async (id = identityId) => {
-      if (!id) return;
-      setConversations(await listConversations(id));
-    },
-    [identityId],
-  );
 
   useEffect(() => {
     let active = true;
-    Promise.all([getCurrentUser(), getIdentityId(), fetchUserAttributes()])
-      .then(([user, id, attrs]) => {
+    getCookieSession()
+      .then((session) => {
         if (!active) return;
-        setIdentityId(id);
         setAccount({
-          name: attrs.name || attrs.email || user.username,
-          email: attrs.email,
+          name: session.username || "Animator",
+          email: session.username || undefined,
         });
-        return listConversations(id);
-      })
-      .then((items) => {
-        if (active && items) setConversations(items);
       })
       .catch((err) => {
-        console.error("failed to load Cognito user:", err);
+        console.error("failed to load cookie session:", err);
         router.replace("/login");
       });
     return () => {
@@ -169,9 +138,7 @@ export default function App() {
     setUpload(null);
     setQaTurns([]);
     setView("chat");
-    setCid(null);
     setLiveSid(null);
-    lastSavedRef.current = null;
   };
 
   // Switching input mode drops whatever the OTHER mode had staged, so `files` and `videoFile`
@@ -201,9 +168,7 @@ export default function App() {
     setResult(null);
     setVerdicts({});
     setQaTurns([]);
-    setCid(null);
     setLiveSid(null);
-    lastSavedRef.current = null;
     setUpload({
       label: `${keys.files.length} keyframes · ${engines === "box" ? "Co-pilot (GPU)" : "Demo"} · ${CADENCE_LABEL[cadence] ?? cadence} · ×${smoothness}`,
       thumbs: keyUrls.slice(0, 6),
@@ -235,9 +200,7 @@ export default function App() {
     setResult(null);
     setVerdicts({});
     setQaTurns([]);
-    setCid(null);
     setLiveSid(null);
-    lastSavedRef.current = null;
     setUpload({
       label: `${videoFile.name} · stride ${stride} · ${engines === "box" ? "Co-pilot (GPU)" : "Demo"}`,
       thumbs: [],
@@ -269,9 +232,8 @@ export default function App() {
     fd.append("index", String(index));
     fd.append("key", file);
     try {
-      const resp = await fetch(`/session/${liveSid}/key`, {
+      const resp = await authenticatedFetch(`/session/${liveSid}/key`, {
         method: "POST",
-        headers: await authHeaders(),
         body: fd,
       });
       if (!resp.ok) {
@@ -354,164 +316,14 @@ export default function App() {
     }
   };
 
-  const currentState = useCallback(
-    (): ConversationState => ({
-      schemaVersion: 1,
-      upload,
-      log,
-      result,
-      qaTurns,
-      verdicts,
-    }),
-    [upload, log, result, qaTurns, verdicts],
-  );
-
-  useEffect(() => {
-    if (!identityId || !result || running) return;
-    const marker = result.artifacts?.montage || result.artifacts?.video;
-    if (!marker || lastSavedRef.current === marker) return;
-
-    let cancelled = false;
-    async function saveCompletedRun() {
-      if (!identityId || !result || !upload) return;
-      setSaving(true);
-      try {
-        const nextCid = cid ?? newConversationId();
-        const persisted = await persistSessionImages({
-          cid: nextCid,
-          identityId,
-          state: currentState(),
-          keyFiles: keys.files,
-          videoFile,
-        });
-        if (cancelled) return;
-        const kind: SessionKind = videoFile ? "video" : "png";
-        const meta = makeConversationMeta({
-          identityId,
-          cid: nextCid,
-          title: upload.label,
-          kind,
-          engines,
-          fps: Number(cadence) || 12,
-          stride: Number(stride) || 2,
-          sid: liveSid,
-          uploadLabel: upload.label,
-          thumb: persisted.result?.artifacts?.montage ?? null,
-        });
-        if (cid) {
-          await updateConversationMeta(identityId, nextCid, {
-            title: meta.title,
-            kind: meta.kind,
-            engines: meta.engines,
-            fps: meta.fps,
-            stride: meta.stride,
-            sid: meta.sid,
-            uploadLabel: meta.uploadLabel,
-            thumb: meta.thumb,
-            updatedAt: meta.updatedAt,
-            schemaVersion: meta.schemaVersion,
-          });
-        } else {
-          await createConversation(meta);
-        }
-        if (cancelled) return;
-        setCid(nextCid);
-        lastSavedRef.current = marker ?? null;
-        await refreshConversations(identityId);
-      } catch (err) {
-        console.error("save conversation failed:", err);
-        if (!cancelled)
-          setBanner("Session finished, but saving history failed.");
-      } finally {
-        if (!cancelled) setSaving(false);
-      }
-    }
-
-    void saveCompletedRun();
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    cadence,
-    cid,
-    currentState,
-    engines,
-    identityId,
-    keys.files,
-    liveSid,
-    refreshConversations,
-    result,
-    running,
-    stride,
-    upload,
-    videoFile,
-  ]);
-
-  useEffect(() => {
-    if (!identityId || !cid || !result) return;
-    if (lightSaveTimer.current) clearTimeout(lightSaveTimer.current);
-    lightSaveTimer.current = setTimeout(() => {
-      setSaving(true);
-      putConversationState(identityId, cid, currentState())
-        .then(() =>
-          updateConversationMeta(identityId, cid, {
-            updatedAt: Date.now(),
-          }),
-        )
-        .then(() => refreshConversations(identityId))
-        .catch((err) => {
-          console.error("light save failed:", err);
-        })
-        .finally(() => setSaving(false));
-    }, 800);
-    return () => {
-      if (lightSaveTimer.current) clearTimeout(lightSaveTimer.current);
-    };
-  }, [
-    cid,
-    currentState,
-    identityId,
-    qaTurns,
-    refreshConversations,
-    result,
-    verdicts,
-  ]);
-
-  const openConversation = async (conversation: ConversationMeta) => {
-    if (!identityId) return;
-    setSaving(true);
-    try {
-      const state = await getConversationState(identityId, conversation.cid);
-      keys.clear();
-      setVideoFile(null);
-      setUpload(state.upload);
-      setLog(state.log);
-      setResult(state.result);
-      setQaTurns(state.qaTurns);
-      setVerdicts(state.verdicts);
-      setCid(conversation.cid);
-      setLiveSid(null);
-      lastSavedRef.current =
-        state.result?.artifacts?.montage || `restore:${conversation.cid}`;
-      setView("chat");
-      setBanner(null);
-    } catch (err) {
-      console.error("open conversation failed:", err);
-      setBanner("Couldn't open that saved chat.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const startNewChat = () => {
     clearAll();
     setVideoFile(null);
   };
 
   const handleSignOut = async () => {
-    await signOut();
-    setConversations([]);
-    router.replace("/login");
+    clearAll();
+    await logoutCookieSession();
   };
 
   const msgs = useMemo(
@@ -532,11 +344,7 @@ export default function App() {
       {/* App shell — left sidebar rail + the main content column (.app). */}
       <SidebarProvider className="copilot-shell">
         <AppSidebar
-          conversations={conversations}
-          activeCid={cid}
-          saving={saving}
           account={account}
-          onSelect={openConversation}
           onNewChat={startNewChat}
           onSignOut={handleSignOut}
         />

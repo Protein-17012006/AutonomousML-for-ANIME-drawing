@@ -1,9 +1,9 @@
 """Core Cognito JWT authentication for Stage 3.
 
 The static site remains public so the SPA can render its own login/signup pages.
-When ``COPILOT_AUTH_REQUIRED=1``, every session/GPU request must carry a valid
-User-Pool ID/access token or explicitly trusted, ALB-signed claims. ``/me/*``
-routes always require one of those verified identities.
+When ``COPILOT_AUTH_REQUIRED=1``, every protected request must carry a valid
+User-Pool ID token in the server-issued HttpOnly cookie or explicitly trusted,
+ALB-signed claims. A bearer ID token is accepted only by the cookie bootstrap.
 """
 from __future__ import annotations
 
@@ -19,6 +19,9 @@ from service.core.config import AuthSettings
 
 
 SESSION_NOT_FOUND_DETAIL = "Unknown session (or no result yet)"
+AUTH_COOKIE_PROD = "__Host-copilot_id"
+AUTH_COOKIE_DEV = "copilot_id"
+MAX_ID_TOKEN_BYTES = 3_800
 
 
 class AuthConfigurationError(RuntimeError):
@@ -81,15 +84,13 @@ class CognitoJwtVerifier:
         if self._jwk_client is None:
             self._jwk_client = jwt.PyJWKClient(self.jwks_url)
         key = self._jwk_client.get_signing_key_from_jwt(token).key
-        # Cognito access tokens use client_id instead of aud.  Signature, issuer,
-        # expiry and algorithm are still verified here; audience/client binding is
-        # checked uniformly in _validate_claims below.
         return jwt.decode(
             token,
             key,
             algorithms=["RS256"],
             issuer=self.issuer,
-            options={"verify_aud": False, "require": ["exp", "iss", "sub", "token_use"]},
+            audience=self.app_client_id,
+            options={"require": ["aud", "exp", "iss", "sub", "token_use"]},
         )
 
     def _validate_claims(self, claims: dict) -> CurrentUser:
@@ -97,15 +98,12 @@ class CognitoJwtVerifier:
             raise ValueError("wrong Cognito issuer")
         if float(claims.get("exp", 0)) <= self._now():
             raise ValueError("expired Cognito token")
-        token_use = claims.get("token_use")
-        if token_use == "id":
-            if claims.get("aud") != self.app_client_id:
-                raise ValueError("ID token is for another app client")
-        elif token_use == "access":
-            if claims.get("client_id") != self.app_client_id:
-                raise ValueError("access token is for another app client")
-        else:
-            raise ValueError("token_use must be id or access")
+        if float(claims.get("nbf", 0)) > self._now():
+            raise ValueError("Cognito token is not valid yet")
+        if claims.get("token_use") != "id":
+            raise ValueError("token_use must be id")
+        if claims.get("aud") != self.app_client_id:
+            raise ValueError("ID token is for another app client")
         sub = str(claims.get("sub") or "").strip()
         if not sub:
             raise ValueError("Cognito token has no subject")
@@ -213,7 +211,7 @@ class AlbOidcVerifier:
                            claims=dict(claims))
 
 
-def _bearer_token(request: Request) -> str:
+def bearer_token(request: Request) -> str:
     scheme, _, token = request.headers.get("Authorization", "").partition(" ")
     if scheme.lower() != "bearer" or not token.strip():
         raise HTTPException(
@@ -222,6 +220,21 @@ def _bearer_token(request: Request) -> str:
             headers={"WWW-Authenticate": "Bearer"},
         )
     return token.strip()
+
+
+def auth_cookie_name() -> str:
+    settings = AuthSettings.from_env(validate_required=False)
+    return AUTH_COOKIE_PROD if settings.cookie_secure else AUTH_COOKIE_DEV
+
+
+def auth_cookie_secure() -> bool:
+    return AuthSettings.from_env(validate_required=False).cookie_secure
+
+
+def _bounded_token(token: str) -> str:
+    if not token or len(token.encode("utf-8")) > MAX_ID_TOKEN_BYTES:
+        raise HTTPException(status_code=401, detail="Invalid Cognito ID token")
+    return token
 
 
 def verifier_for(request: Request) -> CognitoJwtVerifier:
@@ -248,29 +261,10 @@ def alb_verifier_for(request: Request) -> AlbOidcVerifier:
     return verifier
 
 
-def authenticate_request(request: Request) -> CurrentUser:
+def authenticate_bearer_request(request: Request) -> CurrentUser:
+    """Validate the one-time Cognito ID token used to establish the cookie."""
     try:
-        authorization = request.headers.get("Authorization", "")
-        alb_token = request.headers.get("x-amzn-oidc-data", "").strip()
-        bearer_user = None
-        alb_user = None
-        if authorization:
-            bearer_token = _bearer_token(request)
-            bearer_user = verifier_for(request).verify(bearer_token)
-        if alb_token and alb_oidc_enabled():
-            alb_user = alb_verifier_for(request).verify(alb_token)
-        if bearer_user is not None and alb_user is not None:
-            if bearer_user.sub != alb_user.sub:
-                raise ValueError("identity sources disagree")
-            return bearer_user
-        if bearer_user is not None:
-            return bearer_user
-        if alb_user is not None:
-            return alb_user
-        # A raw ALB identity header and an untrusted/disabled ALB claims header
-        # are deliberately not identity. Fall back to the standard 401 response.
-        _bearer_token(request)
-        raise AssertionError("unreachable")
+        return verifier_for(request).verify(_bounded_token(bearer_token(request)))
     except HTTPException:
         raise
     except AuthConfigurationError as exc:
@@ -278,9 +272,58 @@ def authenticate_request(request: Request) -> CurrentUser:
     except Exception as exc:
         raise HTTPException(
             status_code=401,
-            detail="Invalid or expired Cognito token",
+            detail="Invalid or expired Cognito ID token",
             headers={"WWW-Authenticate": "Bearer"},
         ) from exc
+
+
+def authenticate_request(request: Request) -> CurrentUser:
+    """Authenticate an application request from the ID-token cookie or ALB."""
+    try:
+        alb_token = request.headers.get("x-amzn-oidc-data", "").strip()
+        cookie_token = request.cookies.get(auth_cookie_name(), "")
+        cookie_user = None
+        alb_user = None
+        if cookie_token:
+            cookie_user = verifier_for(request).verify(_bounded_token(cookie_token))
+        if alb_token and alb_oidc_enabled():
+            alb_user = alb_verifier_for(request).verify(alb_token)
+        if cookie_user is not None and alb_user is not None:
+            if cookie_user.sub != alb_user.sub:
+                raise ValueError("identity sources disagree")
+            return cookie_user
+        if cookie_user is not None:
+            return cookie_user
+        if alb_user is not None:
+            return alb_user
+        raise HTTPException(status_code=401, detail="Authentication cookie required")
+    except HTTPException:
+        raise
+    except AuthConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired authentication cookie",
+        ) from exc
+
+
+def validate_same_origin(request: Request) -> None:
+    """Reject cross-site state changes made with an automatically sent cookie."""
+    if request.method in {"GET", "HEAD", "OPTIONS", "TRACE"}:
+        return
+    fetch_site = request.headers.get("sec-fetch-site", "").lower()
+    if fetch_site in {"cross-site", "same-site"}:
+        raise HTTPException(status_code=403, detail="Cross-site request rejected")
+    origin = request.headers.get("origin")
+    if not origin:
+        raise HTTPException(status_code=403, detail="Origin header required")
+    forwarded_host = request.headers.get("x-forwarded-host")
+    host = (forwarded_host or request.headers.get("host") or "").split(",", 1)[0].strip()
+    forwarded_proto = request.headers.get("x-forwarded-proto")
+    scheme = (forwarded_proto or request.url.scheme).split(",", 1)[0].strip()
+    if origin.rstrip("/") != f"{scheme}://{host}".rstrip("/"):
+        raise HTTPException(status_code=403, detail="Cross-site request rejected")
 
 
 def request_user_sub(request: Request) -> str | None:
@@ -312,4 +355,6 @@ def require_current_user(request: Request) -> CurrentUser:
     if user is None:
         user = authenticate_request(request)
         request.state.user = user
+    if request.cookies.get(auth_cookie_name()):
+        validate_same_origin(request)
     return user

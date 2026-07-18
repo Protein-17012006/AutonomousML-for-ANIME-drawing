@@ -1,6 +1,5 @@
 "use client";
 
-import type { ConversationMeta } from "@/models/conversation";
 import {
   Sidebar,
   SidebarHeader,
@@ -25,7 +24,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { BrandIcon } from "@/components/common/BrandIcon";
 import {
-  History,
   LayoutGrid,
   LogOut,
   MessageSquare,
@@ -40,11 +38,7 @@ export interface SidebarAccount {
 }
 
 interface AppSidebarProps {
-  conversations: ConversationMeta[];
-  activeCid: string | null;
-  saving: boolean;
   account: SidebarAccount | null;
-  onSelect: (conversation: ConversationMeta) => void;
   onNewChat: () => void;
   onSignOut: () => void;
 }
@@ -60,11 +54,7 @@ function initials(account: SidebarAccount | null) {
 }
 
 export function AppSidebar({
-  conversations,
-  activeCid,
-  saving,
   account,
-  onSelect,
   onNewChat,
   onSignOut,
 }: AppSidebarProps) {
@@ -134,10 +124,7 @@ export function AppSidebar({
         </SidebarGroup>
 
         <SidebarGroup className="group-data-[collapsible=icon]:hidden">
-          <div className="flex items-center justify-between gap-2">
-            <SidebarGroupLabel>History</SidebarGroupLabel>
-            {saving && <span className="text-xs text-ash">Saving...</span>}
-          </div>
+          <SidebarGroupLabel>Current session</SidebarGroupLabel>
           <SidebarMenu>
             <SidebarMenuItem>
               <SidebarMenuButton onClick={onNewChat} className="text-washi">
@@ -145,18 +132,6 @@ export function AppSidebar({
                 <span>New chat</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
-            {conversations.map((conversation) => (
-              <SidebarMenuItem key={conversation.cid}>
-                <SidebarMenuButton
-                  isActive={conversation.cid === activeCid}
-                  onClick={() => onSelect(conversation)}
-                  className="text-ash"
-                >
-                  <History />
-                  <span className="truncate">{conversation.title}</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            ))}
           </SidebarMenu>
         </SidebarGroup>
       </SidebarContent>

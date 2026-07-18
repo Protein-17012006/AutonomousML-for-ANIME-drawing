@@ -36,6 +36,7 @@ Vault/
 
 # Local agent instructions
 AGENTS.md
+frontend/docs
 
 # Coding agents - skills / agent tooling
 .agents/

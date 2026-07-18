@@ -198,6 +198,7 @@ class AgentRateLimitSettings:
 class AuthSettings:
     required: bool
     trust_alb_oidc: bool
+    cookie_secure: bool
     region: str | None
     user_pool_id: str | None
     app_client_id: str | None
@@ -205,9 +206,11 @@ class AuthSettings:
 
     @classmethod
     def from_env(cls, *, validate_required: bool = True) -> "AuthSettings":
+        required = _strict_bool("COPILOT_AUTH_REQUIRED", False)
         settings = cls(
-            required=_strict_bool("COPILOT_AUTH_REQUIRED", False),
+            required=required,
             trust_alb_oidc=_strict_bool("COPILOT_TRUST_ALB_OIDC", False),
+            cookie_secure=_strict_bool("COPILOT_AUTH_COOKIE_SECURE", required),
             region=_text("COPILOT_COGNITO_REGION"),
             user_pool_id=_text("COPILOT_COGNITO_USER_POOL_ID"),
             app_client_id=_text("COPILOT_COGNITO_APP_CLIENT_ID"),
@@ -228,6 +231,16 @@ class AuthSettings:
                     "authentication is enabled but settings are missing: "
                     + ", ".join(missing)
                 )
+        allow_insecure_cookie = _strict_bool(
+            "COPILOT_AUTH_ALLOW_INSECURE_COOKIE", False
+        )
+        if (validate_required and settings.required and not settings.cookie_secure
+                and not allow_insecure_cookie):
+            raise ConfigurationError(
+                "COPILOT_AUTH_COOKIE_SECURE must remain enabled when "
+                "COPILOT_AUTH_REQUIRED=1; local HTTP development must also set "
+                "COPILOT_AUTH_ALLOW_INSECURE_COOKIE=1 explicitly"
+            )
         return settings
 
 

@@ -1,6 +1,6 @@
 // API layer — talks to the FastAPI co-pilot service (same contract as the old web/app.js).
 import type { PairEvent, ResultEvent, DemoResult } from "./types";
-import { authHeaders } from "@/lib/amplify";
+import { authenticatedFetch } from "@/lib/authenticatedApi";
 
 interface SSEEvent {
   name: string;
@@ -116,9 +116,8 @@ export async function runSession(
   fd.append("cadence", cadence || "12");
   fd.append("smoothness", smoothness || "2");
 
-  const resp = await fetch("/session", {
+  const resp = await authenticatedFetch("/session", {
     method: "POST",
-    headers: await authHeaders(),
     body: fd,
   });
   if (!resp.ok || !resp.body) {
@@ -148,9 +147,8 @@ export async function runVideoSession(
   fd.append("cadence", cadence || "12");
   fd.append("smoothness", smoothness || "2");
 
-  const resp = await fetch("/session/video", {
+  const resp = await authenticatedFetch("/session/video", {
     method: "POST",
-    headers: await authHeaders(),
     body: fd,
   });
   if (!resp.ok || !resp.body) {
@@ -181,9 +179,9 @@ export async function askQuestion(
   sid: string,
   question: string,
 ): Promise<{ answer: string; grounded: boolean }> {
-  const resp = await fetch(`/session/${sid}/ask`, {
+  const resp = await authenticatedFetch(`/session/${sid}/ask`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ question }),
   });
   if (!resp.ok) throw new Error(`/ask failed: ${resp.status}`);
@@ -198,9 +196,8 @@ export async function runDemo(files: File[], engines: string, fps: string): Prom
   for (const f of files) fd.append("frames", f);
   fd.append("engines", engines);
   fd.append("fps", fps || "48");
-  const resp = await fetch("/demo", {
+  const resp = await authenticatedFetch("/demo", {
     method: "POST",
-    headers: await authHeaders(),
     body: fd,
   });
   if (!resp.ok) throw new Error(`/demo failed: ${resp.status}`);

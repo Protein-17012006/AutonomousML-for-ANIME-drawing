@@ -14,7 +14,8 @@ import {
   InputOTPSeparator,
   InputOTPSlot,
 } from "@/components/ui/input-otp";
-import { configureAmplify } from "@/lib/amplify";
+import { configureAmplify, getCurrentIdToken } from "@/lib/amplify";
+import { establishCookieSession } from "@/lib/authenticatedApi";
 
 const CODE_LENGTH = 6;
 
@@ -27,11 +28,29 @@ export function VerifyEmailForm() {
     () => "",
   );
   const [verified, setVerified] = useState(false);
+  const [sessionPending, setSessionPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [resending, setResending] = useState(false);
 
   const complete = value.length === CODE_LENGTH && !!email;
+
+  async function finishSignedInSession() {
+    setError(null);
+    setSubmitting(true);
+    try {
+      await establishCookieSession();
+      router.replace("/copilot");
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Your email is verified, but the application session could not be created.",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -41,11 +60,38 @@ export function VerifyEmailForm() {
     setSubmitting(true);
     try {
       await confirmSignUp({ username: email, confirmationCode: value });
+      let signedIn = false;
       try {
-        await autoSignIn();
-        router.replace("/copilot");
+        const result = await autoSignIn();
+        signedIn = result.isSignedIn;
       } catch {
+        // Amplify can report that autoSignIn is no longer available even
+        // though the Cognito tokens were already written. Check the real
+        // token state before sending the user back to the login form.
+        try {
+          await getCurrentIdToken();
+          signedIn = true;
+        } catch {
+          signedIn = false;
+        }
+      }
+
+      if (!signedIn) {
         setVerified(true);
+        return;
+      }
+
+      try {
+        await establishCookieSession();
+        router.replace("/copilot");
+      } catch (err) {
+        setVerified(true);
+        setSessionPending(true);
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Your email is verified, but the application session could not be created.",
+        );
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Verification failed.");
@@ -73,14 +119,31 @@ export function VerifyEmailForm() {
       <div className="flex flex-col gap-5">
         <Alert>
           <Check className="mt-0.5 size-4 shrink-0 text-pass" />
-          <AlertDescription>Your email is verified. You can sign in now.</AlertDescription>
+          <AlertDescription>
+            {sessionPending
+              ? "Your email is verified and Cognito signed you in. Finish creating the application session."
+              : "Your email is verified. You can sign in now."}
+          </AlertDescription>
         </Alert>
-        <Button
-          asChild
-          className="h-10 w-full"
-        >
-          <Link href="/login">Continue to sign in</Link>
-        </Button>
+        {error && (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+        {sessionPending ? (
+          <Button
+            type="button"
+            onClick={finishSignedInSession}
+            disabled={submitting}
+            className="h-10 w-full"
+          >
+            {submitting ? "Creating session..." : "Continue to copilot"}
+          </Button>
+        ) : (
+          <Button asChild className="h-10 w-full">
+            <Link href="/login">Continue to sign in</Link>
+          </Button>
+        )}
       </div>
     );
   }

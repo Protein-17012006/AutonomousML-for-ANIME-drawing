@@ -3,8 +3,7 @@
 import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { fetchAuthSession, getCurrentUser } from "aws-amplify/auth";
-import { configureAmplify } from "@/lib/amplify";
+import { getCookieSession } from "@/lib/authenticatedApi";
 
 const CopilotApp = dynamic(() => import("@/components/copilot/CopilotApp"), {
   ssr: false,
@@ -16,8 +15,7 @@ export default function CopilotPage() {
 
   useEffect(() => {
     let active = true;
-    configureAmplify();
-    Promise.all([getCurrentUser(), fetchAuthSession()])
+    getCookieSession()
       .then(() => {
         if (active) setAllowed(true);
       })

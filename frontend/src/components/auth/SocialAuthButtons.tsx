@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { signInWithRedirect } from "aws-amplify/auth";
+import { signInWithRedirect, signOut } from "aws-amplify/auth";
 import { Button } from "@/components/ui/button";
 import { GoogleIcon } from "@/components/common/icons/GoogleIcon";
 import { GitHubIcon } from "@/components/common/icons/GitHubIcon";
@@ -9,7 +9,11 @@ import { AppleIcon } from "@/components/common/icons/AppleIcon";
 import { configureAmplify } from "@/lib/amplify";
 
 const PROVIDERS = [
-  { name: "Google", Icon: GoogleIcon, enabled: true },
+  {
+    name: "Google",
+    Icon: GoogleIcon,
+    enabled: process.env.NEXT_PUBLIC_GOOGLE_OAUTH_ENABLED === "true",
+  },
   { name: "GitHub", Icon: GitHubIcon, enabled: false },
   { name: "Apple", Icon: AppleIcon, enabled: false },
 ] as const;
@@ -23,10 +27,16 @@ export function SocialAuthButtons() {
     setError(null);
     setSubmitting(true);
     try {
+      // Amplify forbids starting a new provider flow while any Cognito user
+      // remains signed in. This commonly happens after password autoSignIn or
+      // an interrupted cookie bootstrap, so clear that client-side session
+      // through Amplify before starting the Google authorization redirect.
+      await signOut();
       await signInWithRedirect({ provider: "Google" });
     } catch (err) {
-      setSubmitting(false);
       setError(err instanceof Error ? err.message : "Could not continue with Google.");
+    } finally {
+      setSubmitting(false);
     }
   }
 

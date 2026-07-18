@@ -1,163 +1,110 @@
 "use client";
 
+import "aws-amplify/auth/enable-oauth-listener";
 import { Amplify } from "aws-amplify";
-import { fetchAuthSession, getCurrentUser } from "aws-amplify/auth";
-import { getUrl, uploadData, downloadData, remove } from "aws-amplify/storage";
-import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
+import { fetchAuthSession } from "aws-amplify/auth";
+import { cognitoUserPoolsTokenProvider } from "aws-amplify/auth/cognito";
+import { sessionStorage as amplifySessionStorage } from "aws-amplify/utils";
 
 let configured = false;
 
-const region = process.env.NEXT_PUBLIC_AWS_REGION || "ap-southeast-1";
-const userPoolId = process.env.NEXT_PUBLIC_COGNITO_USER_POOL_ID || "";
-const userPoolClientId = process.env.NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID || "";
-const identityPoolId = process.env.NEXT_PUBLIC_COGNITO_IDENTITY_POOL_ID || "";
-const domain = process.env.NEXT_PUBLIC_COGNITO_DOMAIN || "";
-const bucketName = process.env.NEXT_PUBLIC_USERDATA_BUCKET || "";
+function required(name: string, value: string | undefined) {
+  if (!value) throw new Error(`${name} is not configured.`);
+  return value;
+}
 
 function currentOrigin() {
-  if (typeof window === "undefined") return "http://localhost:3000";
-  return window.location.origin;
+  return typeof window === "undefined"
+    ? "http://localhost:3000"
+    : window.location.origin;
+}
+
+export function cognitoLogoutUrl() {
+  const domain = required(
+    "NEXT_PUBLIC_COGNITO_DOMAIN",
+    process.env.NEXT_PUBLIC_COGNITO_DOMAIN,
+  );
+  const clientId = required(
+    "NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID",
+    process.env.NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID,
+  );
+  const logoutUri =
+    process.env.NEXT_PUBLIC_COGNITO_REDIRECT_SIGN_OUT ||
+    `${currentOrigin()}/login`;
+  const url = new URL(`https://${domain}/logout`);
+  url.searchParams.set("client_id", clientId);
+  url.searchParams.set("logout_uri", logoutUri);
+  return url.toString();
 }
 
 export function configureAmplify() {
-  if (configured || !userPoolId || !userPoolClientId || !identityPoolId) return;
+  if (configured) return;
 
-  const redirectBase = currentOrigin();
+  const userPoolId = required(
+    "NEXT_PUBLIC_COGNITO_USER_POOL_ID",
+    process.env.NEXT_PUBLIC_COGNITO_USER_POOL_ID,
+  );
+  const userPoolClientId = required(
+    "NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID",
+    process.env.NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID,
+  );
+  const domain = process.env.NEXT_PUBLIC_COGNITO_DOMAIN;
+  const redirectSignIn =
+    process.env.NEXT_PUBLIC_COGNITO_REDIRECT_SIGN_IN ||
+    `${currentOrigin()}/sso-callback`;
+  const redirectSignOut =
+    process.env.NEXT_PUBLIC_COGNITO_REDIRECT_SIGN_OUT ||
+    `${currentOrigin()}/login`;
+
+  // Amplify needs temporary state across the hosted-UI redirect, but the
+  // long-lived application session is the server-issued HttpOnly cookie.
+  cognitoUserPoolsTokenProvider.setKeyValueStorage(amplifySessionStorage);
   Amplify.configure({
     Auth: {
       Cognito: {
         userPoolId,
         userPoolClientId,
-        identityPoolId,
         loginWith: {
           email: true,
           ...(domain
-            ? { oauth: {
-                domain,
-                scopes: ["openid", "email", "profile"],
-                redirectSignIn: [`${redirectBase}/sso-callback`],
-                redirectSignOut: [`${redirectBase}/login`],
-                responseType: "code",
-              } }
+            ? {
+                oauth: {
+                  domain,
+                  scopes: ["openid", "email", "profile"],
+                  redirectSignIn: [redirectSignIn],
+                  redirectSignOut: [redirectSignOut],
+                  responseType: "code" as const,
+                },
+              }
             : {}),
         },
       },
     },
-    ...(bucketName
-      ? { Storage: {
-          S3: {
-            bucket: bucketName,
-            region,
-          },
-        } }
-      : {}),
   });
   configured = true;
 }
 
-export async function requireCurrentUser() {
-  configureAmplify();
-  return getCurrentUser();
-}
-
-export async function getIdentityId(): Promise<string> {
+export async function getCurrentIdToken() {
   configureAmplify();
   const session = await fetchAuthSession();
-  if (!session.identityId) {
-    throw new Error("Cognito Identity Pool did not return an identityId.");
+  const token = session.tokens?.idToken?.toString();
+  if (!token) throw new Error("Cognito did not return an ID token.");
+  return token;
+}
+
+export function clearTemporaryAmplifySession() {
+  if (typeof window === "undefined") return;
+  const keys: string[] = [];
+  for (let index = 0; index < window.sessionStorage.length; index += 1) {
+    const key = window.sessionStorage.key(index);
+    if (
+      key &&
+      (key.startsWith("CognitoIdentityServiceProvider.") ||
+        key === "amplify-signin-with-hostedUI")
+    ) {
+      keys.push(key);
+    }
   }
-  return session.identityId;
-}
-
-export async function getAccessToken(): Promise<string | null> {
-  configureAmplify();
-  try {
-    const session = await fetchAuthSession();
-    return session.tokens?.accessToken?.toString() ?? null;
-  } catch {
-    return null;
-  }
-}
-
-export async function authHeaders(): Promise<Record<string, string>> {
-  const token = await getAccessToken();
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
-
-export async function getDynamoDoc() {
-  configureAmplify();
-  const session = await fetchAuthSession();
-  if (!session.credentials) {
-    throw new Error("Cognito Identity Pool did not return AWS credentials.");
-  }
-  return DynamoDBDocumentClient.from(
-    new DynamoDBClient({
-      region,
-      credentials: session.credentials,
-    }),
-  );
-}
-
-export function chatsTableName() {
-  const table = process.env.NEXT_PUBLIC_CHATS_TABLE;
-  if (!table) throw new Error("NEXT_PUBLIC_CHATS_TABLE is not configured.");
-  return table;
-}
-
-export function userdataBucket() {
-  if (!bucketName) throw new Error("NEXT_PUBLIC_USERDATA_BUCKET is not configured.");
-  return { bucketName, region };
-}
-
-export function storageKey(identityId: string, cid: string, name: string) {
-  return `private/${identityId}/conversations/${cid}/${name}`;
-}
-
-export function markS3Key(key: string) {
-  return `s3key:${key}`;
-}
-
-export function unmarkS3Key(value: string | null | undefined) {
-  return value?.startsWith("s3key:") ? value.slice("s3key:".length) : null;
-}
-
-export async function putStorageObject(path: string, data: Blob | string, contentType?: string) {
-  configureAmplify();
-  await uploadData({
-    path,
-    data,
-    options: {
-      bucket: userdataBucket(),
-      contentType,
-    },
-  }).result;
-}
-
-export async function getSignedStorageUrl(path: string) {
-  configureAmplify();
-  const signed = await getUrl({
-    path,
-    options: {
-      bucket: userdataBucket(),
-      expiresIn: 900,
-    },
-  });
-  // Fragments are never sent to S3. Keeping the source key there lets the persistence layer
-  // turn a rendered URL back into a durable s3key: value during a later light-save.
-  return `${signed.url.toString()}#s3key=${encodeURIComponent(path)}`;
-}
-
-export async function getStorageText(path: string) {
-  configureAmplify();
-  const result = await downloadData({
-    path,
-    options: { bucket: userdataBucket() },
-  }).result;
-  return result.body.text();
-}
-
-export async function removeStorageObject(path: string) {
-  configureAmplify();
-  await remove({ path, options: { bucket: userdataBucket() } });
+  keys.forEach((key) => window.sessionStorage.removeItem(key));
+  window.sessionStorage.removeItem("copilot:pendingEmail");
 }
