@@ -1,5 +1,10 @@
 # DynamoDB Chat Schema — In-Between Co-pilot (Stage 3 persistence)
 
+> **Archived optional design (2026-07-19):** Conversation/message persistence is not part of the
+> current session-focused product. This direct-browser-era schema must not be implemented or used
+> to reintroduce browser DynamoDB/S3 access. Retain it only as reference if optional Phase 3 is
+> explicitly reopened under the FastAPI-owned trust boundary.
+
 > **Audience:** the teammate provisioning AWS for Stage 3.
 > **Purpose:** everything needed to stand up the chat-history storage so signed-in users get saved,
 > reopenable conversations.

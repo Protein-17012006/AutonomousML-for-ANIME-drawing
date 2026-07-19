@@ -16,6 +16,10 @@ from service.core.config import PublisherSettings
 _ARTIFACT_SUFFIXES = {".png", ".md", ".mp4"}
 
 
+def owner_sort_key(timestamp: int, pid: str) -> str:
+    return f"CREATED#{timestamp:020d}#{pid}"
+
+
 def aws_enabled() -> bool:
     return PublisherSettings.from_env(validate_required=False).enabled
 
@@ -49,10 +53,11 @@ def publish_session(sid, session_dir, result, *, owner_sub=None, clients=None, p
         # Derive needs_key indices from pair actions (CopilotResult has no needs_key field)
         needs_key = [getattr(p, "index", i) for i, p in enumerate(r.pairs)
                      if getattr(p, "action", None) == "needs_key"]
+        timestamp = int(time.time())
         item = {
             "pid": {"S": pid},
             "sid": {"N": str(sid)},
-            "ts": {"N": str(int(time.time()))},
+            "ts": {"N": str(timestamp)},
             "n_pairs": {"N": str(len(r.pairs))},
             "n_autopass": {"N": str(r.n_autopass)},
             "n_corrected": {"N": str(r.n_corrected)},
@@ -64,6 +69,7 @@ def publish_session(sid, session_dir, result, *, owner_sub=None, clients=None, p
         }
         if owner_sub:
             item["owner_sub"] = {"S": owner_sub}
+            item["owner_sort"] = {"S": owner_sort_key(timestamp, pid)}
         clients["ddb"].put_item(TableName=table, Item=item)
         return {"published": True, "pid": pid, "s3_keys": s3_keys, "error": None}
     except Exception as exc:   # noqa: BLE001 — by contract this function never raises

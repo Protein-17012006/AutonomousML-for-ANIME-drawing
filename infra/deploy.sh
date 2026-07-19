@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # copilot AWS front door - CloudFormation orchestration.
-# Usage: deploy.sh up | frontend <dist-dir> | sync-userdata | outputs | teardown
+# Usage: deploy.sh up | data-plan [name] | data-apply <name> | frontend <dist-dir> | sync-userdata | outputs | teardown
 set -euo pipefail
 # Git-Bash/MSYS on Windows rewrites leading-slash args (e.g. the SSM parameter name
 # /copilot/tailscale-authkey) into Windows paths before aws.exe sees them; disable that.
@@ -49,6 +49,31 @@ up() {
   outputs
 }
 
+data_plan() {
+  local name="${1:-phase2-owner-index-$(date +%Y%m%d-%H%M%S)}"
+  echo "== create REVIEW-ONLY copilot-data change set: $name"
+  aws cloudformation create-change-set --region "$REGION" \
+    --stack-name copilot-data --change-set-name "$name" --change-set-type UPDATE \
+    --template-body file://30-data.yaml --capabilities CAPABILITY_NAMED_IAM \
+    --parameters "ParameterKey=BucketPrefix,ParameterValue=$BUCKET_PREFIX" \
+    --tags Key=project,Value=copilot >/dev/null
+  aws cloudformation wait change-set-create-complete --region "$REGION" \
+    --stack-name copilot-data --change-set-name "$name"
+  aws cloudformation describe-change-set --region "$REGION" \
+    --stack-name copilot-data --change-set-name "$name" --output table
+  echo "REVIEW ONLY. Execute later with: bash infra/deploy.sh data-apply $name"
+}
+
+data_apply() {
+  local name="${1:?usage: deploy.sh data-apply <reviewed-change-set-name>}"
+  echo "== execute reviewed copilot-data change set: $name"
+  aws cloudformation execute-change-set --region "$REGION" \
+    --stack-name copilot-data --change-set-name "$name"
+  aws cloudformation wait stack-update-complete --region "$REGION" \
+    --stack-name copilot-data
+  echo "copilot-data update complete"
+}
+
 sync_userdata() {   # push a changed ec2-userdata.sh; reboot does NOT re-run it (cloud-init runs once)
   aws s3 cp ec2-userdata.sh "s3://${BUCKET_PREFIX}-deploy/infra/ec2-userdata.sh" --region "$REGION"
   local iid
@@ -93,9 +118,11 @@ teardown() {
 
 case "${1:-}" in
   up) up ;;
+  data-plan) data_plan "${2:-}" ;;
+  data-apply) data_apply "${2:-}" ;;
   frontend) frontend "${2:-}" ;;
   sync-userdata) sync_userdata ;;
   outputs) outputs ;;
   teardown) teardown ;;
-  *) echo "usage: $0 up | frontend <dist-dir> | sync-userdata | outputs | teardown"; exit 1 ;;
+  *) echo "usage: $0 up | data-plan [name] | data-apply <name> | frontend <dist-dir> | sync-userdata | outputs | teardown"; exit 1 ;;
 esac

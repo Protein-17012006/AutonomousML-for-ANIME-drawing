@@ -44,3 +44,4 @@ skills-lock.json
 
 # AWS infra (Stage 3 handoff) - the real params.env holds the tailscale key, NEVER commit
 infra/params.env
+session-owner-manifest-*.json

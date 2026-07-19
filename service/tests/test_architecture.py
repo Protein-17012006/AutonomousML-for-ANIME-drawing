@@ -43,6 +43,25 @@ def test_feature_apis_use_session_port_not_legacy_global_state():
         assert "service.sessions.state" not in _imports(module), module
 
 
+def test_production_app_composes_durable_session_history_before_static_ui():
+    source = (SERVICE_ROOT / "app.py").read_text(encoding="utf-8")
+    imports = _imports("app.py")
+    assert "service.session_history" in imports
+    assert "service.session_history.dependencies" in imports
+    assert "configure_session_history(app)" in source
+    history_route = "app.include_router(session_history_routes.router)"
+    static_mount = 'app.mount("/", StaticFiles('
+    assert history_route in source
+    assert source.index(history_route) < source.index(static_mount)
+
+
+def test_optional_phase3_conversation_persistence_is_not_in_current_app():
+    assert not (SERVICE_ROOT / "conversations").exists()
+    source = (SERVICE_ROOT / "app.py").read_text(encoding="utf-8")
+    assert "conversation_routes" not in source
+    assert 'prefix="/conversations"' not in source
+
+
 def test_engine_adapter_is_framework_independent():
     assert not any(
         name.startswith("fastapi") for name in _imports("infrastructure/engines.py"))

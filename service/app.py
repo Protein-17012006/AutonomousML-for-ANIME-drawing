@@ -22,6 +22,8 @@ from service.feedback import api as feedback_routes
 from service.media import api as demo_routes
 from service.memory import api as memory_routes
 from service.review import api as review_routes
+from service.session_history import api as session_history_routes
+from service.session_history.dependencies import configure_session_history
 from service.sessions import api as session_routes
 from service.sessions.http_dependencies import session_repository_for
 from service.core.config import AuthSettings, WebSettings
@@ -33,6 +35,7 @@ app.state.auth_settings = AuthSettings.from_env()
 app.state.session_repository = session_repository_for()
 app.state.session_http_runtime = build_session_http_runtime()
 app.state.review_http_runtime = build_review_http_runtime()
+configure_session_history(app)
 
 
 @app.middleware("http")
@@ -122,6 +125,7 @@ async def _no_cache_html(request, call_next):
 # (GET /session/{sid}/feedback would be swallowed by the artifact route as
 # name="feedback"), and the static mount must come last so API routes take precedence.
 app.include_router(auth_api.router)
+app.include_router(session_history_routes.router)
 app.include_router(feedback_routes.router)
 app.include_router(session_routes.router)
 app.include_router(demo_routes.router)

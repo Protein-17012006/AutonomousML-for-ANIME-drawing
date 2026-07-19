@@ -359,6 +359,37 @@ class PublisherSettings:
 
 
 @dataclass(frozen=True)
+class SessionHistorySettings:
+    enabled: bool
+    table_name: str | None
+    artifact_bucket: str | None
+    region: str
+    owner_index: str
+
+    @classmethod
+    def from_env(cls, *, validate_required: bool = True) -> "SessionHistorySettings":
+        settings = cls(
+            enabled=_strict_bool("COPILOT_SESSION_HISTORY_ENABLED", False),
+            table_name=_text("AWS_SESSIONS_TABLE"),
+            artifact_bucket=_text("AWS_ARTIFACT_BUCKET"),
+            region=_text("AWS_REGION", "ap-southeast-1") or "ap-southeast-1",
+            owner_index=_text(
+                "AWS_SESSIONS_OWNER_INDEX", "OwnerSessionsIndex", required=True
+            ) or "OwnerSessionsIndex",
+        )
+        if validate_required and settings.enabled:
+            if not settings.table_name:
+                raise ConfigurationError(
+                    "AWS_SESSIONS_TABLE is required when session history is enabled"
+                )
+            if not settings.artifact_bucket:
+                raise ConfigurationError(
+                    "AWS_ARTIFACT_BUCKET is required when session history is enabled"
+                )
+        return settings
+
+
+@dataclass(frozen=True)
 class BoxSettings:
     vlm_base_url: str
     vlm_model: str

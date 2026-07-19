@@ -5,18 +5,49 @@ Replaces the earlier Vite SPA; the co-pilot logic (session SSE, timing-sheet rev
 board, grounded Q&A) was ported into `src/components/copilot/`.
 
 ## Routes
-- `/` → redirects to `/copilot`.
-- `/copilot` → the chat-first co-pilot (client-only SPA): drop keys/video → streamed
+- `/` → public, statically rendered landing page.
+- `/copilot` → Cognito-protected chat-first co-pilot (client-only SPA): drop keys/video → streamed
   decision log as chat bubbles → flagged/needs-key bubbles → result card + review board,
   plus grounded follow-up Q&A (`POST /session/{sid}/ask`).
+- `/login`, `/signup`, `/verify-email`, `/forgot-password`, `/reset-password`, and
+  `/sso-callback` → Cognito/Amplify authentication flow.
+
+## Authentication and persistence
+
+Amplify obtains a Cognito ID token for a one-time `POST /auth/session` bootstrap. FastAPI
+validates the token and sets an HttpOnly cookie; `/copilot` checks `/auth/me`, and later
+API/SSE requests use same-origin credentials. Direct browser Identity Pool, DynamoDB, and S3
+access has been removed. Conversation/message persistence is outside the current scope and retained
+only as an optional future improvement. Durable session history is the supported product path: FastAPI can
+list the signed-in user's published sessions through `GET /sessions` and stream an owned output
+through `GET /sessions/{pid}/artifacts/{name}`. The browser never receives AWS credentials,
+bucket names, raw object keys, or another user's Cognito `sub`.
 
 ## Dev
 ```bash
 npm install
 npm run dev            # http://localhost:3000
 ```
-Dev proxies the API to the box: `next.config.ts` rewrites `/session`, `/session/:path*`,
-`/demo` → `NEXT_PUBLIC_API_TARGET` (default `http://100.71.161.102:8000`).
+Dev proxies the API to the configured service: `next.config.ts` rewrites `/auth/:path*`,
+`/me/:path*`, `/session`, `/session/:path*`, `/sessions`, `/sessions/:path*`, and `/demo` to `NEXT_PUBLIC_API_TARGET`
+(default `http://100.71.161.102:8000`; `.env.example` uses local `http://127.0.0.1:8000`).
+
+For the no-model session-retrieval proof, configure these backend-only values in
+`service/.env.local` and run `uvicorn service.auth_dev_app:app --reload --env-file service/.env.local`:
+
+```dotenv
+COPILOT_SESSION_HISTORY_ENABLED=1
+AWS_SESSIONS_TABLE=copilot_sessions
+AWS_ARTIFACT_BUCKET=copilot-g4-artifacts
+AWS_SESSIONS_OWNER_INDEX=OwnerSessionsIndex
+AWS_REGION=ap-southeast-1
+```
+
+Boto3 obtains AWS access from the server process's normal credential chain. Do not put AWS
+credentials or these storage settings in `NEXT_PUBLIC_*`. After `/auth/me` succeeds on `/copilot`,
+development builds request the first 20 owned session summaries and print them in the browser
+console. Artifact bytes are fetched only when a protected artifact URL is requested; entering the
+page does not download every artifact.
 
 ## Production (static export, served by the FastAPI service)
 ```bash

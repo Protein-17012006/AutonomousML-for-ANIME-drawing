@@ -198,7 +198,7 @@ frontend/src/lib/chatStore.ts
 frontend/src/models/conversation.ts
 ```
 
-The associated direct DynamoDB/S3/Identity Pool packages and environment variables were removed. Conversation-history UI is temporarily disabled until Phase 3 provides FastAPI-owned persistence.
+The associated direct DynamoDB/S3/Identity Pool packages and environment variables were removed. Durable owned sessions are now the supported history surface. Phase 3 conversation/message persistence is optional future work, not a current delivery requirement.
 
 ## Next.js local proxy
 
@@ -351,7 +351,9 @@ When the box returns:
 ```text
 Phase 1: verified Cognito cookie identity       <- implemented; production cutover pending
     -> Phase 2: user-scoped session retrieval  <- next; model/GPU not required for ownership proof
-    -> Phase 3: conversation/message persistence through FastAPI
+
+Optional branch only if explicitly reopened:
+Phase 3: conversation/message persistence through FastAPI
 ```
 
 Cross-phase invariants:
@@ -359,7 +361,7 @@ Cross-phase invariants:
 - Cognito `sub` remains the only authoritative internal user identity.
 - The browser never supplies authoritative `owner_sub`, `user_id`, database keys, or private S3 prefixes.
 - FastAPI owns authentication, authorization, DynamoDB, and S3 access.
-- Phase 2 and Phase 3 must reuse this ownership boundary rather than create another identity model.
+- Phase 2 uses this ownership boundary. Optional Phase 3 must reuse it if explicitly reopened rather than create another identity model.
 - Authentication and history tests must remain runnable without the unavailable AI model.
 
 ## Teammate continuation checklist

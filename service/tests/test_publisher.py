@@ -68,6 +68,28 @@ def test_publishes_artifacts_and_record(tmp_path, monkeypatch):
     assert item["keys_requested_total"] == {"N": "2"}
 
 
+def test_owned_publish_writes_owner_index_attributes(tmp_path, monkeypatch):
+    monkeypatch.setenv("AWS_PUBLISH", "1")
+    monkeypatch.setenv("AWS_ARTIFACT_BUCKET", "b")
+    monkeypatch.setenv("AWS_SESSIONS_TABLE", "t")
+    ddb = FakeDdb()
+    out = publisher.publish_session(
+        7,
+        _session_dir(tmp_path),
+        _result(),
+        owner_sub="cognito-sub",
+        clients={"s3": FakeS3(), "ddb": ddb},
+        pid="owned-pid",
+    )
+    assert out["published"] is True
+    (_, item), = ddb.items
+    assert item["owner_sub"] == {"S": "cognito-sub"}
+    timestamp = int(item["ts"]["N"])
+    assert item["owner_sort"] == {
+        "S": publisher.owner_sort_key(timestamp, "owned-pid")
+    }
+
+
 def test_s3_failure_never_raises(tmp_path, monkeypatch):
     monkeypatch.setenv("AWS_PUBLISH", "1")
     monkeypatch.setenv("AWS_ARTIFACT_BUCKET", "b")
@@ -88,21 +110,32 @@ def test_missing_env_never_raises(tmp_path, monkeypatch):
 def test_app_worker_calls_publisher(tmp_path, monkeypatch):
     """POST /session must invoke publish_session once with the sid + session dir + result."""
     import service.app as appmod
-    import service.sessions.streaming as streaming_mod
+    import service.composition.session_runtime as composition_mod
     from fastapi.testclient import TestClient
     from PIL import Image
 
     calls = []
-    monkeypatch.setattr(streaming_mod, "publish_session",
-                        lambda sid, sdir, result: calls.append((sid, sdir, result)))
+    monkeypatch.setattr(
+        composition_mod,
+        "publish_session",
+        lambda sid, sdir, result, *, owner_sub=None: calls.append(
+            (sid, sdir, result, owner_sub)
+        ),
+    )
+    old_runtime = appmod.app.state.session_http_runtime
+    appmod.app.state.session_http_runtime = composition_mod.build_session_http_runtime()
     img = tmp_path / "k.png"
     Image.new("RGB", (64, 64), (200, 100, 50)).save(img)
-    client = TestClient(appmod.app)
-    with open(img, "rb") as f1, open(img, "rb") as f2:
-        r = client.post("/session", files=[("keys", ("a.png", f1, "image/png")),
-                                           ("keys", ("b.png", f2, "image/png"))],
-                        data={"engines": "stub"})
+    try:
+        client = TestClient(appmod.app)
+        with open(img, "rb") as f1, open(img, "rb") as f2:
+            r = client.post("/session", files=[("keys", ("a.png", f1, "image/png")),
+                                               ("keys", ("b.png", f2, "image/png"))],
+                            data={"engines": "stub"})
+    finally:
+        appmod.app.state.session_http_runtime = old_runtime
     assert r.status_code == 200 and "event: result" in r.text
     assert len(calls) == 1
-    sid, sdir, result = calls[0]
+    sid, sdir, result, owner_sub = calls[0]
     assert isinstance(sid, int) and result.pairs   # real result object reached the publisher
+    assert owner_sub is None

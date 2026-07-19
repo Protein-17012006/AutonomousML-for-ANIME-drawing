@@ -37,8 +37,27 @@ Resources:
     Properties:
       TableName: copilot_sessions
       BillingMode: PAY_PER_REQUEST
-      AttributeDefinitions: [{AttributeName: pid, AttributeType: S}]
+      AttributeDefinitions:
+        - {AttributeName: pid, AttributeType: S}
+        - {AttributeName: owner_sub, AttributeType: S}
+        - {AttributeName: owner_sort, AttributeType: S}
       KeySchema: [{AttributeName: pid, KeyType: HASH}]
+      GlobalSecondaryIndexes:
+        - IndexName: OwnerSessionsIndex
+          KeySchema:
+            - {AttributeName: owner_sub, KeyType: HASH}
+            - {AttributeName: owner_sort, KeyType: RANGE}
+          Projection:
+            ProjectionType: INCLUDE
+            NonKeyAttributes:
+              - ts
+              - n_pairs
+              - n_autopass
+              - n_corrected
+              - flagged
+              - abstained
+              - needs_key
+              - artifact_keys
       Tags: [{Key: project, Value: copilot}]
 
   PublisherUser:
