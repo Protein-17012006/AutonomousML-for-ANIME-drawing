@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
+
+from service.sessions.schemas import PairEvent, ResultEvent
 
 
 class ArtifactLinks(BaseModel):
@@ -23,7 +26,11 @@ class SessionSummaryCounts(BaseModel):
 
 class SessionSummary(BaseModel):
     pid: str
+    title: str
+    status: Literal["draft", "complete"]
     created_at: str
+    updated_at: str
+    workspace_available: bool = False
     summary: SessionSummaryCounts
     artifacts: ArtifactLinks
 
@@ -33,12 +40,41 @@ class SessionListResponse(BaseModel):
     next_cursor: str | None = None
 
 
+class SessionTitleRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=80)
+
+    @field_validator("title")
+    @classmethod
+    def normalize_title(cls, value: str) -> str:
+        normalized = " ".join(value.split())
+        if not normalized or len(normalized) > 80:
+            raise ValueError("title must contain between 1 and 80 characters")
+        if any(ord(char) < 32 or ord(char) == 127 for char in normalized):
+            raise ValueError("title must not contain control characters")
+        return normalized
+
+
+class WorkspaceUpload(BaseModel):
+    mode: Literal["frames", "video"]
+    label: str
+    filenames: list[str] = Field(default_factory=list)
+
+
+class WorkspaceSnapshot(BaseModel):
+    schema_version: Literal[1]
+    upload: WorkspaceUpload
+    pairs: list[PairEvent]
+    result: ResultEvent
+
+
 @dataclass(frozen=True)
 class PublishedSession:
     summary: SessionSummary
     owner_sub: str
     artifact_keys: dict[str, str]
     owner_sort: str
+    snapshot_key: str | None = None
+    snapshot_version: int | None = None
 
 
 @dataclass(frozen=True)

@@ -2,7 +2,7 @@
 
 import "aws-amplify/auth/enable-oauth-listener";
 import { Amplify } from "aws-amplify";
-import { fetchAuthSession } from "aws-amplify/auth";
+import { fetchAuthSession, signOut } from "aws-amplify/auth";
 import { cognitoUserPoolsTokenProvider } from "aws-amplify/auth/cognito";
 import { sessionStorage as amplifySessionStorage } from "aws-amplify/utils";
 
@@ -92,19 +92,13 @@ export async function getCurrentIdToken() {
   return token;
 }
 
-export function clearTemporaryAmplifySession() {
+export async function clearTemporaryAmplifySession() {
   if (typeof window === "undefined") return;
-  const keys: string[] = [];
-  for (let index = 0; index < window.sessionStorage.length; index += 1) {
-    const key = window.sessionStorage.key(index);
-    if (
-      key &&
-      (key.startsWith("CognitoIdentityServiceProvider.") ||
-        key === "amplify-signin-with-hostedUI")
-    ) {
-      keys.push(key);
-    }
+  try {
+    // Let Amplify clear its token provider and in-memory auth state. Removing
+    // storage keys alone can leave the previous identity active in this tab.
+    await signOut();
+  } finally {
+    window.sessionStorage.removeItem("copilot:pendingEmail");
   }
-  keys.forEach((key) => window.sessionStorage.removeItem(key));
-  window.sessionStorage.removeItem("copilot:pendingEmail");
 }

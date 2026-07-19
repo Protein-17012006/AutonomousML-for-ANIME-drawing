@@ -140,3 +140,56 @@ def test_sids_are_not_sequential_or_js_unsafe():
     b, _ = repo.create()
     assert b != a + 1, "sids must not be enumerable by incrementing"
     assert 0 < a < 2**53 and 0 < b < 2**53  # JSON/JS Number-safe
+
+
+def test_history_pid_is_owned_and_reaches_publisher(monkeypatch, token_is_sub_verifier):
+    import types
+    import service.composition.session_runtime as composition_mod
+
+    monkeypatch.setenv("COPILOT_AUTH_REQUIRED", "1")
+    calls = []
+
+    class Catalog:
+        def get_owned(self, pid, owner_sub):
+            if pid == "draft-pid" and owner_sub == "user-a":
+                return types.SimpleNamespace(
+                    summary=types.SimpleNamespace(status="draft")
+                )
+            return None
+
+    monkeypatch.setattr(
+        composition_mod,
+        "publish_session",
+        lambda sid, sdir, outcome, *, owner_sub=None, pid=None, workspace_input=None: calls.append(
+            (owner_sub, pid, workspace_input)
+        ),
+    )
+    old_runtime = app.state.session_http_runtime
+    old_catalog = getattr(app.state, "session_catalog", None)
+    app.state.session_http_runtime = composition_mod.build_session_http_runtime()
+    app.state.session_catalog = Catalog()
+    try:
+        owner = _login("user-a")
+        response = owner.post(
+            "/session",
+            files=_files(),
+            data={"engines": "stub", "history_pid": "draft-pid"},
+            headers={"Origin": ORIGIN},
+        )
+        assert response.status_code == 200
+        assert calls == [("user-a", "draft-pid", {
+            "mode": "frames", "label": "2 keyframes", "filenames": ["0.png", "1.png"]
+        })]
+        stranger = _login("user-b")
+        assert stranger.post(
+            "/session",
+            files=_files(),
+            data={"engines": "stub", "history_pid": "draft-pid"},
+            headers={"Origin": ORIGIN},
+        ).status_code == 404
+    finally:
+        app.state.session_http_runtime = old_runtime
+        if old_catalog is None:
+            delattr(app.state, "session_catalog")
+        else:
+            app.state.session_catalog = old_catalog

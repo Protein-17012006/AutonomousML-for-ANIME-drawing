@@ -3,14 +3,14 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { signIn } from "aws-amplify/auth";
+import { signIn, signOut } from "aws-amplify/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { SocialAuthButtons } from "./SocialAuthButtons";
-import { configureAmplify, getCurrentIdToken } from "@/lib/amplify";
+import { configureAmplify } from "@/lib/amplify";
 import { establishCookieSession } from "@/lib/authenticatedApi";
 
 export function LoginForm() {
@@ -29,22 +29,9 @@ export function LoginForm() {
     const password = String(form.get("password") ?? "");
 
     try {
-      // Verification with autoSignIn can leave a valid Amplify session before
-      // the application cookie is established. Recover it instead of asking
-      // Cognito to sign in the same user a second time.
-      let alreadySignedIn = false;
-      try {
-        await getCurrentIdToken();
-        alreadySignedIn = true;
-      } catch {
-        // No current Cognito session: continue with the submitted credentials.
-      }
-      if (alreadySignedIn) {
-        await establishCookieSession();
-        router.replace("/copilot");
-        return;
-      }
-
+      // A password submission is an explicit request to authenticate these
+      // credentials. Never reuse a different cached Cognito/OAuth identity.
+      await signOut();
       const result = await signIn({ username: email, password });
       sessionStorage.setItem("copilot:pendingEmail", email);
       if (result.nextStep.signInStep === "CONFIRM_SIGN_UP") {

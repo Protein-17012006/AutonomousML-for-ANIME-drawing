@@ -4,7 +4,6 @@ import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getCookieSession } from "@/lib/authenticatedApi";
-import { logDevelopmentSessions } from "@/lib/sessionApi";
 
 const CopilotApp = dynamic(() => import("@/components/copilot/CopilotApp"), {
   ssr: false,
@@ -20,7 +19,6 @@ export default function CopilotPage() {
       .then(() => {
         if (active) {
           setAllowed(true);
-          void logDevelopmentSessions();
         }
       })
       .catch(() => {

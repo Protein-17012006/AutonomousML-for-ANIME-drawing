@@ -82,6 +82,9 @@ def _row(pid: str, owner: str | None, timestamp: int) -> dict:
             f"artifacts/{pid}/reconstructed.mp4",
             f"artifacts/other/leak.md",
         ]),
+        "title": f"Session {pid}",
+        "status": "complete",
+        "updated_at": timestamp,
     }
     if owner:
         item.update(
@@ -191,3 +194,77 @@ def test_malformed_artifact_manifest_is_not_exposed(history_runtime):
         "report": None,
         "video": None,
     }
+
+
+def test_create_detail_and_rename_are_owner_scoped(history_runtime):
+    owner = _login("user-a")
+    stranger = _login("user-b")
+    created = owner.post(
+        "/sessions",
+        json={"title": "  Moonlit   cut  "},
+        headers={"Origin": ORIGIN},
+    )
+    assert created.status_code == 201
+    body = created.json()
+    assert body["title"] == "Moonlit cut"
+    assert body["status"] == "draft"
+    assert body["workspace_available"] is False
+    pid = body["pid"]
+    assert owner.get(f"/sessions/{pid}").status_code == 200
+    assert stranger.get(f"/sessions/{pid}").status_code == 404
+    assert stranger.patch(
+        f"/sessions/{pid}",
+        json={"title": "Stolen"},
+        headers={"Origin": ORIGIN},
+    ).status_code == 404
+    renamed = owner.patch(
+        f"/sessions/{pid}",
+        json={"title": "Final timing"},
+        headers={"Origin": ORIGIN},
+    )
+    assert renamed.status_code == 200
+    assert renamed.json()["title"] == "Final timing"
+
+
+def test_workspace_is_validated_owned_and_rewrites_artifacts(history_runtime):
+    table, s3 = history_runtime
+    row = _row("snapshot", "user-a", 100)
+    row.update(
+        snapshot_key="artifacts/snapshot/workspace.v1.json",
+        snapshot_version=1,
+    )
+    table.put_item(Item=row)
+    payload = {
+        "schema_version": 1,
+        "upload": {"mode": "frames", "label": "2 keyframes", "filenames": ["a.png", "b.png"]},
+        "pairs": [{
+            "index": 0,
+            "action": "filled",
+            "keys_requested": 0,
+            "mid_url": "montage.png",
+        }],
+        "result": {
+            "n_autopass": 1,
+            "n_corrected": 0,
+            "keys_requested_total": 0,
+            "flagged": [],
+            "abstained": [],
+            "needs_key": [],
+            "artifacts": {"montage": "montage.png", "report": "report.md"},
+            "pair_mids": {"0": "montage.png"},
+            "key_urls": {},
+        },
+    }
+    s3.put_object(
+        Bucket=BUCKET,
+        Key=row["snapshot_key"],
+        Body=json.dumps(payload).encode(),
+        ContentType="application/json",
+    )
+    owner = _login("user-a")
+    response = owner.get("/sessions/snapshot/workspace")
+    assert response.status_code == 200
+    workspace = response.json()
+    assert workspace["pairs"][0]["mid_url"] == "/sessions/snapshot/artifacts/montage.png"
+    assert workspace["result"]["artifacts"]["report"] == "/sessions/snapshot/artifacts/report.md"
+    assert _login("user-b").get("/sessions/snapshot/workspace").status_code == 404

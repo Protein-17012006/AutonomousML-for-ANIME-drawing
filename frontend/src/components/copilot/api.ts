@@ -109,12 +109,14 @@ export async function runSession(
   cadence: string,
   smoothness: string,
   h: SessionHandlers,
+  historyPid?: string | null,
 ): Promise<void> {
   const fd = new FormData();
   for (const f of files) fd.append("keys", f);
   fd.append("engines", engines);
   fd.append("cadence", cadence || "12");
   fd.append("smoothness", smoothness || "2");
+  if (historyPid) fd.append("history_pid", historyPid);
 
   const resp = await authenticatedFetch("/session", {
     method: "POST",
@@ -137,6 +139,7 @@ export async function runVideoSession(
   smoothness: string,
   engines: string,
   h: SessionHandlers,
+  historyPid?: string | null,
 ): Promise<void> {
   const fd = new FormData();
   fd.append("video", video);
@@ -146,6 +149,7 @@ export async function runVideoSession(
   // is still posted (best-effort hint) but the server is free to override it.
   fd.append("cadence", cadence || "12");
   fd.append("smoothness", smoothness || "2");
+  if (historyPid) fd.append("history_pid", historyPid);
 
   const resp = await authenticatedFetch("/session/video", {
     method: "POST",

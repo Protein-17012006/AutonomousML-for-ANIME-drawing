@@ -129,6 +129,16 @@ def test_real_rs256_signature_tamper_and_jwks_key_rotation():
         verifier.verify(tampered)
 
 
+def test_signed_token_allows_small_clock_skew_but_rejects_large_future_iat():
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    verifier = CognitoJwtVerifier("ap-southeast-1", "pool-1", "client-1")
+    verifier._jwk_client = _RotatingJwks({"key-1": key.public_key()})
+
+    assert verifier.verify(_signed_token(key, iat=time.time() + 30)).sub == "user-sub-1"
+    with pytest.raises(jwt.ImmatureSignatureError):
+        verifier.verify(_signed_token(key, iat=time.time() + 120))
+
+
 def test_cookie_bootstrap_me_and_logout(monkeypatch, injected_verifier):
     monkeypatch.setenv("COPILOT_AUTH_REQUIRED", "1")
     client = _client()

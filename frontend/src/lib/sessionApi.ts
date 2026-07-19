@@ -1,6 +1,7 @@
 "use client";
 
 import { authenticatedFetch } from "@/lib/authenticatedApi";
+import type { PairEvent, ResultEvent } from "@/components/copilot/types";
 
 export interface SessionSummaryCounts {
   n_pairs: number;
@@ -19,7 +20,11 @@ export interface SessionArtifactLinks {
 
 export interface PublishedSessionSummary {
   pid: string;
+  title: string;
+  status: "draft" | "complete";
   created_at: string;
+  updated_at: string;
+  workspace_available: boolean;
   summary: SessionSummaryCounts;
   artifacts: SessionArtifactLinks;
 }
@@ -27,6 +32,17 @@ export interface PublishedSessionSummary {
 export interface SessionListResponse {
   items: PublishedSessionSummary[];
   next_cursor: string | null;
+}
+
+export interface SessionWorkspaceSnapshot {
+  schema_version: 1;
+  upload: {
+    mode: "frames" | "video";
+    label: string;
+    filenames: string[];
+  };
+  pairs: PairEvent[];
+  result: ResultEvent;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -62,10 +78,23 @@ function isSession(value: unknown): value is PublishedSessionSummary {
   return (
     isRecord(value) &&
     typeof value.pid === "string" &&
+    typeof value.title === "string" &&
+    (value.status === "draft" || value.status === "complete") &&
     typeof value.created_at === "string" &&
+    typeof value.updated_at === "string" &&
+    typeof value.workspace_available === "boolean" &&
     isCounts(value.summary) &&
     isArtifacts(value.artifacts)
   );
+}
+
+async function sessionJson(response: Response): Promise<PublishedSessionSummary> {
+  if (!response.ok) {
+    throw new Error(`Session request failed (${response.status}).`);
+  }
+  const value: unknown = await response.json();
+  if (!isSession(value)) throw new Error("Invalid session response.");
+  return value;
 }
 
 function isSessionList(value: unknown): value is SessionListResponse {
@@ -94,32 +123,27 @@ export async function listMySessions(
   return value;
 }
 
-let proofPromise: Promise<void> | null = null;
+export async function getMySession(pid: string): Promise<PublishedSessionSummary> {
+  return sessionJson(await authenticatedFetch(`/sessions/${encodeURIComponent(pid)}`, {
+    cache: "no-store",
+  }));
+}
 
-export function logDevelopmentSessions(): Promise<void> {
-  if (process.env.NODE_ENV !== "development") return Promise.resolve();
-  if (proofPromise) return proofPromise;
-  proofPromise = listMySessions()
-    .then((sessions) => {
-      console.info(
-        `[session-retrieval-test] ${sessions.items.length} authorized sessions`,
-      );
-      console.table(
-        sessions.items.map((session) => ({
-          pid: session.pid,
-          created_at: session.created_at,
-          pairs: session.summary.n_pairs,
-          on_model: session.summary.n_autopass,
-          corrected: session.summary.n_corrected,
-          flagged: session.summary.flagged,
-          abstained: session.summary.abstained,
-          needs_key: session.summary.needs_key,
-        })),
-      );
-      console.info("[session-retrieval-test] response", sessions);
-    })
-    .catch((error: unknown) => {
-      console.warn("[session-retrieval-test] unavailable", error);
-    });
-  return proofPromise;
+export async function createMySession(title: string): Promise<PublishedSessionSummary> {
+  return sessionJson(await authenticatedFetch("/sessions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title }),
+  }));
+}
+
+export async function renameMySession(
+  pid: string,
+  title: string,
+): Promise<PublishedSessionSummary> {
+  return sessionJson(await authenticatedFetch(`/sessions/${encodeURIComponent(pid)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title }),
+  }));
 }

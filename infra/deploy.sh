@@ -50,7 +50,7 @@ up() {
 }
 
 data_plan() {
-  local name="${1:-phase2-owner-index-$(date +%Y%m%d-%H%M%S)}"
+  local name="${1:-phase2-session-history-$(date +%Y%m%d-%H%M%S)}"
   echo "== create REVIEW-ONLY copilot-data change set: $name"
   aws cloudformation create-change-set --region "$REGION" \
     --stack-name copilot-data --change-set-name "$name" --change-set-type UPDATE \

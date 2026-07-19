@@ -85,8 +85,18 @@ class RunSession:
             qa_degraded=metadata.qa_degraded,
         )
 
-    def publish(self, sid: int, session_dir: str, result) -> dict:
+    def publish(
+        self,
+        sid: int,
+        session_dir: str,
+        outcome: SessionOutcome,
+        *,
+        history_pid: str | None = None,
+        workspace_input: dict | None = None,
+    ) -> dict:
         return self.adapters.publish_session(
-            sid, session_dir, result,
+            sid, session_dir, outcome,
             owner_sub=self.repository.owner_for(sid),
+            pid=history_pid,
+            workspace_input=workspace_input,
         ) or {}

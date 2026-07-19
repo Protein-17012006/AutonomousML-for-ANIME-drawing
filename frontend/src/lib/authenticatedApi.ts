@@ -41,7 +41,7 @@ export async function establishCookieSession() {
     const detail = await responseDetail(response);
     throw new Error(detail || `Session setup failed (${response.status}).`);
   }
-  clearTemporaryAmplifySession();
+  await clearTemporaryAmplifySession();
 }
 
 export async function getCookieSession(): Promise<CookieSession> {
@@ -62,7 +62,7 @@ export async function logoutCookieSession() {
       credentials: "same-origin",
     });
   } finally {
-    clearTemporaryAmplifySession();
+    await clearTemporaryAmplifySession();
     window.location.assign(cognitoLogoutUrl());
   }
 }

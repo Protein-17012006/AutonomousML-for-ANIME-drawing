@@ -65,16 +65,25 @@ Resources:
     Properties:
       UserName: copilot-box-publisher
       Policies:
-        - PolicyName: publish-only          # design §3: Put-only, no Get/List/Delete
+        - PolicyName: session-api-and-publish
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
               - Effect: Allow
-                Action: s3:PutObject
-                Resource: !Sub ${ArtifactsBucket.Arn}/*
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                Resource: !Sub ${ArtifactsBucket.Arn}/artifacts/*
               - Effect: Allow
-                Action: dynamodb:PutItem
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:BatchGetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
                 Resource: !GetAtt SessionsTable.Arn
+              - Effect: Allow
+                Action: dynamodb:Query
+                Resource: !Sub ${SessionsTable.Arn}/index/OwnerSessionsIndex
       Tags: [{Key: project, Value: copilot}]
 
 Outputs:

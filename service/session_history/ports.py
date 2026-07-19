@@ -3,7 +3,12 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from service.session_history.models import PublishedSession, SessionPage, StoredArtifact
+from service.session_history.models import (
+    PublishedSession,
+    SessionPage,
+    StoredArtifact,
+    WorkspaceSnapshot,
+)
 
 
 class SessionCatalog(Protocol):
@@ -13,6 +18,14 @@ class SessionCatalog(Protocol):
 
     def get_owned(self, pid: str, owner_sub: str) -> PublishedSession | None: ...
 
+    def create_for_owner(self, owner_sub: str, *, title: str) -> PublishedSession: ...
+
+    def rename_owned(
+        self, pid: str, owner_sub: str, *, title: str
+    ) -> PublishedSession | None: ...
+
 
 class ArtifactStore(Protocol):
     def get(self, key: str, *, filename: str) -> StoredArtifact | None: ...
+
+    def get_workspace(self, key: str) -> WorkspaceSnapshot | None: ...

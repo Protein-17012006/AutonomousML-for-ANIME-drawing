@@ -2,7 +2,7 @@
 // Co-pilot app shell — owns all session state and switches the chat ⇄ board surfaces.
 // The presentational pieces were split out into ./components/* and the logic into ./lib/*
 // (this file used to be a ~1360-line monolith holding all of them).
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { PairEvent, ResultEvent, DemoResult, InputMode } from "./types";
 import { runSession, runDemo, runVideoSession, askQuestion } from "./api";
@@ -28,6 +28,13 @@ import {
   getCookieSession,
   logoutCookieSession,
 } from "@/lib/authenticatedApi";
+import {
+  createMySession,
+  getMySession,
+  listMySessions,
+  renameMySession,
+  type PublishedSessionSummary,
+} from "@/lib/sessionApi";
 
 /* cadence value → human "shoot on Ns" label, shared by the upload bubble + the result sampling badge */
 const CADENCE_LABEL: Record<string, string> = {
@@ -86,6 +93,29 @@ export default function App() {
   // Auth
   const [account, setAccount] = useState<SidebarAccount | null>(null);
   const [liveSid, setLiveSid] = useState<string | null>(null);
+  const [history, setHistory] = useState<PublishedSessionSummary[]>([]);
+  const [historyCursor, setHistoryCursor] = useState<string | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyLoadingMore, setHistoryLoadingMore] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [selectedPid, setSelectedPid] = useState<string | null>(null);
+  const [activeDraftPid, setActiveDraftPid] = useState<string | null>(null);
+
+  const loadHistory = useCallback(async () => {
+    setHistoryLoading(true);
+    setHistoryError(null);
+    try {
+      const page = await listMySessions();
+      setHistory(page.items);
+      setHistoryCursor(page.next_cursor);
+      return page.items;
+    } catch (error) {
+      setHistoryError(error instanceof Error ? error.message : "Could not load sessions.");
+      return [];
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -96,6 +126,7 @@ export default function App() {
           name: session.username || "Animator",
           email: session.username || undefined,
         });
+        void loadHistory();
       })
       .catch((err) => {
         console.error("failed to load cookie session:", err);
@@ -104,7 +135,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [router]);
+  }, [loadHistory, router]);
 
   // object URLs for the uploaded keys (key A/B of each pair = keyUrls[i], keyUrls[i+1]).
   const keyUrls = useMemo(
@@ -139,6 +170,58 @@ export default function App() {
     setQaTurns([]);
     setView("chat");
     setLiveSid(null);
+  };
+
+  const selectHistorySession = async (session: PublishedSessionSummary) => {
+    setSelectedPid(session.pid);
+    if (session.status === "draft") {
+      clearAll();
+      setVideoFile(null);
+      setActiveDraftPid(session.pid);
+    } else {
+      setActiveDraftPid(null);
+    }
+    try {
+      const selected = await getMySession(session.pid);
+      setHistory((items) => items.map((item) => item.pid === selected.pid ? selected : item));
+      if (process.env.NODE_ENV === "development") {
+        console.info("[selected-session-summary]", selected);
+      }
+    } catch (error) {
+      setHistoryError(error instanceof Error ? error.message : "Could not load session.");
+    }
+  };
+
+  const createHistorySession = async (title: string) => {
+    const created = await createMySession(title);
+    setHistory((items) => [created, ...items.filter((item) => item.pid !== created.pid)]);
+    setSelectedPid(created.pid);
+    setActiveDraftPid(created.pid);
+    clearAll();
+    setVideoFile(null);
+  };
+
+  const renameHistorySession = async (pid: string, title: string) => {
+    const renamed = await renameMySession(pid, title);
+    setHistory((items) => items.map((item) => item.pid === pid ? renamed : item));
+  };
+
+  const loadMoreHistory = async () => {
+    if (!historyCursor || historyLoadingMore) return;
+    setHistoryLoadingMore(true);
+    setHistoryError(null);
+    try {
+      const page = await listMySessions(20, historyCursor);
+      setHistory((items) => [
+        ...items,
+        ...page.items.filter((next) => !items.some((item) => item.pid === next.pid)),
+      ]);
+      setHistoryCursor(page.next_cursor);
+    } catch (error) {
+      setHistoryError(error instanceof Error ? error.message : "Could not load more sessions.");
+    } finally {
+      setHistoryLoadingMore(false);
+    }
   };
 
   // Switching input mode drops whatever the OTHER mode had staged, so `files` and `videoFile`
@@ -182,7 +265,11 @@ export default function App() {
           setLiveSid(sidFromResult(r));
         },
         onError: (m) => setBanner(m),
-      });
+      }, activeDraftPid);
+      const refreshed = await loadHistory();
+      if (activeDraftPid && refreshed.some((item) => item.pid === activeDraftPid && item.status === "complete")) {
+        setActiveDraftPid(null);
+      }
     } catch (err) {
       console.error("run session failed:", err);
       setBanner(
@@ -214,7 +301,11 @@ export default function App() {
           setLiveSid(sidFromResult(r));
         },
         onError: (m) => setBanner(m),
-      });
+      }, activeDraftPid);
+      const refreshed = await loadHistory();
+      if (activeDraftPid && refreshed.some((item) => item.pid === activeDraftPid && item.status === "complete")) {
+        setActiveDraftPid(null);
+      }
     } catch (err) {
       console.error("run video session failed:", err);
       setBanner(
@@ -316,11 +407,6 @@ export default function App() {
     }
   };
 
-  const startNewChat = () => {
-    clearAll();
-    setVideoFile(null);
-  };
-
   const handleSignOut = async () => {
     clearAll();
     await logoutCookieSession();
@@ -345,8 +431,18 @@ export default function App() {
       <SidebarProvider className="copilot-shell">
         <AppSidebar
           account={account}
-          onNewChat={startNewChat}
           onSignOut={handleSignOut}
+          sessions={history}
+          selectedPid={selectedPid}
+          historyLoading={historyLoading}
+          historyLoadingMore={historyLoadingMore}
+          historyError={historyError}
+          hasMoreSessions={Boolean(historyCursor)}
+          onSelectSession={(session) => void selectHistorySession(session)}
+          onCreateSession={createHistorySession}
+          onRenameSession={renameHistorySession}
+          onRetryHistory={() => void loadHistory()}
+          onLoadMore={() => void loadMoreHistory()}
         />
         <div className="app">
           {view === "chat" ? (

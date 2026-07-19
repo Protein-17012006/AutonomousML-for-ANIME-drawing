@@ -51,6 +51,7 @@ export default function RootLayout({ children }: Readonly<RootLayoutProps>) {
         ibmPlexSans.variable,
         ibmPlexMono.variable)}
       suppressHydrationWarning
+      data-scroll-behavior="smooth"
     >
       <head></head>
       <body>

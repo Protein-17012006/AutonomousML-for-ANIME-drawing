@@ -8,6 +8,7 @@ ALB-signed claims. A bearer ID token is accepted only by the cookie bootstrap.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 import re
 import time
 from typing import Callable
@@ -18,10 +19,14 @@ from fastapi import HTTPException, Request
 from service.core.config import AuthSettings
 
 
+logger = logging.getLogger(__name__)
+
+
 SESSION_NOT_FOUND_DETAIL = "Unknown session (or no result yet)"
 AUTH_COOKIE_PROD = "__Host-copilot_id"
 AUTH_COOKIE_DEV = "copilot_id"
 MAX_ID_TOKEN_BYTES = 3_800
+JWT_CLOCK_SKEW_LEEWAY_SECONDS = 60
 
 
 class AuthConfigurationError(RuntimeError):
@@ -90,15 +95,18 @@ class CognitoJwtVerifier:
             algorithms=["RS256"],
             issuer=self.issuer,
             audience=self.app_client_id,
+            leeway=JWT_CLOCK_SKEW_LEEWAY_SECONDS,
             options={"require": ["aud", "exp", "iss", "sub", "token_use"]},
         )
 
     def _validate_claims(self, claims: dict) -> CurrentUser:
         if claims.get("iss") != self.issuer:
             raise ValueError("wrong Cognito issuer")
-        if float(claims.get("exp", 0)) <= self._now():
+        if (float(claims.get("exp", 0))
+                <= self._now() - JWT_CLOCK_SKEW_LEEWAY_SECONDS):
             raise ValueError("expired Cognito token")
-        if float(claims.get("nbf", 0)) > self._now():
+        if (float(claims.get("nbf", 0))
+                > self._now() + JWT_CLOCK_SKEW_LEEWAY_SECONDS):
             raise ValueError("Cognito token is not valid yet")
         if claims.get("token_use") != "id":
             raise ValueError("token_use must be id")
@@ -270,6 +278,11 @@ def authenticate_bearer_request(request: Request) -> CurrentUser:
     except AuthConfigurationError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
+        logger.warning(
+            "Cognito ID-token verification failed: %s: %s",
+            type(exc).__name__,
+            exc,
+        )
         raise HTTPException(
             status_code=401,
             detail="Invalid or expired Cognito ID token",

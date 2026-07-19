@@ -6,6 +6,10 @@ from datetime import datetime, timezone
 from decimal import Decimal
 import json
 import pathlib
+import time
+import uuid
+
+from pydantic import ValidationError
 
 from service.session_history.models import (
     ArtifactLinks,
@@ -14,6 +18,7 @@ from service.session_history.models import (
     SessionSummary,
     SessionSummaryCounts,
     StoredArtifact,
+    WorkspaceSnapshot,
 )
 
 
@@ -60,6 +65,11 @@ def _created_at(timestamp: int) -> str:
     )
 
 
+def _safe_snapshot_key(pid: str, value) -> str | None:
+    expected = f"artifacts/{pid}/workspace.v1.json"
+    return expected if value == expected else None
+
+
 def _safe_artifact_keys(pid: str, value) -> dict[str, str]:
     prefix = f"artifacts/{pid}/"
     safe: dict[str, str] = {}
@@ -84,6 +94,12 @@ def _summary_from_row(row: dict) -> PublishedSession | None:
     if not pid or not owner_sub or not owner_sort or timestamp <= 0:
         return None
     artifact_keys = _safe_artifact_keys(pid, row.get("artifact_keys"))
+    snapshot_version = _integer(row.get("snapshot_version")) or None
+    snapshot_key = _safe_snapshot_key(pid, row.get("snapshot_key"))
+    status = str(row.get("status") or "complete")
+    if status not in {"draft", "complete"}:
+        return None
+    updated_at = max(timestamp, _integer(row.get("updated_at")))
     links: dict[str, str | None] = {
         "montage": None,
         "report": None,
@@ -95,7 +111,14 @@ def _summary_from_row(row: dict) -> PublishedSession | None:
             links[field] = f"/sessions/{pid}/artifacts/{basename}"
     summary = SessionSummary(
         pid=pid,
+        title=str(row.get("title") or "Untitled session").strip()[:80]
+        or "Untitled session",
+        status=status,
         created_at=_created_at(timestamp),
+        updated_at=_created_at(updated_at),
+        workspace_available=(
+            status == "complete" and snapshot_version == 1 and snapshot_key is not None
+        ),
         summary=SessionSummaryCounts(
             n_pairs=max(0, _integer(row.get("n_pairs"))),
             n_autopass=max(0, _integer(row.get("n_autopass"))),
@@ -111,6 +134,8 @@ def _summary_from_row(row: dict) -> PublishedSession | None:
         owner_sub=owner_sub,
         artifact_keys=artifact_keys,
         owner_sort=owner_sort,
+        snapshot_key=snapshot_key,
+        snapshot_version=snapshot_version,
     )
 
 
@@ -145,6 +170,71 @@ class DynamoSessionCatalog:
             return None
         return _summary_from_row(row)
 
+    def create_for_owner(self, owner_sub: str, *, title: str) -> PublishedSession:
+        timestamp = int(time.time())
+        pid = uuid.uuid4().hex
+        row = {
+            "pid": pid,
+            "owner_sub": owner_sub,
+            "owner_sort": f"CREATED#{timestamp:020d}#{pid}",
+            "ts": timestamp,
+            "updated_at": timestamp,
+            "title": title,
+            "status": "draft",
+            "artifact_keys": "[]",
+        }
+        self.table.put_item(
+            Item=row,
+            ConditionExpression="attribute_not_exists(pid)",
+        )
+        parsed = _summary_from_row(row)
+        if parsed is None:  # pragma: no cover - constructed row is valid by design
+            raise RuntimeError("failed to construct session draft")
+        return parsed
+
+    def rename_owned(
+        self, pid: str, owner_sub: str, *, title: str
+    ) -> PublishedSession | None:
+        from botocore.exceptions import ClientError
+
+        timestamp = int(time.time())
+        try:
+            response = self.table.update_item(
+                Key={"pid": pid},
+                UpdateExpression="SET title = :title, updated_at = :updated",
+                ConditionExpression="owner_sub = :owner",
+                ExpressionAttributeValues={
+                    ":title": title,
+                    ":updated": timestamp,
+                    ":owner": owner_sub,
+                },
+                ReturnValues="ALL_NEW",
+            )
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+                return None
+            raise
+        return _summary_from_row(response.get("Attributes") or {})
+
+    def _batch_rows(self, pids: list[str]) -> dict[str, dict]:
+        if not pids:
+            return {}
+        pending = [{"pid": pid} for pid in pids]
+        rows: dict[str, dict] = {}
+        for _ in range(4):
+            response = self.table.meta.client.batch_get_item(
+                RequestItems={self.table.name: {"Keys": pending}}
+            )
+            for row in response.get("Responses", {}).get(self.table.name, []):
+                if row.get("pid"):
+                    rows[str(row["pid"])] = row
+            pending = response.get("UnprocessedKeys", {}).get(
+                self.table.name, {}
+            ).get("Keys", [])
+            if not pending:
+                return rows
+        raise RuntimeError("session metadata batch read did not complete")
+
     def list_for_owner(
         self, owner_sub: str, *, limit: int, cursor: str | None
     ) -> SessionPage:
@@ -167,11 +257,15 @@ class DynamoSessionCatalog:
                 "owner_sort": prior.owner_sort,
             }
         response = self.table.query(**query)
-        items = [
-            parsed
-            for row in response.get("Items", [])
-            if (parsed := _summary_from_row(row)) is not None
+        ordered_pids = [
+            str(row.get("pid")) for row in response.get("Items", []) if row.get("pid")
         ]
+        rows = self._batch_rows(ordered_pids)
+        items = []
+        for pid in ordered_pids:
+            parsed = _summary_from_row(rows.get(pid, {}))
+            if parsed is not None and parsed.owner_sub == owner_sub:
+                items.append(parsed)
         last = response.get("LastEvaluatedKey")
         next_cursor = None
         if isinstance(last, dict) and last.get("pid"):
@@ -201,3 +295,19 @@ class S3ArtifactStore:
             content_length=response.get("ContentLength"),
             filename=filename,
         )
+
+    def get_workspace(self, key: str) -> WorkspaceSnapshot | None:
+        try:
+            response = self.client.get_object(Bucket=self.bucket, Key=key)
+            payload = json.loads(response["Body"].read())
+            return WorkspaceSnapshot.model_validate(payload)
+        except Exception as exc:
+            from botocore.exceptions import ClientError
+
+            if isinstance(exc, ClientError) and exc.response.get("Error", {}).get(
+                "Code"
+            ) in {"NoSuchKey", "404", "NotFound"}:
+                return None
+            if isinstance(exc, (json.JSONDecodeError, UnicodeDecodeError, ValidationError)):
+                return None
+            raise

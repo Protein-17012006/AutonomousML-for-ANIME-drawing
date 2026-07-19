@@ -53,7 +53,9 @@ def stream_session(key_arrays: list[np.ndarray], engines: str, *,
                    repository: SessionRepository,
                    cadence_fps: int = 12,
                    smoothness: int = 2, sampling: dict = None, show: str = None,
-                   owner_sub: str | None = None) -> StreamingResponse:
+                   owner_sub: str | None = None,
+                   history_pid: str | None = None,
+                   workspace_input: dict | None = None) -> StreamingResponse:
     """Start one run and adapt its pair/result callbacks to an SSE response."""
     cfg = model_or_422(
         SessionCfg,
@@ -117,7 +119,13 @@ def stream_session(key_arrays: list[np.ndarray], engines: str, *,
                     emit_pair=lambda pair, url: emit("pair", (pair, url)),
                 )
                 emit("result", outcome)
-                published = use_case.publish(sid, session_dir, outcome.result)
+                published = use_case.publish(
+                    sid,
+                    session_dir,
+                    outcome,
+                    history_pid=history_pid,
+                    workspace_input=workspace_input,
+                )
                 if published.get("published"):
                     print(
                         f"[publisher] published {len(published['s3_keys'])} objects",
