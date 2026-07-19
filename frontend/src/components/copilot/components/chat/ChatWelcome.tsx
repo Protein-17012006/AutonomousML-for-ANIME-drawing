@@ -18,9 +18,7 @@ interface ChatWelcomeProps {
   onImportVideo?: (file: File) => void;
 }
 
-// Empty-state greeting on the chat surface. Styled to the co-pilot ink theme
-// (sumi desk / washi paper / ash graphite / ao pencil); `.btn .btn-*` come from copilot.css
-// so they override the Button variant colors (same idiom as ChatComposer).
+// Empty-state greeting on the chat surface, styled with the co-pilot ink tokens.
 // The two CTAs are quick-import entry points: they proxy-click hidden pickers and lift the
 // filtered media up — the parent feeds it into the SAME keys/video state the KeyframeDropzone
 // reads and flips the mode dropdown, so the dropzone preview + selector update in lockstep.
@@ -59,7 +57,7 @@ export function ChatWelcome({
           type="file"
           accept="image/png"
           multiple
-          className="visually-hidden"
+          className="sr-only"
           onChange={(e) => {
             // snapshot before resetting value (the load→clear→load bug; see FilePicker)
             const picked = Array.from(e.currentTarget.files ?? []).filter(isPng);
@@ -71,7 +69,7 @@ export function ChatWelcome({
           ref={videoInputRef}
           type="file"
           accept="video/mp4,video/*"
-          className="visually-hidden"
+          className="sr-only"
           onChange={(e) => {
             const f = e.currentTarget.files?.[0] ?? null;
             e.currentTarget.value = "";
@@ -79,19 +77,24 @@ export function ChatWelcome({
           }}
         />
 
-        <Button
-          className="btn btn-primary flex-1"
-          onClick={() => framesInputRef.current?.click()}
-        >
-          Import Keyframes
-        </Button>
+        {onImportFrames && (
+          <Button
+            className="flex-1 border-ao bg-ao font-mono text-[12.5px] font-semibold tracking-[0.02em] text-on-ao hover:bg-ao/85"
+            onClick={() => framesInputRef.current?.click()}
+          >
+            Import Keyframes
+          </Button>
+        )}
 
-        <Button
-          className="btn btn-ghost flex-1"
-          onClick={() => videoInputRef.current?.click()}
-        >
-          Import Video
-        </Button>
+        {onImportVideo && (
+          <Button
+            variant="outline"
+            className="flex-1 border-line bg-transparent font-mono text-[12.5px] tracking-[0.02em] text-washi hover:border-ao hover:bg-transparent hover:text-ao"
+            onClick={() => videoInputRef.current?.click()}
+          >
+            Import Video
+          </Button>
+        )}
       </CardContent>
     </Card>
   );

@@ -1,31 +1,66 @@
+"use client";
+
+import { useState } from "react";
+import { signInWithRedirect, signOut } from "aws-amplify/auth";
 import { Button } from "@/components/ui/button";
 import { GoogleIcon } from "@/components/common/icons/GoogleIcon";
 import { GitHubIcon } from "@/components/common/icons/GitHubIcon";
 import { AppleIcon } from "@/components/common/icons/AppleIcon";
+import { configureAmplify } from "@/lib/amplify";
 
-// Third-party sign-in options. TEMPLATE ONLY — buttons are non-functional (type="button",
-// no handler); Stage 3 wires these to Firebase Auth. Logos are inline brand SVGs (see
-// components/common/icons/*): Google stays 4-color; GitHub + Apple inherit currentColor.
 const PROVIDERS = [
-  { name: "Google", Icon: GoogleIcon },
-  { name: "GitHub", Icon: GitHubIcon },
-  { name: "Apple", Icon: AppleIcon },
+  {
+    name: "Google",
+    Icon: GoogleIcon,
+    enabled: process.env.NEXT_PUBLIC_GOOGLE_OAUTH_ENABLED === "true",
+  },
+  { name: "GitHub", Icon: GitHubIcon, enabled: false },
+  { name: "Apple", Icon: AppleIcon, enabled: false },
 ] as const;
 
 export function SocialAuthButtons() {
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function googleSignIn() {
+    configureAmplify();
+    setError(null);
+    setSubmitting(true);
+    try {
+      // Amplify forbids starting a new provider flow while any Cognito user
+      // remains signed in. This commonly happens after password autoSignIn or
+      // an interrupted cookie bootstrap, so clear that client-side session
+      // through Amplify before starting the Google authorization redirect.
+      await signOut();
+      await signInWithRedirect({ provider: "Google" });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not continue with Google.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   return (
     <div className="flex flex-col gap-2">
-      {PROVIDERS.map(({ name, Icon }) => (
+      {PROVIDERS.map(({ name, Icon, enabled }) => (
         <Button
           key={name}
           type="button"
           variant="outline"
+          disabled={!enabled || submitting}
+          onClick={enabled ? googleSignIn : undefined}
           className="h-10 w-full justify-center gap-2"
         >
           <Icon className="size-4" />
           Continue with {name}
+          {!enabled && <span className="text-xs text-muted-foreground">(coming soon)</span>}
         </Button>
       ))}
+      {error && (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      )}
     </div>
   );
 }

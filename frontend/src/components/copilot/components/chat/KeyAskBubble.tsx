@@ -2,6 +2,8 @@
 // inline reply dropzone (the collaborative-loop turn made conversational).
 import { useRef, useState } from "react";
 import type { PairEvent } from "../../types";
+import { Button } from "@/components/ui/button";
+import { CircleHelp, KeyRound, Upload } from "lucide-react";
 
 export function KeyAskBubble({ pair, resolved, onRefill }: {
   pair: PairEvent;
@@ -21,16 +23,19 @@ export function KeyAskBubble({ pair, resolved, onRefill }: {
   };
   return (
     <div className={`bubble agent ask${resolved ? " resolved" : ""}`}>
-      <div className="bubble-label">{isGap ? "🔑 Key requested" : "🤔 Unsure — key welcome"}</div>
+      <div className="bubble-label">
+        {isGap ? <KeyRound className="mr-1 inline size-3.5" aria-hidden="true" /> : <CircleHelp className="mr-1 inline size-3.5" aria-hidden="true" />}
+        {isGap ? "Key requested" : "Unsure — a key could settle this"}
+      </div>
       <p>{text}</p>
       {!resolved && (
         <>
-          <input ref={inputRef} type="file" accept="image/png" className="visually-hidden"
+          <input ref={inputRef} type="file" accept="image/png" className="sr-only"
             onChange={(e) => { const f = e.currentTarget.files?.[0] ?? null; e.currentTarget.value = ""; void send(f); }} />
-          <button type="button" className="btn btn-primary" disabled={busy}
+          <Button type="button" className="border-ao bg-ao font-mono text-[12.5px] font-semibold tracking-[0.02em] text-on-ao hover:bg-ao/85" disabled={busy}
             onClick={() => inputRef.current?.click()}>
-            {busy ? "Splicing…" : "Upload a key PNG"}
-          </button>
+            {busy ? "Splicing…" : <><Upload className="size-3.5" aria-hidden="true" /> Upload a key PNG</>}
+          </Button>
         </>
       )}
     </div>

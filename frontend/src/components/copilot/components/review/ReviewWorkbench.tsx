@@ -1,17 +1,17 @@
 // review workbench: two scroll-synced columns (the "board" view).
 // Extracted from CopilotApp.tsx.
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { PairEvent, ResultEvent } from "../../types";
-import { statusClass, statusGlyph, whyText } from "../../lib/pairView";
-import { actionLabel, errTypeLabel, qaLabel, regionLabel } from "../../labels";
 import { downloadBundle, downloadReview } from "../../lib/exportSession";
 import { QAPanel } from "./QAPanel";
 import { RunLoader } from "./RunLoader";
 import { ReconPlayer } from "./ReconPlayer";
 import { FrameCard } from "./FrameCard";
-import { FlipPlayer, type Frame } from "./FlipPlayer";
-import { ConfidenceMeter } from "./ConfidenceMeter";
+import { ReviewPairRow } from "./ReviewPairRow";
 import { ChatWelcome } from "../chat/ChatWelcome";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { ArrowRight, ChevronDown, ChevronRight, Download, Keyboard, Play, Sparkles, TriangleAlert } from "lucide-react";
 
 type Filter = "offmodel" | "unsure" | "pass" | "all" | "needs_key";
 
@@ -41,11 +41,12 @@ export function ReviewWorkbench({
   const [filter, setFilter] = useState<Filter>("all");
   const [focused, setFocused] = useState<number | null>(initialFocus ?? null);
   // re-entering the board from a different chat bubble refocuses that pair
-  // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional deep-link focus sync from a chat bubble
   useEffect(() => {
-    if (initialFocus != null) setFocused(initialFocus);
+    if (initialFocus == null) return;
+    const frame = requestAnimationFrame(() => setFocused(initialFocus));
+    return () => cancelAnimationFrame(frame);
   }, [initialFocus]);
-  const [exported, setExported] = useState(false); // Export ⤓ → clean-cel ✓ morph
+  const [exported, setExported] = useState(false); // export button briefly confirms the saved bundle
   const [glider, setGlider] = useState({ left: 0, width: 0 }); // sliding "current-cel" triage marker
   const [reconOpen, setReconOpen] = useState(false); // the reconstructed-cut band (collapsed until invoked — payoff shouldn't steal the triage fold)
   const pickedRef = useRef(false); // did the artist choose a filter this run?
@@ -56,26 +57,44 @@ export function ReviewWorkbench({
   const samp = result?.sampling; // drop-a-video decimation summary (null for PNG upload)
   const video = result?.artifacts?.video;
 
-  const filled = log.filter((p) => p.action !== "needs_key");
-  const gaps = log.filter((p) => p.action === "needs_key");
-  const offmodel = filled.filter((p) => p.qa === "flag");
-  const unsure = filled.filter((p) => p.qa === "abstain");
-  const passed = filled.filter((p) => p.qa === "pass");
-  // cadence read-out (the "45fps not 60" principle made visible): holds were COPIED + snaps KEPT
-  // their timing; only genuine small motion was interpolated. Routes come straight from the gate.
-  const holds = filled.filter((p) => p.route === "hold").length;
-  const snaps = filled.filter((p) => p.route === "snap_preserve").length;
-  const interpd = filled.filter((p) => p.route === "rife").length;
-  const shown =
-    filter === "offmodel"
-      ? offmodel
-      : filter === "unsure"
-        ? unsure
-        : filter === "pass"
-          ? passed
-          : filter === "needs_key"
-            ? gaps
-            : filled;
+  const {
+    filled,
+    gaps,
+    offmodel,
+    unsure,
+    passed,
+    holds,
+    snaps,
+    interpd,
+    shown,
+  } = useMemo(() => {
+    const filled = log.filter((p) => p.action !== "needs_key");
+    const gaps = log.filter((p) => p.action === "needs_key");
+    const offmodel = filled.filter((p) => p.qa === "flag");
+    const unsure = filled.filter((p) => p.qa === "abstain");
+    const passed = filled.filter((p) => p.qa === "pass");
+    const shown =
+      filter === "offmodel"
+        ? offmodel
+        : filter === "unsure"
+          ? unsure
+          : filter === "pass"
+            ? passed
+            : filter === "needs_key"
+              ? gaps
+              : filled;
+    return {
+      filled,
+      gaps,
+      offmodel,
+      unsure,
+      passed,
+      holds: filled.filter((p) => p.route === "hold").length,
+      snaps: filled.filter((p) => p.route === "snap_preserve").length,
+      interpd: filled.filter((p) => p.route === "rife").length,
+      shown,
+    };
+  }, [filter, log]);
   const reviewedCount = filled.filter((p) => verdicts[p.index]).length;
   const pending = Math.max(0, keyUrls.length - 1 - log.length); // pairs still being inked (live run)
   // the pair the QA panel inspects: the focused one, else the first in the current view
@@ -274,14 +293,16 @@ export function ReviewWorkbench({
     setFilter(f);
   };
   const chip = (key: Filter, label: string, n: number, title: string) => (
-    <button
+    <Button
+      variant="ghost"
       type="button"
-      className={`chip chip-${key}${filter === key ? " on" : ""}`}
+      className={cn("chip hover:bg-transparent", `chip-${key}`, filter === key && "on")}
       title={title}
+      aria-pressed={filter === key}
       onClick={() => pick(key)}
     >
       {label} <b>{n}</b>
-    </button>
+    </Button>
   );
   const filterDesc: Record<Filter, string> = {
     offmodel:
@@ -292,23 +313,6 @@ export function ReviewWorkbench({
     needs_key:
       "Pairs whose two keys are too far apart to fill — draw a breakdown key between them.",
   };
-  const flipFrames = (p: PairEvent): Frame[] | null => {
-    const a = keyUrls[p.index];
-    const b = keyUrls[p.index + 1];
-    if (!a || !b) return null;
-    const mid = p.mid_url ?? mids?.[String(p.index)]; // live per-pair, fallback to result
-    return mid
-      ? [
-          { url: a, label: "key A" },
-          { url: mid, label: "in-between" },
-          { url: b, label: "key B" },
-        ]
-      : [
-          { url: a, label: "key A" },
-          { url: b, label: "key B" },
-        ];
-  };
-
   // slide the triage glider to the active chip (variable-width mono labels → measure live)
   useLayoutEffect(() => {
     const on = tabsRef.current?.querySelector<HTMLElement>(".chip.on");
@@ -341,13 +345,14 @@ export function ReviewWorkbench({
             <div className="headline">
               <span className="headline-text">{headline}</span>
               {video && (
-                <button
+                <Button
+                  variant="default"
                   type="button"
-                  className="headline-play"
+                  className="border-ao bg-ao px-3.5 py-1.5 font-mono text-xs font-semibold tracking-[0.02em] text-on-ao hover:bg-ao/85 active:translate-y-px"
                   onClick={playCut}
                 >
-                  ▶ Play your cut
-                </button>
+                  <Play data-icon="inline-start" aria-hidden="true" /> Play your cut
+                </Button>
               )}
             </div>
           )}
@@ -428,18 +433,22 @@ export function ReviewWorkbench({
               {result && (
                 <>
                   {" "}
-                  · {result.n_autopass} pass · {result.flagged.length} flag ·{" "}
-                  {result.keys_requested_total} key
+                   · {result.n_autopass} on-model · {result.flagged.length} off-model ·{" "}
+                   {result.keys_requested_total} needs key
                 </>
               )}
             </span>
-            <button
+            <Button
+              variant="outline"
               type="button"
-              className={`export-btn${exported ? " done" : ""}`}
+              className={cn(
+                "font-mono text-[11px] tracking-[0.04em] uppercase hover:border-ao hover:bg-sumi-3 hover:text-ao active:translate-y-px",
+                exported && "border-pass text-pass shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--color-pass)_32%,transparent)]",
+              )}
               disabled={!result}
               title={
                 result
-                  ? "Download the reconstructed video + frames (.zip) AND your accept/reject review (review.json — the artist-κ data)"
+                  ? "Download the reconstructed video, frames, and your accept/reject review"
                   : "Run the co-pilot first"
               }
               onClick={() => {
@@ -449,13 +458,14 @@ export function ReviewWorkbench({
                 window.setTimeout(() => setExported(false), 1600);
               }}
             >
-              {exported ? "Exported ✓" : "Export ⤓"}
-            </button>
+              {exported ? "Exported" : <><Download data-icon="inline-start" aria-hidden="true" /> Export</>}
+            </Button>
           </div>
           <div className="toolbar-foot">
             <p className="filter-desc">{filterDesc[filter]}</p>
             <p className="kbd-hint">
-              ⌨ J/K · A keep · X redraw · columns scroll-synced
+              <Keyboard className="mr-1 inline size-3" aria-hidden="true" />
+              J/K navigate · A keep · X redraw · columns stay synced
             </p>
           </div>
         </div>
@@ -475,28 +485,29 @@ export function ReviewWorkbench({
               className={`sampling-note${(samp.stride ?? 0) > (samp.requested_stride ?? 0) ? " warn" : ""}`}
             >
               {(samp.stride ?? 0) > (samp.requested_stride ?? 0)
-                ? `⚠ Long clip — auto-coarsened to 1 key every ${samp.stride} frames (kept ${samp.kept} of ${samp.source_frames}). This samples the cut, not every frame; trim to a single short cut for a faithful reconstruction.`
-                : `Decimated: kept ${samp.kept} keys of ${samp.source_frames} frames (1 every ${samp.stride}).`}
+                ? <><TriangleAlert className="mr-1 inline size-3.5" aria-hidden="true" />{`Long clip — sampled every ${samp.stride} frames (kept ${samp.kept} of ${samp.source_frames}). This samples the cut, not every frame; trim to a short cut for a faithful reconstruction.`}</>
+                : `Sampled ${samp.kept} keys from ${samp.source_frames} frames (every ${samp.stride}).`}
             </div>
           )}
           {video && (
             /* the reconstructed cut = the payoff, a full-width band above the columns (collapsible) */
             <div className={`recon-band${reconOpen ? "" : " is-collapsed"}`}>
-              <button
+              <Button
+                variant="ghost"
                 type="button"
-                className="recon-band-head"
+                className="recon-band-head rounded-none font-normal hover:bg-transparent"
                 aria-expanded={reconOpen}
                 onClick={() => setReconOpen((o) => !o)}
               >
                 <span className="recon-band-caret" aria-hidden="true">
-                  {reconOpen ? "▾" : "▸"}
+                  {reconOpen ? <ChevronDown data-icon="inline-start" /> : <ChevronRight data-icon="inline-start" />}
                 </span>
                 <span className="eyebrow">出力</span>
                 <span className="recon-band-title">Reconstructed cut</span>
                 {!reconOpen && (
-                  <span className="recon-band-hint">▶ play the filled cut</span>
+                  <span className="recon-band-hint"><Play data-icon="inline-start" aria-hidden="true" /> play the filled cut</span>
                 )}
-              </button>
+              </Button>
               {reconOpen && (
                 <div className="recon-band-body">
                   <ReconPlayer src={video} fps={fps} />
@@ -528,110 +539,36 @@ export function ReviewWorkbench({
                 <p className="log-empty">
                   Load two or more keyframes, then Run. The co-pilot fills what
                   it can and flags the rest — review the suspect in-betweens
-                  here (flip key&nbsp;→&nbsp;in-between&nbsp;→&nbsp;key), with
+                  here (flip the key, in-between, then key), with
                   the big frames synced on the right.
                 </p>
               ) : shown.length === 0 ? (
                 <p className="log-empty">
-                  {filter === "offmodel" || filter === "unsure"
-                    ? "Nothing here — the co-pilot is confident about every in-between. 🎉"
-                    : "No in-betweens in this view."}
+                  {filter === "offmodel" || filter === "unsure" ? (
+                    <>
+                      <Sparkles className="mr-1 inline size-3.5" aria-hidden="true" />
+                      Nothing here — the co-pilot is confident about every in-between.
+                    </>
+                  ) : "No in-betweens in this view."}
                 </p>
               ) : (
                 <ol className="log" key={filter}>
-                  {shown.map((p, i) => {
-                    const ex = explanations?.[String(p.index)];
-                    const frames = flipFrames(p);
-                    const v = verdicts[p.index];
-                    return (
-                      <li
-                        key={p.index}
-                        id={`row-${p.index}`}
-                        data-pair={p.index}
-                        // --i drives the staggered cel-in delay: on a filter remount the cels land
-                        // peg-by-peg down the sheet; capped so a long run never lags the tail.
-                        style={
-                          { "--i": Math.min(i, 12) } as React.CSSProperties
-                        }
-                        className={`${statusClass(p)}${focused === p.index ? " focused" : ""}${v ? " v-" + v : ""}`}
-                        onClick={() => setFocused(p.index)}
-                      >
-                        <div className="log-head">
-                          <span
-                            className={`sglyph sglyph-${statusClass(p)}`}
-                            aria-hidden="true"
-                          >
-                            {statusGlyph(p)}
-                          </span>
-                          pair {p.index} · {actionLabel(p.action)}
-                          {p.qa ? ` · ${qaLabel(p.qa)}` : ""}
-                          {v && (
-                            <span className={`verdict-badge ${v}`}>
-                              {v === "accept" ? "✓ kept" : "✗ redraw"}
-                            </span>
-                          )}
-                        </div>
-                        <div className="log-why">{whyText(p)}</div>
-                        {/* the gauge earns its place where the decision is live (abstain/flag); a clean
-                        pass is already settled, so it stays quiet — fewer dials, calmer list */}
-                        {p.qa !== "pass" && (
-                          <ConfidenceMeter p={p} band={result?.csq} />
-                        )}
-                        {ex && (
-                          <div className="log-explain">
-                            ✎ {errTypeLabel(ex.err_type)}
-                            {regionLabel(ex.region)
-                              ? `, ${regionLabel(ex.region)}`
-                              : ""}{" "}
-                            — {ex.explanation}
-                          </div>
-                        )}
-                        {frames && <FlipPlayer frames={frames} />}
-                        {p.action !== "needs_key" ? (
-                          <div className="verdict">
-                            <span className="verdict-label">Your call</span>
-                            <button
-                              type="button"
-                              className={`vbtn accept${v === "accept" ? " on" : ""}`}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onVerdict(p.index, "accept");
-                              }}
-                            >
-                              ✓ Keep
-                            </button>
-                            <button
-                              type="button"
-                              className={`vbtn reject${v === "reject" ? " on" : ""}`}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onVerdict(p.index, "reject");
-                              }}
-                            >
-                              ✗ Redraw
-                            </button>
-                          </div>
-                        ) : (
-                          <label
-                            className="addkey"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <input
-                              type="file"
-                              accept="image/png"
-                              className="visually-hidden"
-                              onChange={(e) => {
-                                const f = e.currentTarget.files?.[0];
-                                e.currentTarget.value = "";
-                                if (f) onRefill(p.index, f);
-                              }}
-                            />
-                            <span className="btn-addkey">✎ Add my key</span>
-                          </label>
-                        )}
-                      </li>
-                    );
-                  })}
+                  {shown.map((pair, index) => (
+                    <ReviewPairRow
+                      key={pair.index}
+                      pair={pair}
+                      index={index}
+                      focused={focused === pair.index}
+                      verdict={verdicts[pair.index]}
+                      keyUrls={keyUrls}
+                      pairMids={mids}
+                      explanation={explanations?.[String(pair.index)]}
+                      csq={result?.csq}
+                      onFocus={() => setFocused(pair.index)}
+                      onVerdict={onVerdict}
+                      onRefill={onRefill}
+                    />
+                  ))}
                 </ol>
               )}
 
@@ -657,16 +594,17 @@ export function ReviewWorkbench({
 
               {gaps.length > 0 && filter !== "needs_key" && (
                 <div className="gaps">
-                  <button
+                  <Button
+                    variant="ghost"
                     type="button"
-                    className="gaps-head"
+                    className="gaps-head rounded-none font-normal hover:bg-[color-mix(in_oklab,var(--color-akaire)_7%,var(--color-sumi-2))]"
                     onClick={() => pick("needs_key")}
                   >
                     <span className="gaps-mark" aria-hidden="true" />
                     {gaps.length} gap{gaps.length > 1 ? "s" : ""} too large —
                     draw a key here
-                    <span className="gaps-toggle">view →</span>
-                  </button>
+                    <span className="gaps-toggle">view <ArrowRight data-icon="inline-end" aria-hidden="true" /></span>
+                  </Button>
                 </div>
               )}
             </section>

@@ -18,20 +18,28 @@ def _result():
 
 class FakeS3:
     def __init__(self, fail=False):
-        self.calls, self.fail = [], fail
+        self.calls, self.objects, self.fail = [], [], fail
 
     def upload_file(self, path, bucket, key):
         if self.fail:
             raise RuntimeError("s3 down")
         self.calls.append((path, bucket, key))
 
+    def put_object(self, **kwargs):
+        if self.fail:
+            raise RuntimeError("s3 down")
+        self.objects.append(kwargs)
+
 
 class FakeDdb:
     def __init__(self):
-        self.items = []
+        self.items, self.updates = [], []
 
     def put_item(self, TableName, Item):
         self.items.append((TableName, Item))
+
+    def update_item(self, **kwargs):
+        self.updates.append(kwargs)
 
 
 def _session_dir(tmp_path):
@@ -54,18 +62,41 @@ def test_publishes_artifacts_and_record(tmp_path, monkeypatch):
     monkeypatch.setenv("AWS_SESSIONS_TABLE", "t")
     s3, ddb = FakeS3(), FakeDdb()
     out = publisher.publish_session(7, _session_dir(tmp_path), _result(),
-                                    clients={"s3": s3, "ddb": ddb}, pid="deadbeef")
+                                    clients={"s3": s3, "ddb": ddb})
     assert out["published"] is True and out["error"] is None
     keys = [k for _, _, k in s3.calls]
-    assert keys == ["artifacts/deadbeef/montage.png",      # CloudFront /artifacts/* contract
-                    "artifacts/deadbeef/reconstructed.mp4",
-                    "artifacts/deadbeef/report.md"]
+    pid = out["pid"]
+    assert keys == [f"artifacts/{pid}/montage.png",
+                    f"artifacts/{pid}/reconstructed.mp4",
+                    f"artifacts/{pid}/report.md"]
+    assert ddb.items and s3.objects[0]["Key"] == f"artifacts/{pid}/workspace.v1.json"
     (table, item), = ddb.items
-    assert table == "t" and item["pid"] == {"S": "deadbeef"}
+    assert table == "t" and item["pid"] == {"S": pid}
     assert item["sid"] == {"N": "7"} and item["n_pairs"] == {"N": "2"}
     assert item["flagged"] == {"S": "[1]"}
     assert item["needs_key"] == {"S": "[1]"}  # derived from pair.action == "needs_key"
     assert item["keys_requested_total"] == {"N": "2"}
+
+
+def test_owned_publish_writes_owner_index_attributes(tmp_path, monkeypatch):
+    monkeypatch.setenv("AWS_PUBLISH", "1")
+    monkeypatch.setenv("AWS_ARTIFACT_BUCKET", "b")
+    monkeypatch.setenv("AWS_SESSIONS_TABLE", "t")
+    ddb = FakeDdb()
+    out = publisher.publish_session(
+        7,
+        _session_dir(tmp_path),
+        _result(),
+        owner_sub="cognito-sub",
+        clients={"s3": FakeS3(), "ddb": ddb},
+        pid="owned-pid",
+    )
+    assert out["published"] is True
+    assert not ddb.items and len(ddb.updates) == 1
+    update = ddb.updates[0]
+    assert update["Key"] == {"pid": {"S": "owned-pid"}}
+    assert update["ExpressionAttributeValues"][":owner"] == {"S": "cognito-sub"}
+    assert "#status = :draft" in update["ConditionExpression"]
 
 
 def test_s3_failure_never_raises(tmp_path, monkeypatch):
@@ -88,21 +119,33 @@ def test_missing_env_never_raises(tmp_path, monkeypatch):
 def test_app_worker_calls_publisher(tmp_path, monkeypatch):
     """POST /session must invoke publish_session once with the sid + session dir + result."""
     import service.app as appmod
-    import service.sessions.streaming as streaming_mod
+    import service.composition.session_runtime as composition_mod
     from fastapi.testclient import TestClient
     from PIL import Image
 
     calls = []
-    monkeypatch.setattr(streaming_mod, "publish_session",
-                        lambda sid, sdir, result: calls.append((sid, sdir, result)))
+    monkeypatch.setattr(
+        composition_mod,
+        "publish_session",
+        lambda sid, sdir, outcome, *, owner_sub=None, pid=None, workspace_input=None: calls.append(
+            (sid, sdir, outcome, owner_sub, pid, workspace_input)
+        ),
+    )
+    old_runtime = appmod.app.state.session_http_runtime
+    appmod.app.state.session_http_runtime = composition_mod.build_session_http_runtime()
     img = tmp_path / "k.png"
     Image.new("RGB", (64, 64), (200, 100, 50)).save(img)
-    client = TestClient(appmod.app)
-    with open(img, "rb") as f1, open(img, "rb") as f2:
-        r = client.post("/session", files=[("keys", ("a.png", f1, "image/png")),
-                                           ("keys", ("b.png", f2, "image/png"))],
-                        data={"engines": "stub"})
+    try:
+        client = TestClient(appmod.app)
+        with open(img, "rb") as f1, open(img, "rb") as f2:
+            r = client.post("/session", files=[("keys", ("a.png", f1, "image/png")),
+                                               ("keys", ("b.png", f2, "image/png"))],
+                            data={"engines": "stub"})
+    finally:
+        appmod.app.state.session_http_runtime = old_runtime
     assert r.status_code == 200 and "event: result" in r.text
     assert len(calls) == 1
-    sid, sdir, result = calls[0]
-    assert isinstance(sid, int) and result.pairs   # real result object reached the publisher
+    sid, sdir, outcome, owner_sub, pid, workspace_input = calls[0]
+    assert isinstance(sid, int) and outcome.result.pairs
+    assert owner_sub is None
+    assert pid is None and workspace_input["mode"] == "frames"

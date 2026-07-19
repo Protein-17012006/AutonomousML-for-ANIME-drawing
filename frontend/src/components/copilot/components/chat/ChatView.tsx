@@ -5,6 +5,9 @@ import type { ChatMsg } from "../../lib/chatModel";
 import { FlagBubble } from "./FlagBubble";
 import { KeyAskBubble } from "./KeyAskBubble";
 import { ResultCard } from "./ResultCard";
+import { Check, LoaderCircle, TriangleAlert } from "lucide-react";
+
+/* eslint-disable @next/next/no-img-element -- streamed previews are browser-local URLs. */
 
 export function ChatView({
   msgs,
@@ -22,7 +25,9 @@ export function ChatView({
   const endRef = useRef<HTMLDivElement>(null);
   // follow the conversation as bubbles stream in (like any chat client)
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    // Pair events arrive in quick succession over SSE; instant scrolling avoids
+    // queuing a separate smooth-scroll animation for every event.
+    endRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
   }, [msgs.length]);
 
   return (
@@ -53,7 +58,7 @@ export function ChatView({
                     : `Checked ${m.done} pair${m.done === 1 ? "" : "s"}`}
                   {m.running && (
                     <span className="chat-pulse" aria-hidden="true">
-                      ▮
+                      <LoaderCircle className="inline size-3 animate-spin" aria-hidden="true" />
                     </span>
                   )}
                 </div>
@@ -65,7 +70,7 @@ export function ChatView({
                         className="chip chip-pass"
                         title={p.route ?? ""}
                       >
-                        ✓ {p.index}
+                        <Check className="mr-1 inline size-3" aria-hidden="true" /> {p.index}
                       </span>
                     ))}
                   </div>
@@ -118,7 +123,10 @@ export function ChatView({
                 <div className="bubble user">{m.q}</div>
                 <div className="bubble agent">
                   {m.answer === null ? (
-                    <span className="chat-pulse">thinking…</span>
+                    <span className="chat-pulse">
+                      <LoaderCircle className="mr-1 inline size-3 animate-spin" aria-hidden="true" />
+                      thinking…
+                    </span>
                   ) : (
                     <>
                       {m.grounded === false && (
@@ -126,7 +134,7 @@ export function ChatView({
                           className="qa-offline"
                           title="LLM offline — deterministic summary"
                         >
-                          ⚠{" "}
+                          <TriangleAlert className="mr-1 inline size-3.5" aria-hidden="true" />
                         </span>
                       )}
                       {m.answer}

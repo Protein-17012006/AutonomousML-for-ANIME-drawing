@@ -3,9 +3,15 @@
 // cursor-craned, carrying the hero's grammar). Extracted from CopilotApp.tsx.
 import { useState } from "react";
 import type { Explanation, PairEvent } from "../../types";
-import { statusClass, statusGlyph } from "../../lib/pairView";
+import { statusClass } from "../../lib/pairView";
 import { actionLabel, errTypeLabel, qaLabel } from "../../labels";
 import { FlipPlayer, type Frame } from "./FlipPlayer";
+import { StatusGlyph } from "./StatusGlyph";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Pencil, Play, Square } from "lucide-react";
+
+/* eslint-disable @next/next/no-img-element -- review frames are dynamic session/object URLs. */
 
 /* static key·in-between·key, or a big line-test on play */
 function FrameTrip({
@@ -40,21 +46,30 @@ function FrameTrip({
     <>
       <figcaption>
         <span className={`sglyph sglyph-${statusClass(p)}`} aria-hidden="true">
-          {statusGlyph(p)}
+          <StatusGlyph pair={p} />
         </span>
         pair {p.index} · {actionLabel(p.action)}
         {p.qa ? ` · ${qaLabel(p.qa)}` : ""}
         {canPlay && (
-          <button
+          <Button
+            variant="link"
             type="button"
-            className="trip-play"
+            className="ml-auto h-auto p-0 font-mono text-[11px] tracking-[0.04em] text-ao hover:bg-transparent hover:text-washi"
             onClick={(e) => {
               e.stopPropagation();
               setPlay((v) => !v);
             }}
           >
-            {play ? "▦ frames" : "▶ play"}
-          </button>
+            {play ? (
+              <>
+                <Square className="mr-1 inline size-3" aria-hidden="true" /> Show frames
+              </>
+            ) : (
+              <>
+                <Play className="mr-1 inline size-3" aria-hidden="true" /> Play line-test
+              </>
+            )}
+          </Button>
         )}
       </figcaption>
       {play && frames.length >= 2 ? (
@@ -84,13 +99,17 @@ function FrameTrip({
                   }}
                 >
                   <span className="region-tag">
-                    ✎ {errTypeLabel(ex.err_type)}
+                    <Pencil className="mr-1 inline size-3" aria-hidden="true" />
+                    {errTypeLabel(ex.err_type)}
                   </span>
                 </span>
               )}
             </div>
           ) : p.action === "needs_key" ? (
-            <div className="fcell-draw">✎ draw a key here</div>
+            <div className="fcell-draw">
+              <Pencil className="mr-1 inline size-3.5" aria-hidden="true" />
+              draw a key here
+            </div>
           ) : (
             <div className="fcell-empty">in-between</div>
           )}
@@ -133,8 +152,17 @@ export function FrameCard({
       id={`frow-${p.index}`}
       data-pair={p.index}
       style={{ "--i": Math.min(i, 12) } as React.CSSProperties}
-      className={`frameset ${statusClass(p)}${focused ? " focused" : ""}`}
+      className={cn("frameset", statusClass(p), focused && "focused")}
+      role="button"
+      tabIndex={0}
       onClick={onFocus}
+      onKeyDown={(event) => {
+        if (event.target !== event.currentTarget) return;
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onFocus();
+        }
+      }}
     >
       <FrameTrip p={p} a={a} b={b} mid={mid} ex={ex} />
     </figure>

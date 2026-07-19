@@ -34,9 +34,21 @@ Vault/
 # Coding agents - Claude
 .claude/
 
+# Local agent instructions
+AGENTS.md
+frontend/docs/*
+!frontend/docs/plans/
+!frontend/docs/teammate/
+frontend/docs/plans/*
+frontend/docs/teammate/*
+!frontend/docs/plans/phase-2-user-scoped-session-retrieval.md
+!frontend/docs/plans/phase-2-read-only-session-workspace-restoration.md
+!frontend/docs/teammate/PHASE-2-BACKEND-SESSION-HISTORY-HANDOFF.md
+
 # Coding agents - skills / agent tooling
 .agents/
 skills-lock.json
 
 # AWS infra (Stage 3 handoff) - the real params.env holds the tailscale key, NEVER commit
 infra/params.env
+session-owner-manifest-*.json

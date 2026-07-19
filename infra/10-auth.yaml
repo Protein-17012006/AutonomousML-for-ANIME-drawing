@@ -1,14 +1,27 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: copilot front door - Cognito user pool (no self-signup) for ALB authenticate-cognito
+Description: copilot Cognito pool, legacy ALB client, public SPA client, and staged Google OAuth secret
 
 Parameters:
   AppDomain:
     Type: String
-    Description: Public app host staff use, e.g. copilot.example.click
+    Description: Public app host, e.g. copilot.example.click
   HostedUiPrefix:
     Type: String
     Default: copilot-g4-auth
     Description: Globally-unique Cognito hosted-UI domain prefix
+  EnableGoogleOAuth:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: Enable Google only after the retained secret contains real credentials
+  GoogleOAuthSecretVersionId:
+    Type: String
+    Default: PENDING
+    NoEcho: true
+    Description: Secret version containing client_id and client_secret; required when Google is enabled
+
+Conditions:
+  GoogleOAuthEnabled: !Equals [!Ref EnableGoogleOAuth, 'true']
 
 Resources:
   UserPool:
@@ -16,19 +29,21 @@ Resources:
     Properties:
       UserPoolName: copilot-users
       AdminCreateUserConfig:
-        AllowAdminCreateUserOnly: true        # design §3: self-signup OFF
+        AllowAdminCreateUserOnly: false
+      AutoVerifiedAttributes: [email]
       Policies:
         PasswordPolicy:
           MinimumLength: 8
       UserPoolTags:
         project: copilot
 
+  # Retained during the transition because the current ALB listener still uses it.
   UserPoolClient:
     Type: AWS::Cognito::UserPoolClient
     Properties:
       ClientName: copilot-alb
       UserPoolId: !Ref UserPool
-      GenerateSecret: true                    # ALB authenticate-cognito requires a secret
+      GenerateSecret: true
       AllowedOAuthFlowsUserPoolClient: true
       AllowedOAuthFlows: [code]
       AllowedOAuthScopes: [openid]
@@ -38,6 +53,63 @@ Resources:
       ExplicitAuthFlows:
         - ALLOW_USER_SRP_AUTH
         - ALLOW_REFRESH_TOKEN_AUTH
+
+  GoogleOAuthCredentials:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: /copilot/google-oauth
+      Description: Google OAuth web-client credentials used by Cognito
+      GenerateSecretString:
+        SecretStringTemplate: '{"client_id":"PENDING"}'
+        GenerateStringKey: client_secret
+        PasswordLength: 40
+        ExcludePunctuation: true
+      Tags:
+        - Key: project
+          Value: copilot
+
+  GoogleIdentityProvider:
+    Type: AWS::Cognito::UserPoolIdentityProvider
+    Condition: GoogleOAuthEnabled
+    Properties:
+      UserPoolId: !Ref UserPool
+      ProviderName: Google
+      ProviderType: Google
+      ProviderDetails:
+        authorize_scopes: openid email profile
+        client_id: !Sub '{{resolve:secretsmanager:/copilot/google-oauth:SecretString:client_id::${GoogleOAuthSecretVersionId}}}'
+        client_secret: !Sub '{{resolve:secretsmanager:/copilot/google-oauth:SecretString:client_secret::${GoogleOAuthSecretVersionId}}}'
+      AttributeMapping:
+        email: email
+        name: name
+        picture: picture
+
+  SpaUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: copilot-spa
+      UserPoolId: !Ref UserPool
+      GenerateSecret: false
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows: [code]
+      AllowedOAuthScopes: [openid, email, profile]
+      SupportedIdentityProviders: !If
+        - GoogleOAuthEnabled
+        - [COGNITO, !Ref GoogleIdentityProvider]
+        - [COGNITO]
+      CallbackURLs:
+        - http://localhost:3000/sso-callback
+        - !Sub https://${AppDomain}/sso-callback
+      LogoutURLs:
+        - http://localhost:3000/login
+        - !Sub https://${AppDomain}/login
+      ExplicitAuthFlows:
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      EnableTokenRevocation: true
+      PreventUserExistenceErrors: ENABLED
 
   UserPoolDomain:
     Type: AWS::Cognito::UserPoolDomain
@@ -52,6 +124,13 @@ Outputs:
   UserPoolClientId:
     Value: !Ref UserPoolClient
     Export: {Name: copilot-UserPoolClientId}
+  SpaUserPoolClientId:
+    Value: !Ref SpaUserPoolClient
+    Export: {Name: copilot-SpaUserPoolClientId}
   UserPoolDomainPrefix:
     Value: !Ref HostedUiPrefix
     Export: {Name: copilot-UserPoolDomain}
+  GoogleOAuthSecretArn:
+    Value: !Ref GoogleOAuthCredentials
+  GoogleOAuthSecretName:
+    Value: /copilot/google-oauth

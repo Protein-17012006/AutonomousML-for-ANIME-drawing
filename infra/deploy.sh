@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # copilot AWS front door - CloudFormation orchestration.
-# Usage: deploy.sh up | frontend <dist-dir> | sync-userdata | outputs | teardown
+# Usage: deploy.sh up | data-plan [name] | data-apply <name> | frontend <dist-dir> | sync-userdata | outputs | teardown
 set -euo pipefail
 # Git-Bash/MSYS on Windows rewrites leading-slash args (e.g. the SSM parameter name
 # /copilot/tailscale-authkey) into Windows paths before aws.exe sees them; disable that.
@@ -10,6 +10,8 @@ cd "$(dirname "$0")"
 # shellcheck disable=SC1091
 source params.env
 REGION="${REGION:-ap-southeast-1}"
+ENABLE_GOOGLE_OAUTH="${ENABLE_GOOGLE_OAUTH:-false}"
+GOOGLE_OAUTH_SECRET_VERSION_ID="${GOOGLE_OAUTH_SECRET_VERSION_ID:-PENDING}"
 
 # conditionally forwards remaining args as --parameter-overrides; ${1:+...} is safe under set -u
 dep() {  # dep <stack> <template> <region> [param-overrides...]
@@ -24,7 +26,9 @@ dep() {  # dep <stack> <template> <region> [param-overrides...]
 up() {
   dep copilot-data 30-data.yaml "$REGION" "BucketPrefix=$BUCKET_PREFIX"
   dep copilot-auth 10-auth.yaml "$REGION" \
-      "AppDomain=$APP_DOMAIN" "HostedUiPrefix=$HOSTED_UI_PREFIX"
+      "AppDomain=$APP_DOMAIN" "HostedUiPrefix=$HOSTED_UI_PREFIX" \
+      "EnableGoogleOAuth=$ENABLE_GOOGLE_OAUTH" \
+      "GoogleOAuthSecretVersionId=$GOOGLE_OAUTH_SECRET_VERSION_ID"
   dep copilot-cert-use1 15-cert-us-east-1.yaml us-east-1 \
       "DomainName=$APP_DOMAIN" "HostedZoneId=$HOSTED_ZONE_ID"
   echo "== secrets + EC2 bootstrap assets"
@@ -43,6 +47,31 @@ up() {
       "HostedZoneId=$HOSTED_ZONE_ID" "BucketPrefix=$BUCKET_PREFIX"
   dep copilot-budget 50-budget.yaml "$REGION" "NotificationEmail=$BUDGET_EMAIL"
   outputs
+}
+
+data_plan() {
+  local name="${1:-phase2-session-history-$(date +%Y%m%d-%H%M%S)}"
+  echo "== create REVIEW-ONLY copilot-data change set: $name"
+  aws cloudformation create-change-set --region "$REGION" \
+    --stack-name copilot-data --change-set-name "$name" --change-set-type UPDATE \
+    --template-body file://30-data.yaml --capabilities CAPABILITY_NAMED_IAM \
+    --parameters "ParameterKey=BucketPrefix,ParameterValue=$BUCKET_PREFIX" \
+    --tags Key=project,Value=copilot >/dev/null
+  aws cloudformation wait change-set-create-complete --region "$REGION" \
+    --stack-name copilot-data --change-set-name "$name"
+  aws cloudformation describe-change-set --region "$REGION" \
+    --stack-name copilot-data --change-set-name "$name" --output table
+  echo "REVIEW ONLY. Execute later with: bash infra/deploy.sh data-apply $name"
+}
+
+data_apply() {
+  local name="${1:?usage: deploy.sh data-apply <reviewed-change-set-name>}"
+  echo "== execute reviewed copilot-data change set: $name"
+  aws cloudformation execute-change-set --region "$REGION" \
+    --stack-name copilot-data --change-set-name "$name"
+  aws cloudformation wait stack-update-complete --region "$REGION" \
+    --stack-name copilot-data
+  echo "copilot-data update complete"
 }
 
 sync_userdata() {   # push a changed ec2-userdata.sh; reboot does NOT re-run it (cloud-init runs once)
@@ -89,9 +118,11 @@ teardown() {
 
 case "${1:-}" in
   up) up ;;
+  data-plan) data_plan "${2:-}" ;;
+  data-apply) data_apply "${2:-}" ;;
   frontend) frontend "${2:-}" ;;
   sync-userdata) sync_userdata ;;
   outputs) outputs ;;
   teardown) teardown ;;
-  *) echo "usage: $0 up | frontend <dist-dir> | sync-userdata | outputs | teardown"; exit 1 ;;
+  *) echo "usage: $0 up | data-plan [name] | data-apply <name> | frontend <dist-dir> | sync-userdata | outputs | teardown"; exit 1 ;;
 esac

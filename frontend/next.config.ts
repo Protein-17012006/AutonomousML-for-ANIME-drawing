@@ -22,8 +22,12 @@ const nextConfig: NextConfig = EXPORT
       reactCompiler: true,
       async rewrites() {
         return [
+          { source: "/auth/:path*", destination: `${API_TARGET}/auth/:path*` },
+          { source: "/me/:path*", destination: `${API_TARGET}/me/:path*` },
           { source: "/session", destination: `${API_TARGET}/session` },
           { source: "/session/:path*", destination: `${API_TARGET}/session/:path*` },
+          { source: "/sessions", destination: `${API_TARGET}/sessions` },
+          { source: "/sessions/:path*", destination: `${API_TARGET}/sessions/:path*` },
           { source: "/demo", destination: `${API_TARGET}/demo` },
         ];
       },

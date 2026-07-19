@@ -48,7 +48,7 @@ export function Milestones() {
           {MILESTONES.map(({ icon: Icon, stat, body }) => (
             <Card key={stat} className="gap-3">
               <CardHeader className="gap-3">
-                <div className="flex size-11 items-center justify-center rounded-xl bg-linear-to-br from-purple-500 to-pink-500 text-white">
+                <div className="flex size-11 items-center justify-center rounded-xl bg-primary text-primary-foreground">
                   <Icon className="size-5" />
                 </div>
                 <CardTitle className="font-display text-2xl text-foreground">

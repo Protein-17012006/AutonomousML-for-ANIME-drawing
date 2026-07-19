@@ -2,8 +2,17 @@
 
 import { useState, useRef, useEffect, useMemo } from "react";
 import { BrandIcon } from "../../../common/BrandIcon";
+import { Field, FieldLabel } from "@/components/ui/field";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import type { InputMode } from "../../types";
 import { isPng, isVideoFile } from "../../lib/media";
+import { ChevronDown, ChevronRight, X } from "lucide-react";
 
 interface KeyframeDropzoneProps {
   files: File[];
@@ -62,21 +71,26 @@ export function KeyframeDropzone({
     if (f) onVideo(f);
   };
   const isVideo = mode === "video";
+  const handleModeChange = (value: string) => {
+    if (value === "frames" || value === "video") onModeChange(value);
+  };
 
   return (
     <div className="dropzone-wrap">
       <div className="flex flex-col gap-2">
         {/* MODE SELECTOR — sits outside the clickable box so it never opens the file dialog */}
-        <label className="field self-start">
-          input
-          <select
-            value={mode}
-            onChange={(e) => onModeChange(e.target.value as InputMode)}
-          >
-            <option value="frames">Frames (PNG)</option>
-            <option value="video">Video (MP4)</option>
-          </select>
-        </label>
+        <Field orientation="horizontal" className="inline-flex w-auto items-center gap-1.5 self-start font-mono text-[11px] tracking-[0.08em] text-ash uppercase">
+          <FieldLabel className="font-mono text-[11px] tracking-[0.08em] text-ash uppercase">input</FieldLabel>
+          <Select value={mode} onValueChange={handleModeChange}>
+            <SelectTrigger size="sm" className="w-auto font-mono text-[13px] text-washi">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="frames">Frames (PNG)</SelectItem>
+              <SelectItem value="video">Video (MP4)</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
         {/* DROP BOX */}
         <div
           className={`dropzone${over ? " is-over" : ""}`}
@@ -106,7 +120,7 @@ export function KeyframeDropzone({
             type="file"
             accept={isVideo ? "video/mp4,video/*" : "image/png"}
             multiple={!isVideo}
-            className="visually-hidden"
+            className="sr-only"
             onChange={(e) => {
               // snapshot before resetting value (the load→clear→load bug; see FilePicker)
               if (isVideo) {
@@ -148,7 +162,9 @@ export function KeyframeDropzone({
               aria-expanded={open}
               onClick={() => setOpen((o) => !o)}
             >
-              <span className="celstrip-caret">{open ? "▾" : "▸"}</span>{" "}
+              <span className="celstrip-caret" aria-hidden="true">
+                {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+              </span>{" "}
               {files.length} keyframes
             </button>
             <button type="button" className="cel-clear" onClick={onClear}>
@@ -165,13 +181,14 @@ export function KeyframeDropzone({
                     <button
                       type="button"
                       className="cel-x"
-                      title={`remove ${f.name}`}
+                      title={`Remove ${f.name}`}
+                      aria-label={`Remove ${f.name}`}
                       onClick={(e) => {
                         e.stopPropagation();
                         onRemove(f);
                       }}
                     >
-                      ×
+                      <X className="size-3" aria-hidden="true" />
                     </button>
                   </div>
                   <figcaption>{f.name}</figcaption>
@@ -192,7 +209,9 @@ export function KeyframeDropzone({
               aria-expanded={open}
               onClick={() => setOpen((o) => !o)}
             >
-              <span className="celstrip-caret">{open ? "▾" : "▸"}</span> video clip
+              <span className="celstrip-caret" aria-hidden="true">
+                {open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+              </span> video clip
             </button>
             <button
               type="button"
@@ -216,13 +235,14 @@ export function KeyframeDropzone({
                   <button
                     type="button"
                     className="cel-x"
-                    title={`remove ${videoFile.name}`}
+                    title={`Remove ${videoFile.name}`}
+                    aria-label={`Remove ${videoFile.name}`}
                     onClick={(e) => {
                       e.stopPropagation();
                       onVideo(null);
                     }}
                   >
-                    ×
+                    <X className="size-3" aria-hidden="true" />
                   </button>
                 </div>
                 <figcaption>{videoFile.name}</figcaption>

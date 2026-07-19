@@ -1,5 +1,6 @@
 import { LandingNav } from "./components/LandingNav";
 import { Hero } from "./components/Hero";
+import { TechnologyCarousel } from "./components/TechnologyCarousel";
 import { Milestones } from "./components/Milestones";
 import { About } from "./components/About";
 import { FeatureShowcase } from "./components/FeatureShowcase";
@@ -12,13 +13,14 @@ import { Footer } from "./components/Footer";
 // (LandingNav drawer, FeatureShowcase selector, Newsletter form).
 export function HomePage() {
   return (
-    <div className="flex min-h-screen flex-col bg-background">
+    <div className="flex min-h-screen flex-col bg-sumi">
       <LandingNav />
       <main className="flex flex-col">
         <Hero />
-        <Milestones />
+        <TechnologyCarousel />
         <About />
         <FeatureShowcase />
+        <Milestones />
         <Newsletter />
       </main>
       <Footer />

@@ -17,15 +17,6 @@ export function statusClass(p: PairEvent): string {
   return p.action === "needs_key" ? "needs_key" : p.qa ?? "";
 }
 
-/* a shape per status so the state survives without colour (deuteranopia-safe; structure = info) */
-export function statusGlyph(p: PairEvent): string {
-  if (p.action === "needs_key") return "✎";
-  if (p.qa === "pass") return "✓";
-  if (p.qa === "abstain") return "~";
-  if (p.qa === "flag") return "!";
-  return "·";
-}
-
 /* confidence meter — "% clean" = 1 − P(error) read on a calibrated 180° dial (a measurement,
    not a download). The indicator arc draws itself like the run-loader stroke (pathLength=1 →
    dashoffset = 1 − clean). Raw csq p/u stay in the tooltip (rigor on hover). */
@@ -35,6 +26,11 @@ export const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
  *  uncertainty bin. "forced" = the hard u_max gate makes it always-abstain. */
 export function abstainZone(p: PairEvent, band?: CsqBand | null): { from: number; to: number } | "forced" | null {
   if (!band) return null;
+  if (
+    band.u_edges.length < 2 ||
+    band.tau_pass.length !== band.u_edges.length - 1 ||
+    band.tau_flag.length !== band.u_edges.length - 1
+  ) return null;
   const u = p.uncertainty ?? 0;
   if (u > band.u_max) return "forced";
   const e = band.u_edges;

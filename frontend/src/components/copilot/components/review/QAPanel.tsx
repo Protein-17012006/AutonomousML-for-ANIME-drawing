@@ -9,7 +9,6 @@ import {
   abstainZone,
   clamp01,
   statusClass,
-  statusGlyph,
 } from "../../lib/pairView";
 import {
   errTypeLabel,
@@ -17,6 +16,9 @@ import {
   readableReason,
   regionLabel,
 } from "../../labels";
+import { cn } from "@/lib/utils";
+import { KeyRound, Pencil } from "lucide-react";
+import { StatusGlyph } from "./StatusGlyph";
 
 export function QAPanel({
   p,
@@ -38,7 +40,7 @@ export function QAPanel({
       <div className="qapanel qapanel-needskey">
         <div className="qap-head">
           <span className="sglyph sglyph-needs_key" aria-hidden="true">
-            ✎
+            <KeyRound className="size-3" strokeWidth={2.5} aria-hidden="true" />
           </span>
           pair {p.index} · needs a key
         </div>
@@ -51,14 +53,14 @@ export function QAPanel({
   const tone =
     p.qa === "pass" ? "pass" : p.qa === "abstain" ? "abstain" : "flag";
   const hasDial = p.verdict_prob != null;
-  const clean = hasDial ? clamp01(1 - (p.verdict_prob as number)) : 0;
+  const clean = clamp01(1 - (p.verdict_prob ?? 0));
   const zone = abstainZone(p, band);
   const rigor = readableReason(p.reason);
   return (
-    <div className={`qapanel qapanel-${tone}`}>
+    <div className={cn("qapanel", `qapanel-${tone}`)}>
       <div className="qap-head">
-        <span className={`sglyph sglyph-${statusClass(p)}`} aria-hidden="true">
-          {statusGlyph(p)}
+        <span className={cn("sglyph", `sglyph-${statusClass(p)}`)} aria-hidden="true">
+          <StatusGlyph pair={p} />
         </span>
         pair {p.index} · {qaLabel(p.qa)}
       </div>
@@ -118,7 +120,8 @@ export function QAPanel({
       </div>
       {ex && (
         <div className="qap-explain">
-          ✎ {errTypeLabel(ex.err_type)}
+          <Pencil className="mr-1 inline size-3" aria-hidden="true" />
+          {errTypeLabel(ex.err_type)}
           {regionLabel(ex.region) ? `, ${regionLabel(ex.region)}` : ""} —{" "}
           {ex.explanation}
         </div>

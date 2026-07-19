@@ -2,33 +2,55 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ArrowLeft, Check } from "lucide-react";
+import { resetPassword } from "aws-amplify/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { configureAmplify } from "@/lib/amplify";
 
-// Forgot-password form. TEMPLATE ONLY — submit is a client-side stub (preventDefault); no email is
-// actually sent. Stage 3 wires this to Firebase Auth (sendPasswordResetEmail). Plain <label> is used
-// (no shadcn Label component installed), matching LoginForm / SignupForm.
 export function ForgotPasswordForm() {
+  const router = useRouter();
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (email.trim()) setSent(true);
+    configureAmplify();
+    setError(null);
+    setSubmitting(true);
+    try {
+      await resetPassword({ username: email.trim() });
+      sessionStorage.setItem("copilot:pendingEmail", email.trim());
+      setSent(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not send reset code.");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   if (sent) {
     return (
       <div className="flex flex-col gap-5">
-        <div className="flex items-start gap-2 rounded-lg border border-border bg-muted/50 px-3 py-2 font-body text-sm text-foreground">
-          <Check className="mt-0.5 size-4 shrink-0 text-emerald-500" />
-          <span>
-            If an account exists for{" "}
-            <span className="font-medium">{email}</span>, a reset link is on its
-            way. Check your inbox and spam folder.
-          </span>
-        </div>
+        <Alert>
+          <Check className="mt-0.5 size-4 shrink-0 text-pass" />
+          <AlertDescription>
+            If an account exists for <span className="font-medium">{email}</span>, a reset code is on
+            its way.
+          </AlertDescription>
+        </Alert>
+        <Button
+          type="button"
+          onClick={() => router.push("/reset-password")}
+          className="h-10 w-full"
+        >
+          Enter reset code
+        </Button>
         <Button asChild variant="outline" className="h-10 w-full">
           <Link href="/login">
             <ArrowLeft />
@@ -41,14 +63,10 @@ export function ForgotPasswordForm() {
 
   return (
     <div className="flex flex-col gap-5">
-      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-        <div className="flex flex-col gap-2">
-          <label
-            htmlFor="email"
-            className="font-body text-sm font-medium text-foreground"
-          >
-            Email
-          </label>
+      <form onSubmit={handleSubmit}>
+        <FieldGroup className="gap-4">
+        <Field data-invalid={!!error}>
+          <FieldLabel htmlFor="email">Email</FieldLabel>
           <Input
             id="email"
             name="email"
@@ -59,23 +77,29 @@ export function ForgotPasswordForm() {
             onChange={(e) => setEmail(e.target.value)}
             placeholder="you@studio.com"
             className="h-10"
+            aria-invalid={!!error}
+            aria-describedby={error ? "forgot-password-error" : undefined}
           />
-        </div>
+        </Field>
 
         <Button
           type="submit"
-          className="h-10 w-full border-0 bg-linear-to-r from-purple-500 to-pink-500 text-white hover:opacity-90"
+          disabled={submitting}
+          className="h-10 w-full"
         >
-          Send reset link
+          {submitting ? "Sending..." : "Send reset code"}
         </Button>
+        {error && (
+          <Alert id="forgot-password-error" variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+        </FieldGroup>
       </form>
 
-      <p className="text-center font-body text-sm text-muted-foreground">
+      <p className="text-center font-body text-sm text-ash">
         Remember your password?{" "}
-        <Link
-          href="/login"
-          className="font-medium text-foreground hover:underline"
-        >
+        <Link href="/login" className="font-medium text-washi hover:underline">
           Sign in
         </Link>
       </p>

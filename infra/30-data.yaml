@@ -37,8 +37,27 @@ Resources:
     Properties:
       TableName: copilot_sessions
       BillingMode: PAY_PER_REQUEST
-      AttributeDefinitions: [{AttributeName: pid, AttributeType: S}]
+      AttributeDefinitions:
+        - {AttributeName: pid, AttributeType: S}
+        - {AttributeName: owner_sub, AttributeType: S}
+        - {AttributeName: owner_sort, AttributeType: S}
       KeySchema: [{AttributeName: pid, KeyType: HASH}]
+      GlobalSecondaryIndexes:
+        - IndexName: OwnerSessionsIndex
+          KeySchema:
+            - {AttributeName: owner_sub, KeyType: HASH}
+            - {AttributeName: owner_sort, KeyType: RANGE}
+          Projection:
+            ProjectionType: INCLUDE
+            NonKeyAttributes:
+              - ts
+              - n_pairs
+              - n_autopass
+              - n_corrected
+              - flagged
+              - abstained
+              - needs_key
+              - artifact_keys
       Tags: [{Key: project, Value: copilot}]
 
   PublisherUser:
@@ -46,16 +65,25 @@ Resources:
     Properties:
       UserName: copilot-box-publisher
       Policies:
-        - PolicyName: publish-only          # design §3: Put-only, no Get/List/Delete
+        - PolicyName: session-api-and-publish
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
               - Effect: Allow
-                Action: s3:PutObject
-                Resource: !Sub ${ArtifactsBucket.Arn}/*
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                Resource: !Sub ${ArtifactsBucket.Arn}/artifacts/*
               - Effect: Allow
-                Action: dynamodb:PutItem
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:BatchGetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
                 Resource: !GetAtt SessionsTable.Arn
+              - Effect: Allow
+                Action: dynamodb:Query
+                Resource: !Sub ${SessionsTable.Arn}/index/OwnerSessionsIndex
       Tags: [{Key: project, Value: copilot}]
 
 Outputs:

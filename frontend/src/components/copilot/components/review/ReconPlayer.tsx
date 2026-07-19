@@ -1,6 +1,8 @@
 // reconstructed-cut transport: X-sheet rail + frame-accurate step (rVFC).
 // Extracted from CopilotApp.tsx.
 import { useEffect, useRef, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { ChevronLeft, ChevronRight, Pause, Play } from "lucide-react";
 
 export function ReconPlayer({ src, fps }: { src: string; fps: number }) {
   const vref = useRef<HTMLVideoElement>(null);
@@ -63,11 +65,11 @@ export function ReconPlayer({ src, fps }: { src: string; fps: number }) {
         onClick={toggle}
       />
       <div className="rplayer-ctl">
-        <button type="button" className="rbtn" onClick={() => step(-1)} aria-label="previous frame">◀</button>
-        <button type="button" className="rbtn rbtn-play" onClick={toggle} aria-label={playing ? "pause" : "play"}>
-          {playing ? "❚❚" : "▶"}
-        </button>
-        <button type="button" className="rbtn" onClick={() => step(1)} aria-label="next frame">▶</button>
+        <Button type="button" variant="outline" size="sm" className="font-mono text-[11px] text-washi hover:border-ao hover:bg-sumi-2 hover:text-ao active:translate-y-px" onClick={() => step(-1)} aria-label="previous frame"><ChevronLeft className="size-3.5" aria-hidden="true" /></Button>
+        <Button type="button" variant="outline" size="sm" className="min-w-9 font-mono text-[11px] text-washi hover:border-ao hover:bg-sumi-2 hover:text-ao active:translate-y-px" onClick={toggle} aria-label={playing ? "pause" : "play"}>
+          {playing ? <Pause className="size-3.5" aria-hidden="true" /> : <Play className="size-3.5" aria-hidden="true" />}
+        </Button>
+        <Button type="button" variant="outline" size="sm" className="font-mono text-[11px] text-washi hover:border-ao hover:bg-sumi-2 hover:text-ao active:translate-y-px" onClick={() => step(1)} aria-label="next frame"><ChevronRight className="size-3.5" aria-hidden="true" /></Button>
         <div
           className="rplayer-rail"
           ref={railRef}
@@ -77,8 +79,10 @@ export function ReconPlayer({ src, fps }: { src: string; fps: number }) {
           aria-valuemin={0}
           aria-valuemax={total}
           tabIndex={0}
-          onPointerDown={(e) => { (e.target as Element).setPointerCapture?.(e.pointerId); seek(e.clientX); }}
+          onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); seek(e.clientX); }}
           onPointerMove={(e) => { if (e.buttons) seek(e.clientX); }}
+          onPointerUp={(e) => { e.currentTarget.releasePointerCapture?.(e.pointerId); }}
+          onPointerCancel={(e) => { e.currentTarget.releasePointerCapture?.(e.pointerId); }}
           onKeyDown={(e) => { if (e.key === "ArrowLeft") { e.preventDefault(); step(-1); } else if (e.key === "ArrowRight") { e.preventDefault(); step(1); } }}
         >
           <span className="rplayer-fill" style={{ width: `${pct}%` }} />

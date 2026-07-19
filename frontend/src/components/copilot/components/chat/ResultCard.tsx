@@ -1,5 +1,7 @@
 // Final agent message: session stats + artifacts + board handoff + exports.
 import type { ResultEvent } from "../../types";
+import { Button } from "@/components/ui/button";
+import { Check, CircleHelp, Download, Flag, KeyRound, Wrench } from "lucide-react";
 
 /* cadence_fps → "shoot on Ns" label; falls back to a plain "Nfps" for an unrecognized rate */
 function cadenceLabel(cadenceFps?: number): string {
@@ -24,11 +26,14 @@ export function ResultCard({ result, keyUrls, onOpenBoard, onExport }: {
   ).filter((i) => keyUrls[i]);
   return (
     <div className="bubble agent result-card">
-      <div className="bubble-label">Session done</div>
+      <div className="bubble-label">Run complete</div>
       <p className="result-stats">
-        ✓ {result.n_autopass} auto-pass · 🔧 {result.n_corrected} corrected ·
-        ⚑ {result.flagged.length} flagged · 🤔 {result.abstained.length} unsure ·
-        🔑 {result.keys_requested_total} keys requested
+        <Check className="mr-1 inline size-3" aria-hidden="true" />
+        {result.n_autopass} on-model · <Wrench className="mr-1 inline size-3" aria-hidden="true" />
+        {result.n_corrected} corrected · <Flag className="mr-1 inline size-3" aria-hidden="true" />
+        {result.flagged.length} off-model · <CircleHelp className="mr-1 inline size-3" aria-hidden="true" />
+        {result.abstained.length} unsure · <KeyRound className="mr-1 inline size-3" aria-hidden="true" />
+        {result.keys_requested_total} keys requested
       </p>
       {samp?.output_fps != null && (
         // sampling badge — what cadence × smoothness the box actually delivered this run
@@ -48,8 +53,10 @@ export function ResultCard({ result, keyUrls, onOpenBoard, onExport }: {
         </p>
       )}
       <div className="result-actions">
-        <button type="button" className="btn btn-primary" onClick={onOpenBoard}>Open review board</button>
-        <button type="button" className="btn btn-ghost" onClick={() => onExport(result)}>Export bundle ⤓</button>
+        <Button type="button" className="border-ao bg-ao font-mono text-[12.5px] font-semibold tracking-[0.02em] text-on-ao hover:bg-ao/85" onClick={onOpenBoard}>Open review board</Button>
+        <Button type="button" variant="outline" className="font-mono text-[12.5px] tracking-[0.02em]" onClick={() => onExport(result)}>
+          <Download className="size-3.5" aria-hidden="true" /> Export bundle
+        </Button>
       </div>
       {flaggedKeys.length > 0 && (
         <p className="result-flagged-keys">

@@ -1,15 +1,53 @@
 // API layer — talks to the FastAPI co-pilot service (same contract as the old web/app.js).
 import type { PairEvent, ResultEvent, DemoResult } from "./types";
+import { authenticatedFetch } from "@/lib/authenticatedApi";
 
 interface SSEEvent {
   name: string;
   // SSE payloads are validated server-side; shape depends on event name.
-  data: PairEvent | ResultEvent | { message: string };
+  data: unknown;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isPairEvent(value: unknown): value is PairEvent {
+  return isRecord(value) && typeof value.index === "number" && typeof value.action === "string";
+}
+
+function isResultEvent(value: unknown): value is ResultEvent {
+  return (
+    isRecord(value) &&
+    typeof value.n_autopass === "number" &&
+    typeof value.n_corrected === "number" &&
+    typeof value.keys_requested_total === "number" &&
+    Array.isArray(value.flagged) &&
+    Array.isArray(value.abstained)
+  );
+}
+
+function isErrorEvent(value: unknown): value is { message: string } {
+  return isRecord(value) && typeof value.message === "string";
+}
+
+function isAskResponse(value: unknown): value is { answer: string; grounded: boolean } {
+  return isRecord(value) && typeof value.answer === "string" && typeof value.grounded === "boolean";
+}
+
+function isDemoResult(value: unknown): value is DemoResult {
+  return (
+    isRecord(value) &&
+    typeof value.video === "string" &&
+    typeof value.frames === "number" &&
+    typeof value.src === "number" &&
+    typeof value.gt === "number"
+  );
 }
 
 export function parseSSE(buffer: string): { events: SSEEvent[]; rest: string } {
   const events: SSEEvent[] = [];
-  let rest = buffer;
+  let rest = buffer.replaceAll("\r\n", "\n");
   let idx: number;
   while ((idx = rest.indexOf("\n\n")) !== -1) {
     const block = rest.slice(0, idx);
@@ -20,7 +58,7 @@ export function parseSSE(buffer: string): { events: SSEEvent[]; rest: string } {
       if (line.startsWith("event:")) name = line.slice(6).trim();
       else if (line.startsWith("data:")) data += line.slice(5).trim();
     }
-    if (data) events.push({ name, data: JSON.parse(data) });
+    if (data) events.push({ name, data: JSON.parse(data) as unknown });
   }
   return { events, rest };
 }
@@ -40,12 +78,26 @@ async function pumpSSE(body: ReadableStream<Uint8Array>, h: SessionHandlers): Pr
     const { value, done } = await reader.read();
     if (done) break;
     buf += dec.decode(value, { stream: true });
-    const { events, rest } = parseSSE(buf);
+    let events: SSEEvent[];
+    let rest: string;
+    try {
+      ({ events, rest } = parseSSE(buf));
+    } catch {
+      h.onError("The co-pilot returned an invalid stream event.");
+      return;
+    }
     buf = rest;
     for (const e of events) {
-      if (e.name === "pair") h.onPair(e.data as PairEvent);
-      else if (e.name === "result") h.onResult(e.data as ResultEvent);
-      else if (e.name === "error") h.onError((e.data as { message: string }).message);
+      if (e.name === "pair") {
+        if (isPairEvent(e.data)) h.onPair(e.data);
+        else h.onError("The co-pilot returned an invalid pair event.");
+      } else if (e.name === "result") {
+        if (isResultEvent(e.data)) h.onResult(e.data);
+        else h.onError("The co-pilot returned an invalid result event.");
+      } else if (e.name === "error") {
+        if (isErrorEvent(e.data)) h.onError(e.data.message);
+        else h.onError("The co-pilot returned an invalid error event.");
+      }
     }
   }
 }
@@ -57,14 +109,19 @@ export async function runSession(
   cadence: string,
   smoothness: string,
   h: SessionHandlers,
+  historyPid?: string | null,
 ): Promise<void> {
   const fd = new FormData();
   for (const f of files) fd.append("keys", f);
   fd.append("engines", engines);
   fd.append("cadence", cadence || "12");
   fd.append("smoothness", smoothness || "2");
+  if (historyPid) fd.append("history_pid", historyPid);
 
-  const resp = await fetch("/session", { method: "POST", body: fd });
+  const resp = await authenticatedFetch("/session", {
+    method: "POST",
+    body: fd,
+  });
   if (!resp.ok || !resp.body) {
     h.onError(`POST /session failed: ${resp.status}`);
     return;
@@ -82,6 +139,7 @@ export async function runVideoSession(
   smoothness: string,
   engines: string,
   h: SessionHandlers,
+  historyPid?: string | null,
 ): Promise<void> {
   const fd = new FormData();
   fd.append("video", video);
@@ -91,8 +149,12 @@ export async function runVideoSession(
   // is still posted (best-effort hint) but the server is free to override it.
   fd.append("cadence", cadence || "12");
   fd.append("smoothness", smoothness || "2");
+  if (historyPid) fd.append("history_pid", historyPid);
 
-  const resp = await fetch("/session/video", { method: "POST", body: fd });
+  const resp = await authenticatedFetch("/session/video", {
+    method: "POST",
+    body: fd,
+  });
   if (!resp.ok || !resp.body) {
     let detail = `POST /session/video failed: ${resp.status}`;
     if (resp.status === 413) {
@@ -102,8 +164,8 @@ export async function runVideoSession(
       detail = "Video too large to upload (max ~200 MB). Trim it to a short cut (a few seconds to ~2 min) and try again.";
     } else {
       try {
-        const j = (await resp.json()) as { detail?: string };
-        if (j?.detail) detail = j.detail;
+        const j: unknown = await resp.json();
+        if (isRecord(j) && typeof j.detail === "string") detail = j.detail;
       } catch { /* body wasn't JSON */ }
     }
     h.onError(detail);
@@ -115,47 +177,21 @@ export async function runVideoSession(
 /** Planted-error demo cases (labeled): the server plants a stored bad in-between from a
  *  frozen suite and the REAL QA/annotate path judges it — exists because the live gate
  *  yields no natural flags. */
-export type PlantedCase = { id: string; title: string; planted_type: string };
-
-export async function fetchPlantedCases(): Promise<PlantedCase[]> {
-  const resp = await fetch("/session/planted/cases");
-  if (!resp.ok) return [];
-  return ((await resp.json()) as { cases: PlantedCase[] }).cases ?? [];
-}
-
-export async function runPlantedSession(
-  caseId: string,
-  engines: string,
-  cadence: string,
-  smoothness: string,
-  h: SessionHandlers,
-): Promise<void> {
-  const fd = new FormData();
-  fd.append("case", caseId);
-  fd.append("engines", engines);
-  fd.append("cadence", cadence || "12");
-  fd.append("smoothness", smoothness || "2");
-  const resp = await fetch("/session/planted", { method: "POST", body: fd });
-  if (!resp.ok || !resp.body) {
-    h.onError(`POST /session/planted failed: ${resp.status}`);
-    return;
-  }
-  await pumpSSE(resp.body, h);
-}
-
 /** Grounded session Q&A — answers ONLY from the retained session facts;
  *  grounded=false marks the deterministic offline fallback. */
 export async function askQuestion(
   sid: string,
   question: string,
 ): Promise<{ answer: string; grounded: boolean }> {
-  const resp = await fetch(`/session/${sid}/ask`, {
+  const resp = await authenticatedFetch(`/session/${sid}/ask`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ question }),
   });
   if (!resp.ok) throw new Error(`/ask failed: ${resp.status}`);
-  return (await resp.json()) as { answer: string; grounded: boolean };
+  const data: unknown = await resp.json();
+  if (!isAskResponse(data)) throw new Error("Invalid /ask response");
+  return data;
 }
 
 /** POST a full cut → side-by-side original-vs-RIFE comparison video. */
@@ -164,7 +200,12 @@ export async function runDemo(files: File[], engines: string, fps: string): Prom
   for (const f of files) fd.append("frames", f);
   fd.append("engines", engines);
   fd.append("fps", fps || "48");
-  const resp = await fetch("/demo", { method: "POST", body: fd });
+  const resp = await authenticatedFetch("/demo", {
+    method: "POST",
+    body: fd,
+  });
   if (!resp.ok) throw new Error(`/demo failed: ${resp.status}`);
-  return (await resp.json()) as DemoResult;
+  const data: unknown = await resp.json();
+  if (!isDemoResult(data)) throw new Error("Invalid /demo response");
+  return data;
 }

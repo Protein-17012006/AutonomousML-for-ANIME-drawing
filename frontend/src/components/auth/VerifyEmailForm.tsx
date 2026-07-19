@@ -1,56 +1,165 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ArrowLeft, Check } from "lucide-react";
 import { REGEXP_ONLY_DIGITS } from "input-otp";
+import { autoSignIn, confirmSignUp, resendSignUpCode } from "aws-amplify/auth";
 import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   InputOTP,
   InputOTPGroup,
   InputOTPSeparator,
   InputOTPSlot,
 } from "@/components/ui/input-otp";
+import { configureAmplify, getCurrentIdToken } from "@/lib/amplify";
+import { establishCookieSession } from "@/lib/authenticatedApi";
 
-// Email confirmation-code form. TEMPLATE ONLY — submit is a client-side stub (preventDefault); the
-// code is not checked against anything. Stage 3 wires this to the real verification call. Uses the
-// shadcn `input-otp` component (6 digits, split 3-3) for accessible type/paste/keyboard handling.
-// Shares AuthShell with the other auth pages.
 const CODE_LENGTH = 6;
 
 export function VerifyEmailForm() {
+  const router = useRouter();
   const [value, setValue] = useState("");
+  const email = useSyncExternalStore(
+    () => () => undefined,
+    () => sessionStorage.getItem("copilot:pendingEmail") ?? "",
+    () => "",
+  );
   const [verified, setVerified] = useState(false);
+  const [sessionPending, setSessionPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [resending, setResending] = useState(false);
 
-  const complete = value.length === CODE_LENGTH;
+  const complete = value.length === CODE_LENGTH && !!email;
 
-  function handleSubmit(e: React.FormEvent) {
+  async function finishSignedInSession() {
+    setError(null);
+    setSubmitting(true);
+    try {
+      await establishCookieSession();
+      router.replace("/copilot");
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Your email is verified, but the application session could not be created.",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (complete) setVerified(true);
+    if (!complete) return;
+    configureAmplify();
+    setError(null);
+    setSubmitting(true);
+    try {
+      await confirmSignUp({ username: email, confirmationCode: value });
+      let signedIn = false;
+      try {
+        const result = await autoSignIn();
+        signedIn = result.isSignedIn;
+      } catch {
+        // Amplify can report that autoSignIn is no longer available even
+        // though the Cognito tokens were already written. Check the real
+        // token state before sending the user back to the login form.
+        try {
+          await getCurrentIdToken();
+          signedIn = true;
+        } catch {
+          signedIn = false;
+        }
+      }
+
+      if (!signedIn) {
+        setVerified(true);
+        return;
+      }
+
+      try {
+        await establishCookieSession();
+        router.replace("/copilot");
+      } catch (err) {
+        setVerified(true);
+        setSessionPending(true);
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Your email is verified, but the application session could not be created.",
+        );
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Verification failed.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function resend() {
+    if (!email || resending) return;
+    configureAmplify();
+    setError(null);
+    setResending(true);
+    try {
+      await resendSignUpCode({ username: email });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not resend the code.");
+    } finally {
+      setResending(false);
+    }
   }
 
   if (verified) {
     return (
       <div className="flex flex-col gap-5">
-        <div className="flex items-start gap-2 rounded-lg border border-border bg-muted/50 px-3 py-2 font-body text-sm text-foreground">
-          <Check className="mt-0.5 size-4 shrink-0 text-emerald-500" />
-          <span>Your email is verified. You can sign in now.</span>
-        </div>
-        <Button
-          asChild
-          className="h-10 w-full border-0 bg-linear-to-r from-purple-500 to-pink-500 text-white hover:opacity-90"
-        >
-          <Link href="/login">Continue to sign in</Link>
-        </Button>
+        <Alert>
+          <Check className="mt-0.5 size-4 shrink-0 text-pass" />
+          <AlertDescription>
+            {sessionPending
+              ? "Your email is verified and Cognito signed you in. Finish creating the application session."
+              : "Your email is verified. You can sign in now."}
+          </AlertDescription>
+        </Alert>
+        {error && (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+        {sessionPending ? (
+          <Button
+            type="button"
+            onClick={finishSignedInSession}
+            disabled={submitting}
+            className="h-10 w-full"
+          >
+            {submitting ? "Creating session..." : "Continue to copilot"}
+          </Button>
+        ) : (
+          <Button asChild className="h-10 w-full">
+            <Link href="/login">Continue to sign in</Link>
+          </Button>
+        )}
       </div>
     );
   }
 
   return (
     <div className="flex flex-col gap-5">
+      {!email && (
+        <p className="text-center text-sm text-ash">
+          Start from signup or sign in again so we know which email to verify.
+        </p>
+      )}
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
         <div className="flex justify-center">
           <InputOTP
+            id="verification-code"
+            aria-label="Verification code"
             maxLength={CODE_LENGTH}
             value={value}
             onChange={setValue}
@@ -73,20 +182,27 @@ export function VerifyEmailForm() {
 
         <Button
           type="submit"
-          disabled={!complete}
-          className="h-10 w-full border-0 bg-linear-to-r from-purple-500 to-pink-500 text-white hover:opacity-90"
+          disabled={!complete || submitting}
+          className="h-10 w-full"
         >
-          Verify email
+          {submitting ? "Verifying..." : "Verify email"}
         </Button>
+        {error && (
+          <Alert id="verify-email-error" variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
       </form>
 
-      <p className="text-center font-body text-sm text-muted-foreground">
+      <p className="text-center font-body text-sm text-ash">
         Didn&apos;t get a code?{" "}
         <button
           type="button"
-          className="font-medium text-foreground hover:underline"
+          onClick={resend}
+          disabled={!email || resending}
+          className="font-medium text-washi hover:underline"
         >
-          Resend
+          {resending ? "Sending..." : "Resend"}
         </button>
       </p>
 

@@ -12,8 +12,8 @@ from service.memory.adapters import DynamoMemoryStore, InMemoryMemoryStore
 
 def _verifier(sub="user-1"):
     issuer = "https://cognito-idp.ap-southeast-1.amazonaws.com/pool-1"
-    claims = {"iss": issuer, "sub": sub, "token_use": "access",
-              "client_id": "client-1", "exp": time.time() + 300}
+    claims = {"iss": issuer, "sub": sub, "token_use": "id",
+              "aud": "client-1", "exp": time.time() + 300}
     return CognitoJwtVerifier("ap-southeast-1", "pool-1", "client-1",
                               decoder=lambda token: claims)
 
@@ -121,20 +121,23 @@ def test_memory_api_requires_auth_and_supports_user_control():
     app.state.auth_verifier = _verifier()
     app.state.memory_store = InMemoryMemoryStore()
     try:
-        c = TestClient(app)
+        c = TestClient(app, base_url="https://testserver")
         assert c.get("/me/memories").status_code == 401
-        headers = {"Authorization": "Bearer signed"}
-        created = c.post("/me/memories", headers=headers, json={
+        assert c.post("/auth/session", headers={
+            "Authorization": "Bearer signed", "Origin": "https://testserver"
+        }).status_code == 204
+        origin = {"Origin": "https://testserver"}
+        created = c.post("/me/memories", headers=origin, json={
             "kind": "preference", "key": "smoothness", "value": "2"
         })
         assert created.status_code == 201
         item = created.json()
         assert item["status"] == "confirmed"
-        assert len(c.get("/me/memories", headers=headers).json()["memories"]) == 1
-        patched = c.patch(f"/me/memories/{item['id']}", headers=headers,
+        assert len(c.get("/me/memories").json()["memories"]) == 1
+        patched = c.patch(f"/me/memories/{item['id']}", headers=origin,
                           json={"status": "dismissed"})
         assert patched.json()["status"] == "dismissed"
-        assert c.delete(f"/me/memories/{item['id']}", headers=headers).status_code == 204
+        assert c.delete(f"/me/memories/{item['id']}", headers=origin).status_code == 204
     finally:
         if old_verifier is None:
             del app.state.auth_verifier
@@ -158,6 +161,7 @@ def test_extract_api_saves_candidate_not_confirmed(monkeypatch):
         "chat": [{"role": "user", "text": "Please remember I prefer smoothness 2"}],
         "result": MagicMock(),
     }
+    default_session_repository.set_owner(811, "user-1")
     monkeypatch.setattr(
         "service.infrastructure.director_llm.make_ask_fn",
         lambda: lambda prompt: ('{"candidates":[{"kind":"preference",'
@@ -165,9 +169,11 @@ def test_extract_api_saves_candidate_not_confirmed(monkeypatch):
                                 '"confidence":0.99}]}'),
     )
     try:
-        c = TestClient(app)
-        headers = {"Authorization": "Bearer signed"}
-        r = c.post("/me/memories/extract", headers=headers,
+        c = TestClient(app, base_url="https://testserver")
+        assert c.post("/auth/session", headers={
+            "Authorization": "Bearer signed", "Origin": "https://testserver"
+        }).status_code == 204
+        r = c.post("/me/memories/extract", headers={"Origin": "https://testserver"},
                    json={"sid": 811, "cid": "conv-1"})
         assert r.status_code == 200
         candidate = r.json()["candidates"][0]

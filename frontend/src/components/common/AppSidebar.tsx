@@ -1,9 +1,7 @@
 "use client";
 
-// App-shell left rail for the co-pilot. TEMPLATE + STYLES ONLY — the tabs, history and account
-// are static placeholders (no navigation/data/auth wiring yet). Built on the shadcn Sidebar
-// (collapsible="icon" → icons-only on desktop, off-canvas Sheet drawer on mobile). Themed to the
-// copilot ink palette via the --sidebar-* remap on .copilot-shell/body in copilot.css.
+import { useState, type FormEvent } from "react";
+
 import {
   Sidebar,
   SidebarHeader,
@@ -17,57 +15,143 @@ import {
   SidebarRail,
   useSidebar,
 } from "@/components/ui/sidebar";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { BrandIcon } from "@/components/common/BrandIcon";
+import { Input } from "@/components/ui/input";
+import type { PublishedSessionSummary } from "@/lib/sessionApi";
 import {
-  MessageSquare,
+  Check,
   LayoutGrid,
-  History,
+  LoaderCircle,
+  LogOut,
+  MessageSquare,
   PanelLeftClose,
   PanelLeftOpen,
+  Pencil,
+  Plus,
+  RotateCcw,
+  X,
 } from "lucide-react";
 
-// Static placeholder history — real sessions get wired in later.
-const SESSIONS: { id: string; title: string }[] = [
-  { id: "s1", title: "Genga pair 03 · walk cycle" },
-  { id: "s2", title: "Hair overlap · 12 keys" },
-  { id: "s3", title: "Clip: run_test_final.mp4" },
-  { id: "s4", title: "Blink retime · stride 2" },
-  { id: "s5", title: "Cape sim cleanup" },
-];
+export interface SidebarAccount {
+  name: string;
+  email?: string;
+}
 
-export function AppSidebar() {
+interface AppSidebarProps {
+  account: SidebarAccount | null;
+  onSignOut: () => void;
+  sessions: PublishedSessionSummary[];
+  selectedPid: string | null;
+  historyLoading: boolean;
+  historyLoadingMore: boolean;
+  historyError: string | null;
+  hasMoreSessions: boolean;
+  onSelectSession: (session: PublishedSessionSummary) => void;
+  onCreateSession: (title: string) => Promise<void>;
+  onRenameSession: (pid: string, title: string) => Promise<void>;
+  onRetryHistory: () => void;
+  onLoadMore: () => void;
+}
+
+function initials(account: SidebarAccount | null) {
+  const source = account?.name || account?.email || "Animator";
+  return source
+    .split(/\s|@/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("");
+}
+
+export function AppSidebar({
+  account,
+  onSignOut,
+  sessions,
+  selectedPid,
+  historyLoading,
+  historyLoadingMore,
+  historyError,
+  hasMoreSessions,
+  onSelectSession,
+  onCreateSession,
+  onRenameSession,
+  onRetryHistory,
+  onLoadMore,
+}: AppSidebarProps) {
   const { state, isMobile, toggleSidebar } = useSidebar();
-  // Only the DESKTOP icon-rail turns the brand into a hover-to-expand control. Inside the mobile
-  // Sheet drawer (isMobile) the brand stays a plain, non-hovering logo.
   const collapsedRail = state === "collapsed" && !isMobile;
+  const [creating, setCreating] = useState(false);
+  const [createTitle, setCreateTitle] = useState("");
+  const [editingPid, setEditingPid] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const submitCreate = async (event: FormEvent) => {
+    event.preventDefault();
+    const title = createTitle.trim();
+    if (!title || title.length > 80) {
+      setFormError("Use 1–80 characters.");
+      return;
+    }
+    setSaving(true);
+    setFormError(null);
+    try {
+      await onCreateSession(title);
+      setCreateTitle("");
+      setCreating(false);
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : "Could not create session.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const submitRename = async (event: FormEvent, pid: string) => {
+    event.preventDefault();
+    const title = editTitle.trim();
+    if (!title || title.length > 80) {
+      setFormError("Use 1–80 characters.");
+      return;
+    }
+    setSaving(true);
+    setFormError(null);
+    try {
+      await onRenameSession(pid, title);
+      setEditingPid(null);
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : "Could not rename session.");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
-        {/* Brand + desktop collapse toggle. When collapsed to icons the title and the collapse
-            toggle fold away, so the brand mark itself becomes the click target to EXPAND
-            (the thin rail / ⌘B still work too). When expanded it's a plain, non-focusable logo —
-            the dedicated toggle on the right handles collapsing. */}
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
-            <button
+            <Button
+              variant="ghost"
+              size={collapsedRail ? "icon" : "default"}
               type="button"
               onClick={collapsedRail ? toggleSidebar : undefined}
               aria-label={collapsedRail ? "Expand sidebar" : undefined}
               title={collapsedRail ? "Expand sidebar" : undefined}
               tabIndex={collapsedRail ? 0 : -1}
-              className={
-                collapsedRail
-                  ? "group/brand flex h-8 w-8 items-center justify-center"
-                  : "flex items-center"
-              }
+              className={collapsedRail ? "group/brand" : "px-0 hover:bg-transparent"}
             >
               {collapsedRail ? (
                 <>
-                  {/* collapsed rail: the brand IS the expand control. Show the BrandIcon by
-                      default; on hover flip it to the collapsible icon to signal the click. */}
                   <span className="flex group-hover/brand:hidden">
                     <BrandIcon />
                   </span>
@@ -76,27 +160,26 @@ export function AppSidebar() {
               ) : (
                 <BrandIcon />
               )}
-            </button>
-            {/* whitespace-nowrap: keep the title on one line so it doesn't wrap/jump while the
-                rail animates its width open. */}
+            </Button>
             <span className="font-display text-sm whitespace-nowrap text-washi group-data-[collapsible=icon]:hidden">
               In-Between Co-pilot
             </span>
           </div>
-          <button
+          <Button
+            variant="ghost"
+            size="icon-sm"
             type="button"
             onClick={toggleSidebar}
             aria-label="Collapse sidebar"
             title="Collapse sidebar"
-            className="flex items-center text-ash transition-colors hover:text-washi group-data-[collapsible=icon]:hidden"
+            className="text-ash transition-colors hover:text-washi group-data-[collapsible=icon]:hidden"
           >
-            <PanelLeftClose className="h-4 w-4" />
-          </button>
+            <PanelLeftClose />
+          </Button>
         </div>
       </SidebarHeader>
 
       <SidebarContent>
-        {/* Working tabs — icons remain when collapsed; the tooltip labels them on hover. */}
         <SidebarGroup>
           <SidebarMenu>
             <SidebarMenuItem>
@@ -114,37 +197,166 @@ export function AppSidebar() {
           </SidebarMenu>
         </SidebarGroup>
 
-        {/* Session history — hidden when collapsed (per-item titles are meaningless as icons). */}
-        <SidebarGroup className="group-data-[collapsible=icon]:hidden">
-          <SidebarGroupLabel>History</SidebarGroupLabel>
+        <SidebarGroup className="min-h-0 group-data-[collapsible=icon]:hidden">
+          <div className="flex items-center justify-between gap-2 px-2">
+            <SidebarGroupLabel className="px-0">History</SidebarGroupLabel>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              type="button"
+              onClick={() => {
+                setCreating(true);
+                setEditingPid(null);
+                setFormError(null);
+              }}
+              aria-label="Create session"
+              title="Create session"
+            >
+              <Plus />
+            </Button>
+          </div>
           <SidebarMenu>
-            {SESSIONS.map((s) => (
-              <SidebarMenuItem key={s.id}>
-                <SidebarMenuButton className="text-ash">
-                  <History />
-                  <span className="truncate">{s.title}</span>
-                </SidebarMenuButton>
+            {creating && (
+              <SidebarMenuItem>
+                <form onSubmit={submitCreate} className="flex items-center gap-1 px-2 py-1">
+                  <Input
+                    autoFocus
+                    value={createTitle}
+                    maxLength={80}
+                    placeholder="Session title"
+                    aria-label="New session title"
+                    disabled={saving}
+                    onChange={(event) => setCreateTitle(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") {
+                        setCreating(false);
+                        setCreateTitle("");
+                        setFormError(null);
+                      }
+                    }}
+                    className="h-8 min-w-0"
+                  />
+                  <Button type="submit" variant="ghost" size="icon-xs" disabled={saving} aria-label="Create">
+                    {saving ? <LoaderCircle className="animate-spin" /> : <Check />}
+                  </Button>
+                  <Button type="button" variant="ghost" size="icon-xs" disabled={saving} aria-label="Cancel" onClick={() => setCreating(false)}>
+                    <X />
+                  </Button>
+                </form>
+              </SidebarMenuItem>
+            )}
+            {historyLoading && sessions.length === 0 && (
+              <SidebarMenuItem className="flex items-center gap-2 px-2 py-2 text-xs text-ash">
+                <LoaderCircle className="size-3.5 animate-spin" /> Loading sessions…
+              </SidebarMenuItem>
+            )}
+            {!historyLoading && !historyError && sessions.length === 0 && (
+              <SidebarMenuItem className="px-2 py-2 text-xs text-ash">No sessions yet.</SidebarMenuItem>
+            )}
+            {sessions.map((session) => (
+              <SidebarMenuItem key={session.pid} className="flex items-center gap-1">
+                {editingPid === session.pid ? (
+                  <form onSubmit={(event) => submitRename(event, session.pid)} className="flex min-w-0 flex-1 items-center gap-1 px-2 py-1">
+                    <Input
+                      autoFocus
+                      value={editTitle}
+                      maxLength={80}
+                      aria-label={`Rename ${session.title}`}
+                      disabled={saving}
+                      onChange={(event) => setEditTitle(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Escape") {
+                          setEditingPid(null);
+                          setFormError(null);
+                        }
+                      }}
+                      className="h-8 min-w-0"
+                    />
+                    <Button type="submit" variant="ghost" size="icon-xs" disabled={saving} aria-label="Save title">
+                      {saving ? <LoaderCircle className="animate-spin" /> : <Check />}
+                    </Button>
+                    <Button type="button" variant="ghost" size="icon-xs" disabled={saving} aria-label="Cancel rename" onClick={() => setEditingPid(null)}>
+                      <X />
+                    </Button>
+                  </form>
+                ) : (
+                  <>
+                    <SidebarMenuButton
+                      type="button"
+                      isActive={selectedPid === session.pid}
+                      onClick={() => onSelectSession(session)}
+                      tooltip={session.title}
+                      className="min-w-0 flex-1"
+                    >
+                      <span className={`size-1.5 shrink-0 rounded-full ${session.status === "draft" ? "bg-ash" : "bg-pass"}`} aria-hidden="true" />
+                      <span className="truncate">{session.title}</span>
+                    </SidebarMenuButton>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-xs"
+                      aria-label={`Rename ${session.title}`}
+                      title="Rename session"
+                      onClick={() => {
+                        setEditingPid(session.pid);
+                        setEditTitle(session.title);
+                        setCreating(false);
+                        setFormError(null);
+                      }}
+                    >
+                      <Pencil />
+                    </Button>
+                  </>
+                )}
               </SidebarMenuItem>
             ))}
+            {historyError && (
+              <SidebarMenuItem className="flex items-center justify-between gap-2 px-2 py-1 text-xs text-destructive">
+                <span className="truncate">{historyError}</span>
+                <Button type="button" variant="ghost" size="icon-xs" onClick={onRetryHistory} aria-label="Retry session history">
+                  <RotateCcw />
+                </Button>
+              </SidebarMenuItem>
+            )}
+            {formError && <SidebarMenuItem className="px-2 py-1 text-xs text-destructive">{formError}</SidebarMenuItem>}
+            {hasMoreSessions && !historyError && (
+              <SidebarMenuItem>
+                <SidebarMenuButton type="button" onClick={onLoadMore} disabled={historyLoadingMore} className="text-ash">
+                  {historyLoadingMore ? <LoaderCircle className="animate-spin" /> : <Plus />}
+                  <span>Load more</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            )}
           </SidebarMenu>
         </SidebarGroup>
       </SidebarContent>
 
       <SidebarFooter>
-        {/* Account — collapses to just the avatar. */}
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton size="lg">
-              <Avatar className="h-8 w-8">
-                <AvatarFallback>AN</AvatarFallback>
-              </Avatar>
-              <div className="flex flex-col gap-0.5 group-data-[collapsible=icon]:hidden">
-                <span className="truncate text-sm text-washi">Animator</span>
-                <Badge variant="outline" className="border-line text-ash">
-                  Free
-                </Badge>
-              </div>
-            </SidebarMenuButton>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <SidebarMenuButton size="lg">
+                  <Avatar size="default">
+                    <AvatarFallback>{initials(account)}</AvatarFallback>
+                  </Avatar>
+                  <div className="flex flex-col gap-0.5 group-data-[collapsible=icon]:hidden">
+                    <span className="truncate text-sm text-washi">
+                      {account?.name || "Animator"}
+                    </span>
+                    <Badge variant="outline" className="border-line text-ash">
+                      {account?.email || "Signed in"}
+                    </Badge>
+                  </div>
+                </SidebarMenuButton>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent side="top" align="start">
+                <DropdownMenuItem onClick={onSignOut}>
+                  <LogOut />
+                  Sign out
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarFooter>
