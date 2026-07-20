@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: copilot front door - ALB (cognito auth) + EC2 nginx proxy in the default VPC
+Description: copilot front door - ALB + EC2 nginx proxy with FastAPI Cognito-cookie auth
 
 Parameters:
   VpcId: {Type: AWS::EC2::VPC::Id}
@@ -10,8 +10,10 @@ Parameters:
   BoxHost: {Type: String, Default: 100.71.161.102}
   BucketPrefix: {Type: String, Default: copilot-g4}
   AmiId:
-    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
-    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+    # Pin upgrades deliberately. Resolving the public "latest" SSM parameter
+    # during an unrelated stack update can otherwise replace the proxy instance.
+    Type: AWS::EC2::Image::Id
+    Default: ami-0db7bd9b65e88b0a7
 
 Resources:
   AlbCert:                                  # regional cert for the ALB origin domain
@@ -122,16 +124,7 @@ Resources:
       Protocol: HTTPS
       Certificates: [{CertificateArn: !Ref AlbCert}]
       DefaultActions:
-        - Type: authenticate-cognito
-          Order: 1
-          AuthenticateCognitoConfig:
-            UserPoolArn: !ImportValue copilot-UserPoolArn
-            UserPoolClientId: !ImportValue copilot-UserPoolClientId
-            UserPoolDomain: !ImportValue copilot-UserPoolDomain
-            OnUnauthenticatedRequest: authenticate
-            SessionTimeout: 604800            # 7 days
         - Type: forward
-          Order: 2
           TargetGroupArn: !Ref Tg
 
   OriginRecord:

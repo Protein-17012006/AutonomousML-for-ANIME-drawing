@@ -178,9 +178,10 @@ export default function App() {
     try {
       const selected = await getMySession(session.pid);
       setHistory((items) => items.map((item) => item.pid === selected.pid ? selected : item));
-      if (process.env.NODE_ENV === "development") {
-        console.info("[selected-session-summary]", selected);
-      }
+      // This API type contains only the safe sidebar summary contract; log it
+      // after a successful selection in every build so production support can
+      // confirm the owner-scoped record returned by FastAPI.
+      console.info("[selected-session-summary]", selected);
     } catch (error) {
       setHistoryError(error instanceof Error ? error.message : "Could not load session.");
     }

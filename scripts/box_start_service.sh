@@ -68,25 +68,47 @@ AWS_ENV="$HOME/.copilot_aws_env"
 if secure_env_file "$AWS_ENV" 0; then
   . "$AWS_ENV" || security_fail "could not load $AWS_ENV"
 fi
-[ -n "${COPILOT_MEMORY_TABLE:-}" ] || security_fail \
-  "COPILOT_MEMORY_TABLE must be set in $AWS_ENV or the launcher environment"
-[ -n "${COPILOT_FEEDBACK_TABLE:-}" ] || security_fail \
-  "COPILOT_FEEDBACK_TABLE must be set in $AWS_ENV or the launcher environment"
-export COPILOT_MEMORY_TABLE COPILOT_FEEDBACK_TABLE
+# Memory and per-frame feedback are separate, optional persistence features.
+# Keep their current tables when configured; otherwise use the explicit
+# in-memory backend so Phase 2 session-history startup is not blocked by
+# infrastructure that has not been approved or provisioned.
+if [ -z "${COPILOT_MEMORY_TABLE:-}" ] && [ -z "${COPILOT_MEMORY_BACKEND:-}" ]; then
+  COPILOT_MEMORY_BACKEND=memory
+fi
+if [ -z "${COPILOT_FEEDBACK_TABLE:-}" ] && [ -z "${COPILOT_FEEDBACK_BACKEND:-}" ]; then
+  COPILOT_FEEDBACK_BACKEND=memory
+fi
+export COPILOT_MEMORY_BACKEND COPILOT_FEEDBACK_BACKEND
 
-# The public front door authenticates with ALB Cognito and forwards a signed
-# x-amzn-oidc-data token. The box verifies that signature and signer before
-# binding sessions/data to a Cognito subject. Fail closed: this production
-# launcher must never silently fall back to ownerless sessions.
+# Durable owned-session history and read-only workspace restoration use the
+# same publisher credentials and storage.  Do not start a production service
+# that can accept work but cannot publish or restore the completed session.
+[ "${AWS_PUBLISH:-}" = "1" ] || security_fail \
+  "AWS_PUBLISH=1 must be set in $AWS_ENV for durable session history"
+[ -n "${AWS_ARTIFACT_BUCKET:-}" ] || security_fail \
+  "AWS_ARTIFACT_BUCKET must be set in $AWS_ENV"
+[ -n "${AWS_SESSIONS_TABLE:-}" ] || security_fail \
+  "AWS_SESSIONS_TABLE must be set in $AWS_ENV"
+# This launcher is the production session-history service. Enable its history
+# composition by default once the publisher's durable storage is present; an
+# explicit false value still fails closed below.
+: "${COPILOT_SESSION_HISTORY_ENABLED:=1}"
+[ "${COPILOT_SESSION_HISTORY_ENABLED:-}" = "1" ] || security_fail \
+  "COPILOT_SESSION_HISTORY_ENABLED=1 must be set in $AWS_ENV"
+export AWS_PUBLISH AWS_ARTIFACT_BUCKET AWS_SESSIONS_TABLE \
+  COPILOT_SESSION_HISTORY_ENABLED
+
+# The public app authenticates through the FastAPI-issued secure Cognito cookie.
+# ALB Cognito was removed so an old ALB browser session cannot survive logout.
+# Fail closed: this production launcher must never silently fall back to
+# ownerless sessions.
 AUTH_ENV="$HOME/.copilot_auth_env"
 secure_env_file "$AUTH_ENV" 1
 . "$AUTH_ENV" || security_fail "could not load $AUTH_ENV"
 [ -n "$COPILOT_COGNITO_REGION" ] || security_fail "COPILOT_COGNITO_REGION missing from $AUTH_ENV"
 [ -n "$COPILOT_COGNITO_USER_POOL_ID" ] || security_fail "COPILOT_COGNITO_USER_POOL_ID missing from $AUTH_ENV"
 [ -n "$COPILOT_COGNITO_APP_CLIENT_ID" ] || security_fail "COPILOT_COGNITO_APP_CLIENT_ID missing from $AUTH_ENV"
-[ -n "$COPILOT_ALB_ARN" ] || security_fail "COPILOT_ALB_ARN missing from $AUTH_ENV"
-export COPILOT_COGNITO_REGION COPILOT_COGNITO_USER_POOL_ID
-export COPILOT_COGNITO_APP_CLIENT_ID COPILOT_ALB_ARN
+export COPILOT_COGNITO_REGION COPILOT_COGNITO_USER_POOL_ID COPILOT_COGNITO_APP_CLIENT_ID
 
 if [ -n "$PID" ]; then echo "killing old server pid $PID on :$PORT"; kill "$PID"; sleep 2; fi
 
@@ -94,7 +116,7 @@ cd "$DIR" || { echo "FATAL: no $DIR"; exit 1; }
 # COPILOT_WEB_DIR=dist serves the team's canonical Next.js static export
 # (~/copilot_svc/dist, deployed separately from the export repo — NOT from this repo;
 # the old Vite frontend/ was removed 2026-07-05); falls back to web/ in app.py if dist absent.
-COPILOT_AUTH_REQUIRED=1 COPILOT_TRUST_ALB_OIDC=1 COPILOT_ENGINES=box \
+COPILOT_AUTH_REQUIRED=1 COPILOT_TRUST_ALB_OIDC=0 COPILOT_ENGINES=box \
   COPILOT_WEB_DIR="${COPILOT_WEB_DIR:-dist}" nohup setsid "$UVICORN" service.app:app \
   --host 0.0.0.0 --port "$PORT" >"$DIR/uvicorn.log" 2>&1 </dev/null &
 disown 2>/dev/null || true
@@ -111,5 +133,12 @@ if [ "$AUTH_CODE" != "401" ]; then
   NEW_PID="$(ss -ltnp 2>/dev/null | grep ":$PORT" | grep -oP 'pid=\K[0-9]+' | head -1)"
   [ -z "$NEW_PID" ] || kill "$NEW_PID" 2>/dev/null || true
   security_fail "auth health check expected HTTP 401, got ${AUTH_CODE:-no response}"
+fi
+HISTORY_CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 \
+  "http://127.0.0.1:$PORT/sessions" || true)
+if [ "$HISTORY_CODE" != "401" ]; then
+  NEW_PID="$(ss -ltnp 2>/dev/null | grep ":$PORT" | grep -oP 'pid=\K[0-9]+' | head -1)"
+  [ -z "$NEW_PID" ] || kill "$NEW_PID" 2>/dev/null || true
+  security_fail "session-history health check expected HTTP 401, got ${HISTORY_CODE:-no response}"
 fi
 echo "OK: listening on :$PORT with authentication enforced"

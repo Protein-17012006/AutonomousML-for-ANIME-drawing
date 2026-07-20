@@ -18,7 +18,7 @@ BOX_DIR="${BOX_DIR:-~/copilot_svc}"
 PORT="${PORT:-8000}"
 DEST="${BOX_USER}@${BOX_HOST}"
 
-# what to ship: the service, the vanilla web UI (fallback), the core lib, its RUNTIME
+# what to ship: the service, the core lib, its RUNTIME
 # imports (inbetween_copilot/signals/* imports benchmark.{lib,smallgap} at import time,
 # and wiring's qa_fn needs vision_common — omitting them left stale copies on the box:
 # the audit's #3 finding, 2026-07-02), and the daemon launcher.
@@ -26,7 +26,7 @@ DEST="${BOX_USER}@${BOX_HOST}"
 # deployed separately to ~/copilot_svc/dist and served via COPILOT_WEB_DIR=dist. This
 # script deliberately ships NO frontend build, so it can never clobber that Next export
 # (the old frontend/dist -> dist sync did exactly that). Frontend deploy is out of scope here.
-PATHS=(service web inbetween_copilot benchmark vision_common scripts/box_start_service.sh)
+PATHS=(service inbetween_copilot benchmark vision_common scripts/box_start_service.sh)
 # box-only comparison script: git-ignored scratch — ship only when present so a
 # fresh clone's deploy doesn't abort under `set -euo pipefail`.
 [ -e .scratch/fullloop/compare_video.py ] && PATHS+=(.scratch/fullloop/compare_video.py)
@@ -48,7 +48,10 @@ if [[ "${1:-}" == "--restart" ]]; then
   # box_start_service.sh kills the old server BY PORT (a `pkill -f uvicorn...`
   # pattern would match this launcher's own cmdline and kill itself) and relaunches
   # the venv uvicorn detached (nohup+setsid). See that script's header for the why.
-  ssh "${DEST}" "bash ${BOX_DIR}/box_start_service.sh ${PORT}"
+  # Git on Windows may check this shell script out with CRLF. Normalize the
+  # copied launcher on the Linux box before Bash reads it, rather than relying
+  # on each developer's local Git line-ending settings.
+  ssh "${DEST}" "sed -i 's/\\r$//' ${BOX_DIR}/box_start_service.sh && bash ${BOX_DIR}/box_start_service.sh ${PORT}"
   echo ">> verify from your machine (expect 200 + the demo UI):"
   echo "   curl -s -o /dev/null -w 'HTTP %{http_code}\\n' http://${BOX_HOST}:${PORT}/"
 else

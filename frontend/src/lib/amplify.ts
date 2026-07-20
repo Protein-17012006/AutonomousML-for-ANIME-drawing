@@ -19,6 +19,18 @@ function currentOrigin() {
     : window.location.origin;
 }
 
+function sameOriginRedirect(configured: string | undefined, path: string) {
+  const fallback = `${currentOrigin()}${path}`;
+  if (!configured || typeof window === "undefined") return configured || fallback;
+  try {
+    return new URL(configured).origin === window.location.origin
+      ? configured
+      : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 export function cognitoLogoutUrl() {
   const domain = required(
     "NEXT_PUBLIC_COGNITO_DOMAIN",
@@ -28,9 +40,10 @@ export function cognitoLogoutUrl() {
     "NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID",
     process.env.NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID,
   );
-  const logoutUri =
-    process.env.NEXT_PUBLIC_COGNITO_REDIRECT_SIGN_OUT ||
-    `${currentOrigin()}/login`;
+  const logoutUri = sameOriginRedirect(
+    process.env.NEXT_PUBLIC_COGNITO_REDIRECT_SIGN_OUT,
+    "/login",
+  );
   const url = new URL(`https://${domain}/logout`);
   url.searchParams.set("client_id", clientId);
   url.searchParams.set("logout_uri", logoutUri);
@@ -49,12 +62,14 @@ export function configureAmplify() {
     process.env.NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID,
   );
   const domain = process.env.NEXT_PUBLIC_COGNITO_DOMAIN;
-  const redirectSignIn =
-    process.env.NEXT_PUBLIC_COGNITO_REDIRECT_SIGN_IN ||
-    `${currentOrigin()}/sso-callback`;
-  const redirectSignOut =
-    process.env.NEXT_PUBLIC_COGNITO_REDIRECT_SIGN_OUT ||
-    `${currentOrigin()}/login`;
+  const redirectSignIn = sameOriginRedirect(
+    process.env.NEXT_PUBLIC_COGNITO_REDIRECT_SIGN_IN,
+    "/sso-callback",
+  );
+  const redirectSignOut = sameOriginRedirect(
+    process.env.NEXT_PUBLIC_COGNITO_REDIRECT_SIGN_OUT,
+    "/login",
+  );
 
   // Amplify needs temporary state across the hosted-UI redirect, but the
   // long-lived application session is the server-issued HttpOnly cookie.

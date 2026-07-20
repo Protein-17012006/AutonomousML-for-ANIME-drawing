@@ -5,7 +5,9 @@ set -euo pipefail
 # Git-Bash/MSYS on Windows rewrites leading-slash args (e.g. the SSM parameter name
 # /copilot/tailscale-authkey) into Windows paths before aws.exe sees them; disable that.
 export MSYS_NO_PATHCONV=1
+CALLER_DIR="$PWD"
 cd "$(dirname "$0")"
+REPO_ROOT="$(cd .. && pwd)"
 [ -f params.env ] || { echo "ERROR: copy params.env.example -> params.env and fill it in"; exit 1; }
 # shellcheck disable=SC1091
 source params.env
@@ -79,19 +81,60 @@ sync_userdata() {   # push a changed ec2-userdata.sh; reboot does NOT re-run it 
   local iid
   iid=$(aws cloudformation describe-stacks --region "$REGION" --stack-name copilot-frontdoor \
     --query "Stacks[0].Outputs[?OutputKey=='InstanceId'].OutputValue" --output text)
-  echo "synced. Re-run on the instance via SSM: aws ssm send-command --region $REGION --instance-ids $iid --document-name AWS-RunShellScript --parameters 'commands=[\"aws s3 cp s3://${BUCKET_PREFIX}-deploy/infra/ec2-userdata.sh /root/setup.sh\", \"bash /root/setup.sh $REGION $BOX_HOST $BUCKET_PREFIX\"]'"
+  local command_id
+  command_id=$(aws ssm send-command --region "$REGION" --instance-ids "$iid" \
+    --document-name AWS-RunShellScript \
+    --parameters "commands=[\"aws s3 cp s3://${BUCKET_PREFIX}-deploy/infra/ec2-userdata.sh /root/setup.sh --region ${REGION}\",\"sed -i 's/\\r$//' /root/setup.sh\",\"bash /root/setup.sh ${REGION} ${BOX_HOST} ${BUCKET_PREFIX}\"]" \
+    --query 'Command.CommandId' --output text)
+  echo "== running updated proxy setup through SSM ($iid; command $command_id)"
+  if ! aws ssm wait command-executed --region "$REGION" --command-id "$command_id" --instance-id "$iid"; then
+    aws ssm get-command-invocation --region "$REGION" --command-id "$command_id" \
+      --instance-id "$iid" --output json || true
+    return 1
+  fi
+  aws ssm get-command-invocation --region "$REGION" --command-id "$command_id" \
+    --instance-id "$iid" --query '[Status,StandardOutputContent,StandardErrorContent]' --output text
 }
 
 frontend() {
-  local dist="${1:?usage: deploy.sh frontend <dist-dir>}"
+  local dist="${1:-$REPO_ROOT/frontend/out}"
+  if [ -n "${1:-}" ] && [[ "$dist" != /* ]]; then
+    dist="$CALLER_DIR/$dist"
+  fi
+  echo "== build static frontend export"
+  (
+    cd "$REPO_ROOT/frontend"
+    BUILD_EXPORT=1 npm run build
+  )
+  [ -f "$dist/index.html" ] || {
+    echo "ERROR: static export is missing $dist/index.html"
+    exit 1
+  }
+  [ -d "$dist/_next" ] || {
+    echo "ERROR: static export is missing $dist/_next"
+    exit 1
+  }
+  echo "== upload frontend from $dist"
   aws s3 sync "$dist" "s3://${BUCKET_PREFIX}-deploy/frontend/" --delete --region "$REGION"
   local iid
   iid=$(aws cloudformation describe-stacks --region "$REGION" --stack-name copilot-frontdoor \
     --query "Stacks[0].Outputs[?OutputKey=='InstanceId'].OutputValue" --output text)
-  aws ssm send-command --region "$REGION" --instance-ids "$iid" \
+  local command_id
+  command_id=$(aws ssm send-command --region "$REGION" --instance-ids "$iid" \
     --document-name AWS-RunShellScript \
-    --parameters 'commands=["/usr/local/bin/refresh-frontend.sh"]' >/dev/null
-  echo "frontend synced to EC2 via SSM ($iid)"
+    --parameters 'commands=["/usr/local/bin/refresh-frontend.sh"]' \
+    --query 'Command.CommandId' --output text)
+  echo "== atomically refresh frontend on EC2 ($iid; command $command_id)"
+  if ! aws ssm wait command-executed --region "$REGION" --command-id "$command_id" --instance-id "$iid"; then
+    aws ssm get-command-invocation --region "$REGION" --command-id "$command_id" \
+      --instance-id "$iid" --output json || true
+    return 1
+  fi
+  aws ssm get-command-invocation --region "$REGION" --command-id "$command_id" \
+    --instance-id "$iid" --query '[Status,StandardOutputContent,StandardErrorContent]' --output text
+  echo "== smoke test public frontend"
+  curl --fail --silent --show-error --max-time 30 -o /dev/null "https://${APP_DOMAIN}/"
+  echo "frontend deployed and verified at https://${APP_DOMAIN}/"
 }
 
 outputs() {
@@ -124,5 +167,5 @@ case "${1:-}" in
   sync-userdata) sync_userdata ;;
   outputs) outputs ;;
   teardown) teardown ;;
-  *) echo "usage: $0 up | data-plan [name] | data-apply <name> | frontend <dist-dir> | sync-userdata | outputs | teardown"; exit 1 ;;
+  *) echo "usage: $0 up | data-plan [name] | data-apply <name> | frontend [dist-dir] | sync-userdata | outputs | teardown"; exit 1 ;;
 esac

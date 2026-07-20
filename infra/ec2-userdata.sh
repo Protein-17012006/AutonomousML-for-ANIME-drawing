@@ -36,7 +36,18 @@ EOF
 cat > /usr/local/bin/refresh-frontend.sh <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
-aws s3 sync "s3://${BUCKET_PREFIX}-deploy/frontend/" /var/www/copilot/ --delete --exact-timestamps --region ${REGION}
+stage=\$(mktemp -d /var/www/copilot.next.XXXXXX)
+cleanup() { rm -rf "\$stage"; }
+trap cleanup EXIT
+aws s3 sync "s3://${BUCKET_PREFIX}-deploy/frontend/" "\$stage/" --delete --exact-timestamps --region ${REGION}
+test -f "\$stage/index.html"
+test -d "\$stage/_next"
+rm -rf /var/www/copilot.previous
+if [ -d /var/www/copilot ]; then
+  mv /var/www/copilot /var/www/copilot.previous
+fi
+mv "\$stage" /var/www/copilot
+trap - EXIT
 systemctl reload nginx
 EOF
 chmod +x /usr/local/bin/refresh-frontend.sh
@@ -90,7 +101,11 @@ http {
 
         location /artifacts/ { return 404; }   # CloudFront serves these from S3, never via the box
 
-        location ~ ^/(session|demo) {
+        # API routes must reach FastAPI rather than falling through to the static
+        # Next export. The plural sessions route serves durable owned-session
+        # history and workspace snapshots; the auth route bootstraps the
+        # application cookie.
+        location ~ ^/(auth|sessions|session|demo)(?:/|$) {
             limit_req zone=sess burst=3 nodelay;
             limit_req zone=inter burst=10 nodelay;
             proxy_pass http://${BOX_HOST}:8000;

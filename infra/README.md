@@ -34,7 +34,34 @@ Then: Cognito users, box publisher key, frontend — see the vault runbook
 auth-bypass emergency command, teardown).
 
 ## Frontend deploy
-    bash deploy.sh frontend <path-to-next-export-dist>
+
+From the repository root:
+
+    bash infra/deploy.sh frontend
+
+The command builds `frontend/out/`, validates it, syncs it to the private deploy bucket,
+waits for the EC2 SSM refresh, atomically switches the nginx-served directory, and checks the
+public HTTPS root. An optional relative path is resolved from the directory where you invoke the
+command; normally do not supply one.
+
+## Phase 2 session-history backend deploy
+
+The box service needs the durable session-history routes (`/sessions/...`) as
+well as the existing SSE routes. Before restarting it, make sure its protected
+`~/.copilot_aws_env` contains `AWS_PUBLISH=1`, `AWS_ARTIFACT_BUCKET`,
+`AWS_SESSIONS_TABLE`. The launcher enables session history once those durable
+publisher settings are present; set `COPILOT_SESSION_HISTORY_ENABLED=0` only to
+block startup intentionally. Memory and per-frame feedback use in-memory
+storage unless their separate DynamoDB backends are configured. Then, from the
+repository root with `BOX_HOST` set to the teammate box's Tailscale hostname or
+tailnet IP:
+
+    bash scripts/deploy_box.sh --restart
+
+For the public AWS path, sync this updated nginx configuration and re-run it on
+the EC2 proxy before smoke-testing `/sessions` through the front door:
+
+    bash infra/deploy.sh sync-userdata
 
 ## Teardown (back to ~$0)
     # empty the buckets first:
