@@ -23,10 +23,7 @@ export function ChatView({
   onExport: (result: ResultEvent) => void;
 }) {
   const endRef = useRef<HTMLDivElement>(null);
-  // follow the conversation as bubbles stream in (like any chat client)
   useEffect(() => {
-    // Pair events arrive in quick succession over SSE; instant scrolling avoids
-    // queuing a separate smooth-scroll animation for every event.
     endRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
   }, [msgs.length]);
 
@@ -34,7 +31,7 @@ export function ChatView({
     <div className="chat-thread" role="log" aria-label="Co-pilot conversation">
       {msgs.map((m) => {
         switch (m.kind) {
-          // Case: User Upload
+          
           case "user-upload":
             return (
               <div key={m.id} className="bubble user">
@@ -48,7 +45,7 @@ export function ChatView({
                 )}
               </div>
             );
-            // Case: Progress
+          
           case "progress":
             return (
               <div key={m.id} className="bubble agent">
@@ -77,7 +74,7 @@ export function ChatView({
                 )}
               </div>
             );
-            // Case: Flag
+           
           case "flag":
             return (
               <FlagBubble
@@ -88,7 +85,7 @@ export function ChatView({
                 onReview={() => onOpenBoard(m.pair.index)}
               />
             );
-             // Case: Ask for Key
+           
           case "ask-key":
             return (
               <KeyAskBubble
@@ -98,14 +95,14 @@ export function ChatView({
                 onRefill={onRefill}
               />
             );
-             // Case: Warning
+             
           case "warning":
             return (
               <div key={m.id} className="bubble agent warn">
                 {m.text}
               </div>
             );
-             // Case: Flag
+           
           case "result":
             return (
               <ResultCard
@@ -116,7 +113,7 @@ export function ChatView({
                 onExport={onExport}
               />
             );
-             // Case: QA
+          
           case "qa":
             return (
               <div key={m.id} className="qa-turn">
@@ -143,7 +140,7 @@ export function ChatView({
                 </div>
               </div>
             );
-             // Case: Error
+            
           case "error":
             return (
               <div key={m.id} className="bubble agent err">

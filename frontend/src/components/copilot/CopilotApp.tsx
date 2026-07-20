@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { PairEvent, ResultEvent, DemoResult, InputMode } from "./types";
 import { runSession, runDemo, runVideoSession, askQuestion } from "./api";
-import { deriveMessages, type QaTurn, type UserTurn } from "./lib/chatModel";
+import { type ChatMsg, deriveMessages, type QaTurn, type UserTurn } from "./lib/chatModel";
 import { useFileSet } from "./lib/useFileSet";
 import { downloadBundle } from "./lib/exportSession";
 import { ChatHeader } from "./components/chat/ChatHeader";
@@ -116,7 +116,7 @@ export default function App() {
       setHistoryLoading(false);
     }
   }, []);
-
+// Account Setup
   useEffect(() => {
     let active = true;
     getCookieSession()
@@ -137,7 +137,6 @@ export default function App() {
     };
   }, [loadHistory, router]);
 
-  // object URLs for the uploaded keys (key A/B of each pair = keyUrls[i], keyUrls[i+1]).
   const keyUrls = useMemo(
     () => keys.files.map((f) => URL.createObjectURL(f)),
     [keys.files],
@@ -147,9 +146,6 @@ export default function App() {
     [keyUrls],
   );
 
-  // Effective key images for the review triptych. PNG upload → client object URLs. Drop-a-video
-  // has no client files (keys are decoded server-side), so fall back to the server-served
-  // key_urls from the result — otherwise the A/B cells render black.
   const effKeyUrls = useMemo(() => {
     if (keyUrls.length) return keyUrls;
     const sk = result?.key_urls;
@@ -158,8 +154,6 @@ export default function App() {
     return Array.from({ length: n }, (_, i) => sk[String(i)] ?? "");
   }, [keyUrls, result]);
 
-  // Clear resets the whole review session (keys + log + results + verdicts + banner),
-  // not just the loaded keyframes.
   const clearAll = () => {
     keys.clear();
     setLog([]);
@@ -224,8 +218,6 @@ export default function App() {
     }
   };
 
-  // Switching input mode drops whatever the OTHER mode had staged, so `files` and `videoFile`
-  // are never both non-empty (keeps the review triptych's client-vs-server key fallback correct).
   const changeMode = (next: InputMode) => {
     if (next === mode) return;
     if (next === "video")
@@ -233,13 +225,13 @@ export default function App() {
     else setVideoFile(null); // leaving video → drop staged clip
     setMode(next);
   };
-  // ChatWelcome quick-import → feed the SAME state the dropzone reads, and flip the mode to
-  // match the imported media (so the dropzone selector + preview update in lockstep).
+
   const importFrames = (picked: File[]) => {
     if (!picked.length) return;
     changeMode("frames");
     keys.add(picked);
   };
+
   const importVideo = (file: File) => {
     changeMode("video");
     setVideoFile(file);
@@ -315,8 +307,6 @@ export default function App() {
     setRunning(false);
   };
 
-  // draw-key loop: artist supplies a breakdown key for gap `index` → server targeted re-fill.
-  // Insert the key at the SAME position client-side (no re-sort) so keyUrls stays index-aligned.
   const refillKey = async (index: number, file: File) => {
     if (!liveSid) return;
     const fd = new FormData();
@@ -335,8 +325,6 @@ export default function App() {
       }
       const d = await resp.json();
       keys.insertAt(index + 1, file);
-      // a key inserted into gap `index` splits it and shifts every LATER pair by +1 — REMAP the
-      // artist's verdicts (don't wipe: losing N accept/reject marks on one drawn key is brutal at scale).
       setVerdicts((prev) => {
         const next: Record<number, "accept" | "reject"> = {};
         for (const [k, v] of Object.entries(prev)) {
@@ -361,8 +349,6 @@ export default function App() {
     setDemoResult(null);
     setDemoBuilding(true);
     try {
-      // the full-cut Compare panel is a separate legacy demo (not wired to the chat composer's
-      // cadence/smoothness controls) — kept at its historical default playback rate.
       setDemoResult(await runDemo(demo.files, engines, "24"));
     } catch (err) {
       setDemoBanner(`${err}`);
@@ -370,16 +356,12 @@ export default function App() {
     setDemoBuilding(false);
   };
 
-  // Clear resets the WHOLE demo panel — loaded frames AND the built comparison result/banner.
-  // (demo.clear alone only empties files, leaving the wipe video on screen → "Clear does nothing".)
   const clearDemo = () => {
     demo.clear();
     setDemoResult(null);
     setDemoBanner(null);
   };
 
-  // grounded session Q&A → POST /session/{sid}/ask (sid via the same artifact-URL
-  // trick refillKey uses); the pending turn renders as a typing indicator.
   const onAsk = async (q: string) => {
     if (!liveSid) return;
     const n = qaTurns.length;
@@ -412,22 +394,20 @@ export default function App() {
     await logoutCookieSession();
   };
 
-  const msgs = useMemo(
+  const msgs: ChatMsg[] = useMemo(
     () => deriveMessages({ upload, log, result, running, banner, qa: qaTurns }),
     [upload, log, result, running, banner, qaTurns],
   );
+
   const openBoard = (focus: number | null) => {
     setBoardFocus(focus);
     setView("board");
   };
-  // A session is "live" once anything has been staged/streamed. Drives the chat surface's
-  // middle region: welcome (empty) XOR transcript (live) — exactly one flex-1 child so they
-  // don't split the column and leave a gap above the docked composer.
+
   const hasSession = !!upload || log.length > 0 || !!result;
 
   return (
     <TooltipProvider>
-      {/* App shell — left sidebar rail + the main content column (.app). */}
       <SidebarProvider className="copilot-shell">
         <AppSidebar
           account={account}

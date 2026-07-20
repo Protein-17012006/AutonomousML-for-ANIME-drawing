@@ -502,7 +502,7 @@ export function ReviewWorkbench({
                 <span className="recon-band-caret" aria-hidden="true">
                   {reconOpen ? <ChevronDown data-icon="inline-start" /> : <ChevronRight data-icon="inline-start" />}
                 </span>
-                <span className="eyebrow">出力</span>
+                <span className="eyebrow">Output</span>
                 <span className="recon-band-title">Reconstructed cut</span>
                 {!reconOpen && (
                   <span className="recon-band-hint"><Play data-icon="inline-start" aria-hidden="true" /> play the filled cut</span>
