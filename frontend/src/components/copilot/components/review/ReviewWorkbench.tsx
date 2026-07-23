@@ -6,6 +6,7 @@ import { ChatHeader } from "../chat/ChatHeader";
 import { QAPanel } from "./QAPanel";
 import { RunLoader } from "./RunLoader";
 import { ReconPlayer } from "./ReconPlayer";
+import { ComparePlayer } from "./ComparePlayer";
 import { FrameCard } from "./FrameCard";
 import { ReviewPairRow } from "./ReviewPairRow";
 import { cn } from "@/lib/utils";
@@ -15,6 +16,8 @@ import { Download, Film, PanelsTopLeft } from "lucide-react";
 type MainFilter = "filled" | "needs_key";
 type FilledFilter = "pass" | "abstain";
 type SelectionSource = "left" | "right";
+// OUTPUT view: the filled cut, or the box-style original-vs-RIFE loop.
+type OutputTab = "recon" | "compare";
 
 export function ReviewWorkbench({
   log,
@@ -42,7 +45,9 @@ export function ReviewWorkbench({
   const [focused, setFocused] = useState<number | null>(initialFocus ?? null);
   const [exported, setExported] = useState(false);
   const [reconOpen, setReconOpen] = useState(false);
+  const [outTab, setOutTab] = useState<OutputTab>("recon");
   const [failedReconUrl, setFailedReconUrl] = useState<string | null>(null);
+  const [failedCompareUrl, setFailedCompareUrl] = useState<string | null>(null);
   const leftRef = useRef<HTMLElement>(null);
   const rightRef = useRef<HTMLElement>(null);
 
@@ -64,10 +69,13 @@ export function ReviewWorkbench({
   }, [filledFilter, filter, log]);
 
   const video = result?.artifacts?.video;
+  // absent on old sessions and on runs where every gap was refused
+  const compareUrl = result?.artifacts?.compare;
   const explanations = result?.explanations;
   const mids = result?.pair_mids;
   const loadingPreview = running && !result;
   const reconFailed = video != null && failedReconUrl === video;
+  const compareFailed = compareUrl != null && failedCompareUrl === compareUrl;
   const selectedIndex =
     focused != null && shown.some((pair) => pair.index === focused)
       ? focused
@@ -146,6 +154,7 @@ export function ReviewWorkbench({
   const showReviewPairs = () => setReconOpen(false);
   const toggleRecon = () => {
     setFailedReconUrl(null);
+    setFailedCompareUrl(null);
     setReconOpen((open) => !open);
   };
 
@@ -243,14 +252,57 @@ export function ReviewWorkbench({
             <RunLoader message="No reconstructed cut is available for this session." />
           ) : filled.length === 0 ? (
             <RunLoader message="No reconstructed cut is available yet — add a key to fill a gap first" />
-          ) : reconFailed ? (
-            <RunLoader message="The reconstructed cut could not be played. Try reopening the preview." />
           ) : (
-            <ReconPlayer
-              src={video}
-              fps={fps}
-              onError={() => setFailedReconUrl(video)}
-            />
+            <div className={cn("recon-output", compareUrl && "is-tabbed")}>
+              {/* the compare loop only exists once the server rendered one, so
+                  the switch appears with it rather than sitting dead */}
+              {compareUrl && (
+                <div
+                  className="review-subfilters"
+                  role="tablist"
+                  aria-label="Output view"
+                >
+                  <Button
+                    variant="ghost"
+                    type="button"
+                    role="tab"
+                    aria-selected={outTab === "recon"}
+                    className={cn(outTab === "recon" && "is-active")}
+                    onClick={() => setOutTab("recon")}
+                  >
+                    Reconstructed
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    type="button"
+                    role="tab"
+                    aria-selected={outTab === "compare"}
+                    className={cn(outTab === "compare" && "is-active")}
+                    onClick={() => setOutTab("compare")}
+                  >
+                    Original vs RIFE
+                  </Button>
+                </div>
+              )}
+              {compareUrl && outTab === "compare" ? (
+                compareFailed ? (
+                  <RunLoader message="The comparison could not be played. Try reopening the preview." />
+                ) : (
+                  <ComparePlayer
+                    src={compareUrl}
+                    onError={() => setFailedCompareUrl(compareUrl)}
+                  />
+                )
+              ) : reconFailed ? (
+                <RunLoader message="The reconstructed cut could not be played. Try reopening the preview." />
+              ) : (
+                <ReconPlayer
+                  src={video}
+                  fps={fps}
+                  onError={() => setFailedReconUrl(video)}
+                />
+              )}
+            </div>
           )}
         </main>
       ) : (
