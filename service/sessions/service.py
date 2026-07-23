@@ -40,7 +40,8 @@ class RunSession:
         self.adapters = adapters
 
     def execute(self, sid: int, session_dir: str, key_arrays: list, eng, cfg,
-                *, sampling: dict | None, emit_pair: Callable) -> SessionOutcome:
+                *, sampling: dict | None, emit_pair: Callable,
+                gt_frames: list | None = None) -> SessionOutcome:
         a = self.adapters
 
         def on_pair(pair):
@@ -59,6 +60,7 @@ class RunSession:
             mid_engine=eng.rife_engine,
             vlm_struct_fn=eng.vlm_struct_fn,
             softness_fn=eng.softness_fn,
+            gt_frames=gt_frames,
         )
         metadata = build_render_metadata(
             sid, rendered, cfg, eng, base_sampling=sampling)
@@ -73,6 +75,9 @@ class RunSession:
             "explanations": persisted_explanations,
             "qa_degraded": metadata.qa_degraded,
             "sampling": persisted_sampling,
+            # per-gap real GT (video flow; None for PNG uploads) — the compare
+            # artifact's ORIGINAL pane on review re-renders
+            "gt_frames": gt_frames,
         })
         return SessionOutcome(
             result=result,

@@ -55,7 +55,8 @@ def stream_session(key_arrays: list[np.ndarray], engines: str, *,
                    smoothness: int = 2, sampling: dict = None, show: str = None,
                    owner_sub: str | None = None,
                    history_pid: str | None = None,
-                   workspace_input: dict | None = None) -> StreamingResponse:
+                   workspace_input: dict | None = None,
+                   gt_frames: list | None = None) -> StreamingResponse:
     """Start one run and adapt its pair/result callbacks to an SSE response."""
     cfg = model_or_422(
         SessionCfg,
@@ -116,6 +117,7 @@ def stream_session(key_arrays: list[np.ndarray], engines: str, *,
             try:
                 outcome = use_case.execute(
                     sid, session_dir, key_arrays, eng, cfg, sampling=sampling,
+                    gt_frames=gt_frames,
                     emit_pair=lambda pair, url: emit("pair", (pair, url)),
                 )
                 emit("result", outcome)
