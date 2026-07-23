@@ -104,6 +104,59 @@ def test_session_result_carries_compare_artifact():
     assert resp.content[:12].find(b"ftyp") != -1 or len(resp.content) > 0
 
 
+def test_video_session_carries_gt_and_add_key_splices():
+    """Drop-a-video: state keeps per-gap GT; a drawn key splices [None, None]
+    into the split gap so the compare falls back to held-key there."""
+    import os
+    import tempfile
+
+    from fastapi.testclient import TestClient
+    from service.app import app
+    from service.sessions.dependencies import default_session_repository
+
+    import imageio.v2 as imageio
+    frames = [np.full((16, 16, 3), (i // 2) % 256, np.uint8) for i in range(8)]
+    fd, path = tempfile.mkstemp(suffix=".mp4")
+    os.close(fd)
+    try:
+        imageio.mimwrite(path, frames, fps=24, codec="libx264",
+                         pixelformat="yuv420p", macro_block_size=None)
+        with open(path, "rb") as fh:
+            clip = fh.read()
+    finally:
+        os.remove(path)
+
+    c = TestClient(app)
+    r = c.post("/session/video",
+               files={"video": ("cut.mp4", clip, "video/mp4")},
+               data={"engines": "stub"})
+    assert r.status_code == 200
+    result = _result_event(r.text)
+    assert "compare" in result["artifacts"]
+    sid = int(result["artifacts"]["montage"].split("/")[2])
+    state = default_session_repository.state_for(sid)
+    assert state["gt_frames"] is not None
+    assert len(state["gt_frames"]) == len(state["keys"]) - 1
+
+    def _png16(v):
+        import io
+        from PIL import Image
+        b = io.BytesIO()
+        Image.fromarray(np.full((16, 16, 3), v, np.uint8)).save(b, "PNG")
+        b.seek(0)
+        return b
+
+    rk = c.post(f"/session/{sid}/key",
+                files=[("key", ("m.png", _png16(0), "image/png"))],
+                data={"index": "0"})
+    assert rk.status_code == 200
+    assert "compare" in rk.json()["result"]["artifacts"]
+    new_state = default_session_repository.state_for(sid)
+    assert len(new_state["gt_frames"]) == len(new_state["keys"]) - 1
+    assert new_state["gt_frames"][0] is None and new_state["gt_frames"][1] is None
+    assert new_state["gt_frames"][2] is not None   # untouched gap keeps its real GT
+
+
 def test_needs_key_only_session_has_no_compare():
     from fastapi.testclient import TestClient
     from service.app import app

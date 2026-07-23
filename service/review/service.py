@@ -65,6 +65,12 @@ class ReviewSession:
             raise InvalidKeyImage(
                 f"drawn key must be {expected_w}x{expected_h}; got {got_w}x{got_h}")
         new_keys = keys[:index + 1] + [drawn] + keys[index + 1:]
+        # The drawn key splits gap `index`; its stored middle-GT frame no longer
+        # aligns with either sub-gap, so both fall back to held-key (None) while
+        # every other gap keeps its real GT for the compare artifact.
+        old_gt = state.get("gt_frames")
+        new_gt = (list(old_gt[:index]) + [None, None] + list(old_gt[index + 1:])
+                  if old_gt else old_gt)
         vlm_status_before = copy.deepcopy(eng.vlm_status)
 
         def restore_vlm_status() -> None:
@@ -121,6 +127,7 @@ class ReviewSession:
                 mid_engine=eng.rife_engine,
                 vlm_struct_fn=eng.vlm_struct_fn,
                 softness_fn=eng.softness_fn,
+                gt_frames=new_gt,
             )
             revision = state.get("rev", 0) + 1
             metadata = build_render_metadata(
@@ -153,6 +160,7 @@ class ReviewSession:
                 **state,
                 "keys": new_keys,
                 "result": new_result,
+                "gt_frames": new_gt,
                 "explanations": copy.deepcopy(metadata.explanations),
                 "qa_degraded": metadata.qa_degraded,
                 "sampling": dict(metadata.sampling),

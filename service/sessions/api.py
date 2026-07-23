@@ -104,6 +104,7 @@ def post_session_video(
         key_arrays, selected_engine, interpolator=interpolator,
         cadence_fps=cadence_fps,
         smoothness=smoothness, sampling=sampling, show=show or None,
+        gt_frames=gt_frames,
         repository=repository, owner_sub=owner_sub, history_pid=durable_pid,
         workspace_input={
             "mode": "video",
