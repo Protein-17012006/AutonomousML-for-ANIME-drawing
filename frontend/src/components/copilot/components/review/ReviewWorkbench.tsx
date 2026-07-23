@@ -6,6 +6,7 @@ import { downloadBundle, downloadReview } from "../../lib/exportSession";
 import { QAPanel } from "./QAPanel";
 import { RunLoader } from "./RunLoader";
 import { ReconPlayer } from "./ReconPlayer";
+import { ComparePlayer } from "./ComparePlayer";
 import { FrameCard } from "./FrameCard";
 import { ReviewPairRow } from "./ReviewPairRow";
 import { ChatWelcome } from "../chat/ChatWelcome";
@@ -49,6 +50,7 @@ export function ReviewWorkbench({
   const [exported, setExported] = useState(false); // export button briefly confirms the saved bundle
   const [glider, setGlider] = useState({ left: 0, width: 0 }); // sliding "current-cel" triage marker
   const [reconOpen, setReconOpen] = useState(false); // the reconstructed-cut band (collapsed until invoked — payoff shouldn't steal the triage fold)
+  const [outTab, setOutTab] = useState<"recon" | "compare">("recon"); // OUTPUT band view: filled cut vs original-vs-RIFE loop
   const pickedRef = useRef(false); // did the artist choose a filter this run?
   const autoTriagedRef = useRef(false); // has the worst-first auto-triage fired this run?
   const tabsRef = useRef<HTMLDivElement>(null);
@@ -56,6 +58,7 @@ export function ReviewWorkbench({
   const mids = result?.pair_mids;
   const samp = result?.sampling; // drop-a-video decimation summary (null for PNG upload)
   const video = result?.artifacts?.video;
+  const compareUrl = result?.artifacts?.compare; // absent on old sessions / all-gaps-refused runs
 
   const {
     filled,
@@ -510,7 +513,36 @@ export function ReviewWorkbench({
               </Button>
               {reconOpen && (
                 <div className="recon-band-body">
-                  <ReconPlayer src={video} fps={fps} />
+                  {compareUrl && (
+                    /* view toggle: the filled cut vs the box-style original-vs-RIFE loop */
+                    <div className="recon-band-tabs mb-2 flex gap-1" role="tablist" aria-label="output view">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        type="button"
+                        role="tab"
+                        aria-selected={outTab === "recon"}
+                        className={cn("rounded-none font-normal", outTab === "recon" && "underline underline-offset-4")}
+                        onClick={() => setOutTab("recon")}
+                      >
+                        Reconstructed
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        type="button"
+                        role="tab"
+                        aria-selected={outTab === "compare"}
+                        className={cn("rounded-none font-normal", outTab === "compare" && "underline underline-offset-4")}
+                        onClick={() => setOutTab("compare")}
+                      >
+                        Original vs RIFE
+                      </Button>
+                    </div>
+                  )}
+                  {compareUrl && outTab === "compare"
+                    ? <ComparePlayer src={compareUrl} />
+                    : <ReconPlayer src={video} fps={fps} />}
                 </div>
               )}
             </div>
