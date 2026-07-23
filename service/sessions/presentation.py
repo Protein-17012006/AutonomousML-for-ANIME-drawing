@@ -48,12 +48,15 @@ def build_render_metadata(
         "duration": round(rendered.duration, 3),
         "interpolator": cfg.interpolator,
     })
+    artifact_urls = {
+        "montage": f"/session/{sid}/montage.png{suffix}",
+        "report": f"/session/{sid}/report.md{suffix}",
+        "video": f"/session/{sid}/reconstructed.mp4{suffix}",
+    }
+    if getattr(rendered, "compare_file", None):
+        artifact_urls["compare"] = f"/session/{sid}/{rendered.compare_file}{suffix}"
     return RenderMetadata(
-        artifact_urls={
-            "montage": f"/session/{sid}/montage.png{suffix}",
-            "report": f"/session/{sid}/report.md{suffix}",
-            "video": f"/session/{sid}/reconstructed.mp4{suffix}",
-        },
+        artifact_urls=artifact_urls,
         explanations=explanations,
         pair_mids=pair_mids,
         key_urls=key_urls,
