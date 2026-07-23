@@ -13,6 +13,7 @@ class ArtifactLinks(BaseModel):
     montage: str | None = None
     report: str | None = None
     video: str | None = None
+    compare: str | None = None   # original-vs-RIFE side-by-side loop
 
 
 class SessionSummaryCounts(BaseModel):

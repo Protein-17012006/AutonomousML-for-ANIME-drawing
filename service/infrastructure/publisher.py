@@ -59,6 +59,7 @@ def _workspace_snapshot(outcome, uploaded_names: set[str], workspace_input) -> W
         "montage": "montage.png",
         "report": "report.md",
         "video": "reconstructed.mp4",
+        "compare": "compare.mp4",   # original-vs-RIFE loop — keep the OUTPUT tab after restore
     }
     artifacts = {
         field: name for field, name in artifact_names.items() if name in uploaded_names
