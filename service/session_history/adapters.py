@@ -26,6 +26,7 @@ _LINK_NAMES = {
     "montage.png": "montage",
     "report.md": "report",
     "reconstructed.mp4": "video",
+    "compare.mp4": "compare",
 }
 _ALLOWED_SUFFIXES = {".png", ".md", ".mp4"}
 

@@ -157,6 +157,29 @@ def test_video_session_carries_gt_and_add_key_splices():
     assert new_state["gt_frames"][2] is not None   # untouched gap keeps its real GT
 
 
+def test_workspace_snapshot_keeps_compare_artifact():
+    """History restore must not drop the compare tab: the published workspace
+    snapshot's result.artifacts carries compare.mp4 when it was uploaded."""
+    from service.infrastructure.publisher import _workspace_snapshot
+
+    class _Outcome:
+        result = _result([_filled(0, _f(0), _f(50), _f(100))])
+        pair_mids = {}
+        key_urls = {}
+        explanations = {}
+        sampling = {}
+        csq = None
+        qa_degraded = False
+
+    snapshot = _workspace_snapshot(
+        _Outcome(),
+        {"montage.png", "reconstructed.mp4", "compare.mp4"},
+        {"mode": "frames", "label": "t", "filenames": []},
+    )
+    assert snapshot.result.artifacts["compare"] == "compare.mp4"
+    assert snapshot.result.artifacts["video"] == "reconstructed.mp4"
+
+
 def test_needs_key_only_session_has_no_compare():
     from fastapi.testclient import TestClient
     from service.app import app

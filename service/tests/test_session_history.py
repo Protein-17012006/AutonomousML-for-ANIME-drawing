@@ -193,6 +193,7 @@ def test_malformed_artifact_manifest_is_not_exposed(history_runtime):
         "montage": None,
         "report": None,
         "video": None,
+        "compare": None,
     }
 
 
