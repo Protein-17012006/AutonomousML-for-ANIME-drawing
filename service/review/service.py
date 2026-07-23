@@ -79,10 +79,10 @@ class ReviewSession:
         # only for engines whose QA input is provably pair-local (the stub).
         try:
             if eng.qa_window:
-                new_result = run_session(new_keys, eng)
+                new_result = run_session(new_keys, eng, cfg=cfg)
             else:
                 left, right = keys[index], keys[index + 1]
-                sub_pairs = list(run_session([left, drawn, right], eng).pairs)
+                sub_pairs = list(run_session([left, drawn, right], eng, cfg=cfg).pairs)
                 new_pairs = []
                 for pair in result.pairs:
                     if pair.index < index:
