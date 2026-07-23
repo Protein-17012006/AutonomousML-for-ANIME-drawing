@@ -1,0 +1,5 @@
+1:"$Sreact.fragment"
+2:I[97367,["/_next/static/chunks/43bq-ezz3vlvz.js","/_next/static/chunks/1c1qxj93mt6hs.js","/_next/static/chunks/1588biwdo6fnm.js"],"ViewportBoundary"]
+3:I[97367,["/_next/static/chunks/43bq-ezz3vlvz.js","/_next/static/chunks/1c1qxj93mt6hs.js","/_next/static/chunks/1588biwdo6fnm.js"],"MetadataBoundary"]
+4:"$Sreact.suspense"
+0:{"rsc":["$","$1","h",{"children":[["$","meta",null,{"name":"robots","content":"noindex"}],["$","$L2",null,{"children":[["$","meta","0",{"charSet":"utf-8"}],["$","meta","1",{"name":"viewport","content":"width=device-width, initial-scale=1"}]]}],["$","div",null,{"hidden":true,"children":["$","$L3",null,{"children":["$","$4",null,{"name":"Next.Metadata","children":[["$","title","0",{"children":"In-Between Co-pilot"}],["$","meta","1",{"name":"description","content":"An artist-assist co-pilot that generates and verifies the in-between frames between your key drawings."}]]}]}]}],["$","meta",null,{"name":"next-size-adjust","content":""}]]}],"isPartial":false,"staleTime":300,"varyParams":null,"buildId":"eS024r5FwSw4PeZp5_tUW"}
