@@ -6,8 +6,8 @@ from typing import Optional
 
 from pydantic import BaseModel, Field, model_validator
 
-from inbetween_copilot.thresholds import TAU_GATE, TAU_SOFT
-from service.core.config import default_engine
+from inbetween_copilot.thresholds import TAU_SOFT
+from service.core.config import default_engine, tau_gate_default
 
 # FALLBACK ONLY (P2+D 2026-07-08): FrameQA now carries typed p_error/u fields and
 # from_pair prefers them; this regex over the reason string ("csq:… p=… u=…") only
@@ -17,7 +17,10 @@ _PU_RE = re.compile(r"p=([0-9.]+).*?u=([0-9.]+)")
 
 
 class SessionCfg(BaseModel):
-    tau_gate: float = TAU_GATE
+    # per-request read (config is deliberately uncached) so the deployment
+    # override COPILOT_TAU_GATE applies without a code change; the session then
+    # carries its tau for every re-run (draw-a-key, rerun) it spawns.
+    tau_gate: float = Field(default_factory=tau_gate_default)
     tau_soft: float = TAU_SOFT
     engines: str = Field(default_factory=default_engine)
     cadence_fps: int = 12      # nominal rate of the artist's keys (on-1s 24 / on-2s 12 / on-3s 8)

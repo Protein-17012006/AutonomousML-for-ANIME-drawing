@@ -12,6 +12,8 @@ import os
 from pathlib import Path
 from urllib.parse import urlparse
 
+from inbetween_copilot.thresholds import TAU_GATE
+
 
 class ConfigurationError(RuntimeError):
     """An environment setting is missing or cannot satisfy its contract."""
@@ -84,6 +86,27 @@ def _choice(name: str, default: str, allowed: set[str]) -> str:
         choices = " or ".join(sorted(allowed))
         raise ConfigurationError(f"{name} must be {choices}; got {value!r}")
     return value
+
+
+@dataclass(frozen=True)
+class GateSettings:
+    """Interpolable-gate threshold, tunable per deployment (thresholds.py's
+    documented contract). The code default stays the colored-anime calibration
+    (0.017, 2026-06-22); COPILOT_TAU_GATE exists because other domains shift the
+    gap_score range wholesale — line-art keys span 0.019-0.031 (even
+    frame-vs-blank scores 0.031), so 0.017 blocked every pair and a drawn
+    breakdown key could never unblock the session (root-caused 2026-07-23)."""
+
+    tau_gate: float = TAU_GATE
+
+    @classmethod
+    def from_env(cls) -> "GateSettings":
+        value = _number("COPILOT_TAU_GATE", TAU_GATE)
+        if value <= 0.0:
+            raise ConfigurationError(
+                f"COPILOT_TAU_GATE must be > 0; got {value}"
+            )
+        return cls(tau_gate=value)
 
 
 @dataclass(frozen=True)
@@ -466,3 +489,7 @@ def runtime_queue_timeout_seconds() -> float:
 
 def default_engine() -> str:
     return EngineSelectionSettings.from_env().default_engine
+
+
+def tau_gate_default() -> float:
+    return GateSettings.from_env().tau_gate

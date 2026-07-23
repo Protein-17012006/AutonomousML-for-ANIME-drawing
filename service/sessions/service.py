@@ -48,7 +48,7 @@ class RunSession:
             mid_url = f"/session/{sid}/{mid_fn}" if mid_fn else None
             emit_pair(pair, mid_url)
 
-        result = a.run_pipeline(key_arrays, eng, on_pair=on_pair)
+        result = a.run_pipeline(key_arrays, eng, on_pair=on_pair, cfg=cfg)
         rendered = a.render_artifacts(
             result,
             key_arrays,

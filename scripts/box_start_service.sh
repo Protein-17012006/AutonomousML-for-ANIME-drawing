@@ -62,6 +62,15 @@ if secure_env_file "$DEEPSEEK_ENV" 0; then
   . "$DEEPSEEK_ENV" || security_fail "could not load $DEEPSEEK_ENV"
 fi
 
+# Deployment tuning (e.g. export COPILOT_TAU_GATE=0.05 for line-art demos — the
+# colored-anime calibrated 0.017 sits BELOW the whole line-art gap_score range
+# 0.019-0.031, so every pair blocked NEEDS_KEY forever; root-caused 2026-07-23).
+# Optional and fail-soft — absent file = calibrated code defaults.
+TUNING_ENV="$HOME/.copilot_tuning_env"
+if secure_env_file "$TUNING_ENV" 0; then
+  . "$TUNING_ENV" || security_fail "could not load $TUNING_ENV"
+fi
+
 # AWS publisher (front door sub-project 3): S3 artifacts + DynamoDB session records.
 # Env-gated (AWS_PUBLISH=1 inside the file) and fail-soft — absent file = publisher off.
 AWS_ENV="$HOME/.copilot_aws_env"
