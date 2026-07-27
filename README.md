@@ -56,7 +56,8 @@ The pipeline runs in five stages.
 
 *Auto smooth frame output Example*
 
-https://github.com/user-attachments/assets/a1925469-d4e0-488c-ab67-c51b595b0c19
+https://github.com/user-attachments/assets/fab99ed4-fb45-4bf5-9587-4486b1ba5a80
+
 
 The system respect the work and do not distort its intended meaning.
 
