@@ -10,6 +10,13 @@ def test_session_cfg_default_fps():
     assert SessionCfg().fps == 24
 
 
+def test_interpolator_validation():
+    assert SessionCfg().interpolator == "rife"
+    assert SessionCfg(interpolator="gimm").interpolator == "gimm"
+    with pytest.raises(ValueError):
+        SessionCfg(interpolator="unknown")
+
+
 def test_default_cadence_smoothness():
     c = SessionCfg()
     assert c.cadence_fps == 12 and c.smoothness == 2 and c.fps == 24

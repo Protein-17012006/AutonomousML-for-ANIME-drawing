@@ -183,5 +183,23 @@ Configuration is read from environment variables (kept in a local `.env`, which 
 
 - Backend: Python, FastAPI, Uvicorn, NumPy, Pillow, OpenCV, imageio.
 - Frontend: Next.js 16, React 19, TypeScript, Tailwind CSS, Cognito/Amplify authentication.
-- Models and engines: RIFE-4.25 (interpolation), AniSora V3.1 (generative interpolation),
+- Models and engines: selectable RIFE-4.25 or GIMM-VFI (interpolation), AniSora V3.1 (generative interpolation),
   Qwen3-VL-32B with a QLoRA adapter (perception and QA), DeepSeek (director).
+
+### GIMM-VFI on the GPU box
+
+The session APIs accept `interpolator=rife` (default) or
+`interpolator=gimm`. GIMM uses the official
+`GSeanCDAT/GIMM-VFI` checkout and keeps the loaded model process-local.
+Configure a box-local `~/.copilot_gimm_env` (mode `600`) when the checkout is
+not at the defaults:
+
+    COPILOT_GIMM_ROOT=/home/long/GIMM-VFI
+    COPILOT_GIMM_CONFIG=/home/long/GIMM-VFI/configs/gimmvfi/gimmvfi_r_arb.yaml
+    COPILOT_GIMM_CHECKPOINT=/home/long/GIMM-VFI/pretrained_ckpt/gimmvfi_r_arb_lpips.pt
+    COPILOT_GIMM_DEVICE=cuda
+    COPILOT_GIMM_DS_FACTOR=1.0
+
+Install the small adapter dependency set into the service venv with
+`pip install -r requirements-gimm-box.txt`. The GIMM checkout's compiled
+CuPy/softsplat extension must match the CUDA version on the box.

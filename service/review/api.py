@@ -49,6 +49,7 @@ class _SnapshotFileResponse(FileResponse):
 
 @router.post("/session/{sid}/rerun")
 def post_rerun(sid: int, request: Request, engines: str | None = Form(None),
+               interpolator: str | None = Form(None),
                cadence: int | None = Form(None),
                smoothness: int | None = Form(None),
                sessions: SessionRepository = Depends(get_session_repository),
@@ -62,6 +63,9 @@ def post_rerun(sid: int, request: Request, engines: str | None = Form(None),
     return session_runtime.stream_session(
         state["keys"],
         engines if engines is not None else cfg.engines,
+        interpolator=(
+            interpolator if interpolator is not None else cfg.interpolator
+        ),
         cadence_fps=cadence if cadence is not None else cfg.cadence_fps,
         smoothness=smoothness if smoothness is not None else cfg.smoothness,
         sampling=dict(state.get("sampling") or {}),

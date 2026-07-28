@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import re
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -20,6 +20,7 @@ class SessionCfg(BaseModel):
     tau_gate: float = TAU_GATE
     tau_soft: float = TAU_SOFT
     engines: str = Field(default_factory=default_engine)
+    interpolator: Literal["rife", "gimm"] = "rife"
     cadence_fps: int = 12      # nominal rate of the artist's keys (on-1s 24 / on-2s 12 / on-3s 8)
     smoothness: int = 2        # display depth: 1 Off / 2 Standard
     fps: Optional[int] = None  # reconstructed-video playback rate; derived = cadence_fps*smoothness unless passed

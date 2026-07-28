@@ -51,6 +51,7 @@ def _drain_events(q: "queue.Queue", keepalive: "float | None" = None):
 def stream_session(key_arrays: list[np.ndarray], engines: str, *,
                    ports: SessionStreamPorts,
                    repository: SessionRepository,
+                   interpolator: str = "rife",
                    cadence_fps: int = 12,
                    smoothness: int = 2, sampling: dict = None, show: str = None,
                    owner_sub: str | None = None,
@@ -60,7 +61,7 @@ def stream_session(key_arrays: list[np.ndarray], engines: str, *,
     cfg = model_or_422(
         SessionCfg,
         engines=engines, cadence_fps=cadence_fps,
-        smoothness=smoothness, show=show,
+        smoothness=smoothness, show=show, interpolator=interpolator,
     )
     try:
         admission = ports.admission_for(engines)
@@ -84,7 +85,9 @@ def stream_session(key_arrays: list[np.ndarray], engines: str, *,
 
         sid = None
         try:
-            eng = ports.resolve_engine(engines)
+            eng = ports.resolve_engine(
+                engines, interpolator=cfg.interpolator
+            )
             sid, session_dir = repository.create("copilot_session", pin=True)
             if owner_sub:
                 repository.set_owner(sid, owner_sub)

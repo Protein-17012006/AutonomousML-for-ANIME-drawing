@@ -25,6 +25,7 @@ def post_demo(
     request: Request,
     frames: List[UploadFile] = File(...),
     engines: str | None = Form(None),
+    interpolator: str = Form("rife"),
     cadence: int = Form(12),
     smoothness: int = Form(2),
     repository: SessionRepository = Depends(get_session_repository),
@@ -44,6 +45,7 @@ def post_demo(
     cfg = model_or_422(
         SessionCfg,
         engines=selected_engine,
+        interpolator=interpolator,
         cadence_fps=cadence,
         smoothness=smoothness,
     )
@@ -58,19 +60,23 @@ def post_demo(
 
     sid = None
     try:
-        eng = resolve(selected_engine)
-        rife = eng.rife_engine
-        if rife is None:
+        eng = resolve(selected_engine, interpolator=cfg.interpolator)
+        interpolation_engine = eng.rife_engine
+        if interpolation_engine is None:
             raise HTTPException(
                 status_code=400,
-                detail=f"engines {selected_engine!r} has no rife_engine",
+                detail=(
+                    f"engines {selected_engine!r} has no interpolation engine"
+                ),
             )
 
         sid, session_dir = repository.create("copilot_demo", pin=True)
         owner_sub = request_user_sub(request)
         if owner_sub:
             repository.set_owner(sid, owner_sub)
-        build_demo_videos(full, rife, session_dir, fps=cfg.fps)
+        build_demo_videos(
+            full, interpolation_engine, session_dir, fps=cfg.fps
+        )
         return {
             "video": f"/session/{sid}/compare.mp4",
             "video_orig": f"/session/{sid}/original.mp4",
@@ -78,6 +84,7 @@ def post_demo(
             "frames": len(full),
             "src": len(full[0::2]),
             "gt": len(full[1::2]),
+            "interpolator": cfg.interpolator,
         }
     finally:
         if sid is not None:

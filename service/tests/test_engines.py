@@ -1,6 +1,10 @@
 """Tests for service.infrastructure.engines — box-free assertions."""
 import pytest
-from service.infrastructure.engines import stub_engines, box_engines
+from service.infrastructure.engines import (
+    _get_box_runtime,
+    box_engines,
+    stub_engines,
+)
 from service.sessions.schemas import SessionCfg
 from inbetween_copilot.pipeline.copilot import run_copilot
 
@@ -54,3 +58,57 @@ def test_stub_engines_has_vlm_struct_fn():
     assert result["error_type"] == "none"
     assert result["region"] == "none"
     assert "stub" in result["explanation"]
+
+
+def test_gimm_runtime_dispatches_to_gimm_builder_once(monkeypatch, tmp_path):
+    import service.infrastructure.engines as engines_module
+    import service.infrastructure.gimm as gimm_module
+    from service.core.config import BoxSettings, GimmSettings
+
+    box_settings = BoxSettings(
+        vlm_base_url="http://127.0.0.1:8001/v1",
+        vlm_model="test",
+        vlm_max_pixels=320,
+        rife_root=tmp_path,
+        rife_model_dir=tmp_path,
+        rife_device="cpu",
+        csq_artifact_path=tmp_path / "csq.json",
+    )
+    gimm_settings = GimmSettings(
+        root=tmp_path / "GIMM-VFI",
+        config_path=tmp_path / "gimm.yaml",
+        checkpoint_path=tmp_path / "gimm.pt",
+        device="cpu",
+        ds_factor=1.0,
+    )
+    calls = []
+    expected = lambda a, b: [a, "gimm-mid", b]
+    signature = (
+        str(gimm_settings.root),
+        str(gimm_settings.config_path),
+        str(gimm_settings.checkpoint_path),
+        "cpu",
+        1.0,
+    )
+    monkeypatch.setattr(
+        gimm_module,
+        "build_gimm_engine",
+        lambda settings: (calls.append(settings) or expected, signature),
+    )
+    monkeypatch.setattr(engines_module, "_BOX_RUNTIMES", {})
+
+    first = _get_box_runtime(
+        "gimm",
+        box_settings=box_settings,
+        gimm_settings=gimm_settings,
+    )
+    second = _get_box_runtime(
+        "gimm",
+        box_settings=box_settings,
+        gimm_settings=gimm_settings,
+    )
+
+    assert first is second
+    assert first.interpolator == "gimm"
+    assert first.interpolation_engine is expected
+    assert calls == [gimm_settings]

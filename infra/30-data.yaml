@@ -60,6 +60,36 @@ Resources:
               - artifact_keys
       Tags: [{Key: project, Value: copilot}]
 
+  MemoryTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: copilot_memories
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - {AttributeName: userPk, AttributeType: S}
+        - {AttributeName: memorySk, AttributeType: S}
+      KeySchema:
+        - {AttributeName: userPk, KeyType: HASH}
+        - {AttributeName: memorySk, KeyType: RANGE}
+      Tags: [{Key: project, Value: copilot}]
+
+  FeedbackTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: copilot_feedback
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - {AttributeName: sessionPk, AttributeType: S}
+        - {AttributeName: feedbackSk, AttributeType: S}
+      KeySchema:
+        - {AttributeName: sessionPk, KeyType: HASH}
+        - {AttributeName: feedbackSk, KeyType: RANGE}
+      Tags: [{Key: project, Value: copilot}]
+
   PublisherUser:
     Type: AWS::IAM::User
     Properties:
@@ -84,6 +114,15 @@ Resources:
               - Effect: Allow
                 Action: dynamodb:Query
                 Resource: !Sub ${SessionsTable.Arn}/index/OwnerSessionsIndex
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                Resource:
+                  - !GetAtt MemoryTable.Arn
+                  - !GetAtt FeedbackTable.Arn
       Tags: [{Key: project, Value: copilot}]
 
 Outputs:
@@ -96,3 +135,9 @@ Outputs:
   SessionsTableName:
     Value: !Ref SessionsTable
     Export: {Name: copilot-SessionsTable}
+  MemoryTableName:
+    Value: !Ref MemoryTable
+    Export: {Name: copilot-MemoryTable}
+  FeedbackTableName:
+    Value: !Ref FeedbackTable
+    Export: {Name: copilot-FeedbackTable}

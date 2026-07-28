@@ -57,6 +57,7 @@ export interface ResultEvent {
     smoothness?: number;
     output_fps?: number;
     duration?: number;
+    interpolator?: "rife" | "gimm";
     planted?: string;
     planted_type?: string;
     planted_src?: string;
@@ -72,4 +73,5 @@ export interface DemoResult {
   frames: number;
   src: number;
   gt: number;
+  interpolator?: "rife" | "gimm";
 }

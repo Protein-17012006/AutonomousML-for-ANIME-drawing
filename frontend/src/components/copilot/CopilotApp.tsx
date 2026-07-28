@@ -53,6 +53,7 @@ export default function App() {
   const keys = useFileSet();
   const demo = useFileSet();
   const [engines, setEngines] = useState("box");
+  const [interpolator, setInterpolator] = useState("rife");
   // cadence = shoot-on-Ns rate the artist drew at (24/12/8); smoothness = the in-between
   // multiplier applied on top (1=off, 2=standard, 4=extra — Phase 2 enables Extra).
   const [cadence, setCadence] = useState("12");
@@ -245,12 +246,12 @@ export default function App() {
     setQaTurns([]);
     setLiveSid(null);
     setUpload({
-      label: `${keys.files.length} keyframes · ${engines === "box" ? "Co-pilot (GPU)" : "Demo"} · ${CADENCE_LABEL[cadence] ?? cadence} · ×${smoothness}`,
+      label: `${keys.files.length} keyframes · ${engines === "box" ? interpolator.toUpperCase() : "Demo"} · ${CADENCE_LABEL[cadence] ?? cadence} · ×${smoothness}`,
       thumbs: keyUrls.slice(0, 6),
     });
     setRunning(true);
     try {
-      await runSession(keys.files, engines, cadence, smoothness, {
+      await runSession(keys.files, engines, interpolator, cadence, smoothness, {
         onPair: (p) => setLog((prev) => [...prev, p]),
         onResult: (r) => {
           setResult(r);
@@ -281,12 +282,12 @@ export default function App() {
     setQaTurns([]);
     setLiveSid(null);
     setUpload({
-      label: `${videoFile.name} · stride ${stride} · ${engines === "box" ? "Co-pilot (GPU)" : "Demo"}`,
+      label: `${videoFile.name} · stride ${stride} · ${engines === "box" ? interpolator.toUpperCase() : "Demo"}`,
       thumbs: [],
     });
     setRunning(true);
     try {
-      await runVideoSession(videoFile, stride, cadence, smoothness, engines, {
+      await runVideoSession(videoFile, stride, cadence, smoothness, engines, interpolator, {
         onPair: (p) => setLog((prev) => [...prev, p]),
         onResult: (r) => {
           setResult(r);
@@ -349,7 +350,7 @@ export default function App() {
     setDemoResult(null);
     setDemoBuilding(true);
     try {
-      setDemoResult(await runDemo(demo.files, engines, "24"));
+      setDemoResult(await runDemo(demo.files, engines, interpolator, "24"));
     } catch (err) {
       setDemoBanner(`${err}`);
     }
@@ -456,6 +457,8 @@ export default function App() {
                 onModeChange={changeMode}
                 engines={engines}
                 setEngines={setEngines}
+                interpolator={interpolator}
+                setInterpolator={setInterpolator}
                 cadence={cadence}
                 setCadence={setCadence}
                 smoothness={smoothness}

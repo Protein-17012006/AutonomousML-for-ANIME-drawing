@@ -78,6 +78,19 @@ def _number(name: str, default: float, *, minimum: float | None = None) -> float
     return value
 
 
+def _bounded_number(
+    name: str,
+    default: float,
+    *,
+    minimum: float | None = None,
+    maximum: float | None = None,
+) -> float:
+    value = _number(name, default, minimum=minimum)
+    if maximum is not None and value > maximum:
+        raise ConfigurationError(f"{name} must be <= {maximum}; got {value}")
+    return value
+
+
 def _choice(name: str, default: str, allowed: set[str]) -> str:
     value = (_text(name, default) or "").lower()
     if value not in allowed:
@@ -437,6 +450,44 @@ class BoxSettings:
             rife_model_dir=rife_model_dir,
             rife_device=_text("COPILOT_RIFE_DEVICE", "cuda", required=True) or "cuda",
             csq_artifact_path=artifact,
+        )
+
+
+@dataclass(frozen=True)
+class GimmSettings:
+    """Paths and inference options for the official GIMM-VFI checkout."""
+
+    root: Path
+    config_path: Path
+    checkpoint_path: Path
+    device: str
+    ds_factor: float
+
+    @classmethod
+    def from_env(cls) -> "GimmSettings":
+        root = Path(
+            _text("COPILOT_GIMM_ROOT", str(Path.home() / "GIMM-VFI")) or ""
+        ).expanduser().resolve()
+        return cls(
+            root=root,
+            config_path=Path(
+                _text(
+                    "COPILOT_GIMM_CONFIG",
+                    str(root / "configs" / "gimmvfi" / "gimmvfi_r_arb.yaml"),
+                ) or ""
+            ).expanduser().resolve(),
+            checkpoint_path=Path(
+                _text(
+                    "COPILOT_GIMM_CHECKPOINT",
+                    str(root / "pretrained_ckpt" / "gimmvfi_r_arb_lpips.pt"),
+                ) or ""
+            ).expanduser().resolve(),
+            device=_text(
+                "COPILOT_GIMM_DEVICE", "cuda", required=True
+            ) or "cuda",
+            ds_factor=_bounded_number(
+                "COPILOT_GIMM_DS_FACTOR", 1.0, minimum=0.01, maximum=1.0
+            ),
         )
 
 
