@@ -26,7 +26,8 @@ DEST="${BOX_USER}@${BOX_HOST}"
 # deployed separately to ~/copilot_svc/dist and served via COPILOT_WEB_DIR=dist. This
 # script deliberately ships NO frontend build, so it can never clobber that Next export
 # (the old frontend/dist -> dist sync did exactly that). Frontend deploy is out of scope here.
-PATHS=(service web inbetween_copilot benchmark vision_common scripts/box_start_service.sh)
+PATHS=(service inbetween_copilot benchmark vision_common
+       scripts/box_start_service.sh requirements-gimm-box.txt)
 # box-only comparison script: git-ignored scratch — ship only when present so a
 # fresh clone's deploy doesn't abort under `set -euo pipefail`.
 [ -e .scratch/fullloop/compare_video.py ] && PATHS+=(.scratch/fullloop/compare_video.py)

@@ -46,6 +46,7 @@ def build_render_metadata(
         "smoothness": cfg.smoothness,
         "output_fps": cfg.fps,
         "duration": round(rendered.duration, 3),
+        "interpolator": cfg.interpolator,
     })
     return RenderMetadata(
         artifact_urls={

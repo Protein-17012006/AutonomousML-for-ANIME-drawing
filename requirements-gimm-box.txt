@@ -1,0 +1,11 @@
+# Install into the box service venv in addition to requirements-dev.txt.
+# Torch/torchvision are intentionally omitted: the box launcher documents the
+# CUDA-matched build shared with RIFE.
+omegaconf==2.3.0
+easydict>=1.9
+einops>=0.6.1,<0.9
+timm==0.4.12
+yacs>=0.1.8
+loguru>=0.7
+tensorboard>=2.20,<3
+cupy-cuda12x>=13,<14

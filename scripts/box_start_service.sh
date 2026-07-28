@@ -74,6 +74,16 @@ fi
   "COPILOT_FEEDBACK_TABLE must be set in $AWS_ENV or the launcher environment"
 export COPILOT_MEMORY_TABLE COPILOT_FEEDBACK_TABLE
 
+# Optional GIMM-VFI paths. Defaults work for a checkout at ~/GIMM-VFI, while
+# this file supports Long's existing model location without hard-coding it in
+# git. The adapter validates paths only when a request selects GIMM.
+GIMM_ENV="$HOME/.copilot_gimm_env"
+if secure_env_file "$GIMM_ENV" 0; then
+  . "$GIMM_ENV" || security_fail "could not load $GIMM_ENV"
+fi
+export COPILOT_GIMM_ROOT COPILOT_GIMM_CONFIG COPILOT_GIMM_CHECKPOINT
+export COPILOT_GIMM_DEVICE COPILOT_GIMM_DS_FACTOR
+
 # The public front door authenticates with ALB Cognito and forwards a signed
 # x-amzn-oidc-data token. The box verifies that signature and signer before
 # binding sessions/data to a Cognito subject. Fail closed: this production
