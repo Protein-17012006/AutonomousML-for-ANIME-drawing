@@ -23,3 +23,15 @@ class UnknownEngine(ServiceError):
 
 class RuntimeBusy(ServiceError):
     pass
+
+
+class InvalidImageEdit(ServiceError):
+    pass
+
+
+class UnknownImageEditModel(ServiceError):
+    pass
+
+
+class ImageEditUnavailable(ServiceError):
+    pass
