@@ -203,3 +203,38 @@ not at the defaults:
 Install the small adapter dependency set into the service venv with
 `pip install -r requirements-gimm-box.txt`. The GIMM checkout's compiled
 CuPy/softsplat extension must match the CUDA version on the box.
+
+### Mask-guided image editing on the GPU box
+
+The backend exposes `POST /tools/image-edit` for a bounded, mask-guided repair:
+
+- multipart `image`: the source PNG;
+- multipart `mask`: a same-size PNG (white pixels are repaired);
+- form `model`: `diffueraser` (the current allowlisted model);
+- form `seed`: integer `0..2147483647` (default `2026`).
+
+The response is a PNG. Pixels outside the submitted mask are guaranteed to be
+byte-identical to the source image. This is an explicit repair/erase tool, not
+a prompt-based redraw API.
+
+Heavy inference runs in a loopback-only worker so the web service does not
+import DiffuEraser's separate Python environment. On Long's box, the defaults
+match the existing tested checkout:
+
+    /home/long/Desktop/anime_archive/diffueraser_pipeline
+    /home/long/Desktop/anime_archive/diffueraser_pipeline/diffueraser-venv/bin/python
+
+Start the worker before the main service:
+
+    bash scripts/box_start_image_edit_worker.sh 8002
+
+Optional `~/.copilot_image_edit_env` settings:
+
+    COPILOT_DIFFUERASER_ROOT=/home/long/Desktop/anime_archive/diffueraser_pipeline
+    COPILOT_DIFFUERASER_PYTHON=/home/long/Desktop/anime_archive/diffueraser_pipeline/diffueraser-venv/bin/python
+    COPILOT_DIFFUERASER_TIMEOUT=900
+
+The main service uses `COPILOT_IMAGE_EDIT_WORKER_URL` (default
+`http://127.0.0.1:8002`) and `COPILOT_IMAGE_EDIT_TIMEOUT` (default `1200`
+seconds). The worker serializes jobs and must remain bound to loopback; do not
+expose port 8002 through the public load balancer.

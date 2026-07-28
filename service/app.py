@@ -14,11 +14,13 @@ from fastapi.responses import JSONResponse
 
 from service.assistant import api as assistant_routes
 from service import auth_api
+from service.composition.image_edit_runtime import build_image_edit_http_runtime
 from service.composition.session_runtime import (
     build_review_http_runtime,
     build_session_http_runtime,
 )
 from service.feedback import api as feedback_routes
+from service.image_edit import api as image_edit_routes
 from service.media import api as demo_routes
 from service.memory import api as memory_routes
 from service.review import api as review_routes
@@ -35,6 +37,7 @@ app.state.auth_settings = AuthSettings.from_env()
 app.state.session_repository = session_repository_for()
 app.state.session_http_runtime = build_session_http_runtime()
 app.state.review_http_runtime = build_review_http_runtime()
+app.state.image_edit_http_runtime = build_image_edit_http_runtime()
 configure_session_history(app)
 
 
@@ -55,6 +58,7 @@ async def _cognito_session_gate(request: Request, call_next):
     protected_route = (
         path == "/session" or path.startswith("/session/")
         or path == "/demo" or path.startswith("/demo/")
+        or path == "/tools" or path.startswith("/tools/")
     )
     has_cookie = bool(request.cookies.get(auth_cookie_name()))
     has_trusted_alb_claims = (
@@ -132,6 +136,7 @@ app.include_router(demo_routes.router)
 app.include_router(assistant_routes.router)
 app.include_router(review_routes.router)
 app.include_router(memory_routes.router)
+app.include_router(image_edit_routes.router)
 
 
 # --- static web UI: mounted LAST so the API routes above take precedence ---

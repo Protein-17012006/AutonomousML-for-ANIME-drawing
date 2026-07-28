@@ -208,6 +208,42 @@ class AgentRateLimitSettings:
 
 
 @dataclass(frozen=True)
+class ImageEditSettings:
+    """Transport settings for the box-local image-edit worker."""
+
+    worker_url: str
+    timeout_seconds: float
+    default_model: str
+
+    @classmethod
+    def from_env(cls) -> "ImageEditSettings":
+        worker_url = (
+            _text(
+                "COPILOT_IMAGE_EDIT_WORKER_URL",
+                "http://127.0.0.1:8002",
+            )
+            or ""
+        ).rstrip("/")
+        parsed = urlparse(worker_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ConfigurationError(
+                "COPILOT_IMAGE_EDIT_WORKER_URL must be an absolute http(s) URL"
+            )
+        return cls(
+            worker_url=worker_url,
+            # A cold DiffuEraser load plus inference can take several minutes.
+            timeout_seconds=_number(
+                "COPILOT_IMAGE_EDIT_TIMEOUT", 1200.0, minimum=1.0
+            ),
+            default_model=_choice(
+                "COPILOT_IMAGE_EDIT_MODEL",
+                "diffueraser",
+                {"diffueraser"},
+            ),
+        )
+
+
+@dataclass(frozen=True)
 class AuthSettings:
     required: bool
     trust_alb_oidc: bool

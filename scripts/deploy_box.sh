@@ -26,8 +26,8 @@ DEST="${BOX_USER}@${BOX_HOST}"
 # deployed separately to ~/copilot_svc/dist and served via COPILOT_WEB_DIR=dist. This
 # script deliberately ships NO frontend build, so it can never clobber that Next export
 # (the old frontend/dist -> dist sync did exactly that). Frontend deploy is out of scope here.
-PATHS=(service inbetween_copilot benchmark vision_common
-       scripts/box_start_service.sh requirements-gimm-box.txt)
+PATHS=(service inbetween_copilot benchmark vision_common scripts
+       requirements-gimm-box.txt)
 # box-only comparison script: git-ignored scratch — ship only when present so a
 # fresh clone's deploy doesn't abort under `set -euo pipefail`.
 [ -e .scratch/fullloop/compare_video.py ] && PATHS+=(.scratch/fullloop/compare_video.py)
@@ -45,16 +45,18 @@ else
 fi
 
 if [[ "${1:-}" == "--restart" ]]; then
-  echo ">> restarting service on the box (port ${PORT}) via box_start_service.sh"
+  echo ">> starting image-edit worker and restarting service on the box"
   # box_start_service.sh kills the old server BY PORT (a `pkill -f uvicorn...`
   # pattern would match this launcher's own cmdline and kill itself) and relaunches
   # the venv uvicorn detached (nohup+setsid). See that script's header for the why.
-  ssh "${DEST}" "bash ${BOX_DIR}/box_start_service.sh ${PORT}"
+  ssh "${DEST}" \
+    "bash ${BOX_DIR}/scripts/box_start_image_edit_worker.sh 8002 && \
+     bash ${BOX_DIR}/scripts/box_start_service.sh ${PORT}"
   echo ">> verify from your machine (expect 200 + the demo UI):"
   echo "   curl -s -o /dev/null -w 'HTTP %{http_code}\\n' http://${BOX_HOST}:${PORT}/"
 else
   echo ">> files synced. Re-run with --restart to bounce the service, or restart manually:"
-  echo "   ssh ${DEST} \"bash ${BOX_DIR}/box_start_service.sh ${PORT}\""
+  echo "   ssh ${DEST} \"bash ${BOX_DIR}/scripts/box_start_image_edit_worker.sh 8002 && bash ${BOX_DIR}/scripts/box_start_service.sh ${PORT}\""
 fi
 
 echo ">> to build the side-by-side comparison video on the box:"
