@@ -78,6 +78,19 @@ def _number(name: str, default: float, *, minimum: float | None = None) -> float
     return value
 
 
+def _bounded_number(
+    name: str,
+    default: float,
+    *,
+    minimum: float | None = None,
+    maximum: float | None = None,
+) -> float:
+    value = _number(name, default, minimum=minimum)
+    if maximum is not None and value > maximum:
+        raise ConfigurationError(f"{name} must be <= {maximum}; got {value}")
+    return value
+
+
 def _choice(name: str, default: str, allowed: set[str]) -> str:
     value = (_text(name, default) or "").lower()
     if value not in allowed:
@@ -190,6 +203,42 @@ class AgentRateLimitSettings:
             requests_per_minute=_integer("COPILOT_AGENT_RPM", 20, minimum=1),
             max_buckets=_integer(
                 "COPILOT_AGENT_RATE_BUCKETS", 1024, minimum=1
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class ImageEditSettings:
+    """Transport settings for the box-local image-edit worker."""
+
+    worker_url: str
+    timeout_seconds: float
+    default_model: str
+
+    @classmethod
+    def from_env(cls) -> "ImageEditSettings":
+        worker_url = (
+            _text(
+                "COPILOT_IMAGE_EDIT_WORKER_URL",
+                "http://127.0.0.1:8002",
+            )
+            or ""
+        ).rstrip("/")
+        parsed = urlparse(worker_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ConfigurationError(
+                "COPILOT_IMAGE_EDIT_WORKER_URL must be an absolute http(s) URL"
+            )
+        return cls(
+            worker_url=worker_url,
+            # A cold DiffuEraser load plus inference can take several minutes.
+            timeout_seconds=_number(
+                "COPILOT_IMAGE_EDIT_TIMEOUT", 1200.0, minimum=1.0
+            ),
+            default_model=_choice(
+                "COPILOT_IMAGE_EDIT_MODEL",
+                "diffueraser",
+                {"diffueraser"},
             ),
         )
 
@@ -437,6 +486,44 @@ class BoxSettings:
             rife_model_dir=rife_model_dir,
             rife_device=_text("COPILOT_RIFE_DEVICE", "cuda", required=True) or "cuda",
             csq_artifact_path=artifact,
+        )
+
+
+@dataclass(frozen=True)
+class GimmSettings:
+    """Paths and inference options for the official GIMM-VFI checkout."""
+
+    root: Path
+    config_path: Path
+    checkpoint_path: Path
+    device: str
+    ds_factor: float
+
+    @classmethod
+    def from_env(cls) -> "GimmSettings":
+        root = Path(
+            _text("COPILOT_GIMM_ROOT", str(Path.home() / "GIMM-VFI")) or ""
+        ).expanduser().resolve()
+        return cls(
+            root=root,
+            config_path=Path(
+                _text(
+                    "COPILOT_GIMM_CONFIG",
+                    str(root / "configs" / "gimmvfi" / "gimmvfi_r_arb.yaml"),
+                ) or ""
+            ).expanduser().resolve(),
+            checkpoint_path=Path(
+                _text(
+                    "COPILOT_GIMM_CHECKPOINT",
+                    str(root / "pretrained_ckpt" / "gimmvfi_r_arb_lpips.pt"),
+                ) or ""
+            ).expanduser().resolve(),
+            device=_text(
+                "COPILOT_GIMM_DEVICE", "cuda", required=True
+            ) or "cuda",
+            ds_factor=_bounded_number(
+                "COPILOT_GIMM_DS_FACTOR", 1.0, minimum=0.01, maximum=1.0
+            ),
         )
 
 

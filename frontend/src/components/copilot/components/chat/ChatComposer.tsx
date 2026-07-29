@@ -26,6 +26,8 @@ export function ChatComposer(p: {
   onClear: () => void;
   engines: string;
   setEngines: (s: string) => void;
+  interpolator: string;
+  setInterpolator: (s: string) => void;
   cadence: string;
   setCadence: (s: string) => void;
   smoothness: string;
@@ -82,6 +84,23 @@ export function ChatComposer(p: {
               <SelectContent>
                 <SelectItem value="box">Co-pilot (GPU)</SelectItem>
                 <SelectItem value="stub">Demo (no GPU)</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          {/* INTERPOLATION MODEL SELECTION */}
+          <Field orientation="horizontal" className="inline-flex w-auto items-center gap-1.5 font-mono text-[11px] tracking-[0.08em] text-ash uppercase">
+            <FieldLabel className="font-mono text-[11px] tracking-[0.08em] text-ash uppercase">model</FieldLabel>
+            <Select
+              value={p.interpolator}
+              onValueChange={p.setInterpolator}
+              disabled={p.engines !== "box"}
+            >
+              <SelectTrigger size="sm" className="w-auto font-mono text-[13px] text-washi">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="rife">RIFE</SelectItem>
+                <SelectItem value="gimm">GIMM-VFI</SelectItem>
               </SelectContent>
             </Select>
           </Field>

@@ -59,6 +59,41 @@ def test_session_streams_pairs_then_result():
     assert body.index("event: pair") < body.index("event: result")
 
 
+def test_session_echoes_selected_interpolator():
+    import json
+    import re
+
+    c = TestClient(app)
+    files = [
+        ("keys", ("0.png", _png(0), "image/png")),
+        ("keys", ("1.png", _png(1), "image/png")),
+    ]
+    r = c.post(
+        "/session",
+        files=files,
+        data={"engines": "stub", "interpolator": "gimm"},
+    )
+    assert r.status_code == 200
+    result = json.loads(
+        re.search(r"event: result\ndata: (.+)", r.text).group(1)
+    )
+    assert result["sampling"]["interpolator"] == "gimm"
+
+
+def test_session_rejects_unknown_interpolator():
+    c = TestClient(app)
+    files = [
+        ("keys", ("0.png", _png(0), "image/png")),
+        ("keys", ("1.png", _png(1), "image/png")),
+    ]
+    r = c.post(
+        "/session",
+        files=files,
+        data={"engines": "stub", "interpolator": "unknown"},
+    )
+    assert r.status_code == 422
+
+
 def test_session_rejects_one_key():
     c = TestClient(app)
     r = c.post(

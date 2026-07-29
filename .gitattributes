@@ -1,0 +1,3 @@
+scripts/deploy_box.sh text eol=lf
+scripts/box_start_image_edit_worker.sh text eol=lf
+scripts/box_start_service.sh text eol=lf

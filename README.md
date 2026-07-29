@@ -56,7 +56,8 @@ The pipeline runs in five stages.
 
 *Auto smooth frame output Example*
 
-https://github.com/user-attachments/assets/31d25bfc-d19b-4bdb-b104-86e5861ddcbf
+https://github.com/user-attachments/assets/fab99ed4-fb45-4bf5-9587-4486b1ba5a80
+
 
 The system respect the work and do not distort its intended meaning.
 
@@ -182,5 +183,58 @@ Configuration is read from environment variables (kept in a local `.env`, which 
 
 - Backend: Python, FastAPI, Uvicorn, NumPy, Pillow, OpenCV, imageio.
 - Frontend: Next.js 16, React 19, TypeScript, Tailwind CSS, Cognito/Amplify authentication.
-- Models and engines: RIFE-4.25 (interpolation), AniSora V3.1 (generative interpolation),
+- Models and engines: selectable RIFE-4.25 or GIMM-VFI (interpolation), AniSora V3.1 (generative interpolation),
   Qwen3-VL-32B with a QLoRA adapter (perception and QA), DeepSeek (director).
+
+### GIMM-VFI on the GPU box
+
+The session APIs accept `interpolator=rife` (default) or
+`interpolator=gimm`. GIMM uses the official
+`GSeanCDAT/GIMM-VFI` checkout and keeps the loaded model process-local.
+Configure a box-local `~/.copilot_gimm_env` (mode `600`) when the checkout is
+not at the defaults:
+
+    COPILOT_GIMM_ROOT=/home/long/GIMM-VFI
+    COPILOT_GIMM_CONFIG=/home/long/GIMM-VFI/configs/gimmvfi/gimmvfi_r_arb.yaml
+    COPILOT_GIMM_CHECKPOINT=/home/long/GIMM-VFI/pretrained_ckpt/gimmvfi_r_arb_lpips.pt
+    COPILOT_GIMM_DEVICE=cuda
+    COPILOT_GIMM_DS_FACTOR=1.0
+
+Install the small adapter dependency set into the service venv with
+`pip install -r requirements-gimm-box.txt`. The GIMM checkout's compiled
+CuPy/softsplat extension must match the CUDA version on the box.
+
+### Mask-guided image editing on the GPU box
+
+The backend exposes `POST /tools/image-edit` for a bounded, mask-guided repair:
+
+- multipart `image`: the source PNG;
+- multipart `mask`: a same-size PNG (white pixels are repaired);
+- form `model`: `diffueraser` (the current allowlisted model);
+- form `seed`: integer `0..2147483647` (default `2026`).
+
+The response is a PNG. Pixels outside the submitted mask are guaranteed to be
+byte-identical to the source image. This is an explicit repair/erase tool, not
+a prompt-based redraw API.
+
+Heavy inference runs in a loopback-only worker so the web service does not
+import DiffuEraser's separate Python environment. On Long's box, the defaults
+match the existing tested checkout:
+
+    /home/long/Desktop/anime_archive/diffueraser_pipeline
+    /home/long/Desktop/anime_archive/diffueraser_pipeline/diffueraser-venv/bin/python
+
+Start the worker before the main service:
+
+    bash scripts/box_start_image_edit_worker.sh 8002
+
+Optional `~/.copilot_image_edit_env` settings:
+
+    COPILOT_DIFFUERASER_ROOT=/home/long/Desktop/anime_archive/diffueraser_pipeline
+    COPILOT_DIFFUERASER_PYTHON=/home/long/Desktop/anime_archive/diffueraser_pipeline/diffueraser-venv/bin/python
+    COPILOT_DIFFUERASER_TIMEOUT=900
+
+The main service uses `COPILOT_IMAGE_EDIT_WORKER_URL` (default
+`http://127.0.0.1:8002`) and `COPILOT_IMAGE_EDIT_TIMEOUT` (default `1200`
+seconds). The worker serializes jobs and must remain bound to loopback; do not
+expose port 8002 through the public load balancer.

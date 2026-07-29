@@ -15,7 +15,7 @@ import numpy as np
 # without an upward import into service/). Cheap: factory.py's own imports are lazy.
 from inbetween_copilot.triage.factory import make_triage_fn  # noqa: F401
 from inbetween_copilot.triage.widegap import keys_from_gap
-from service.core.config import BoxSettings, ConfigurationError
+from service.core.config import BoxSettings, ConfigurationError, GimmSettings
 from service.core.errors import UnknownEngine
 from service.infrastructure.engine_bundle import EngineBundle
 
@@ -33,7 +33,7 @@ def _stub_triage_fn(a, b, pp):
     return {**dataclasses.asdict(t), "brief": template_brief(t)}
 
 
-def stub_engines() -> EngineBundle:
+def stub_engines(_cfg=None) -> EngineBundle:
     # gap_fn divides by 100.0 so that unit-spaced keys (e.g. 0,1,2) produce
     # gap = 0.01 < TAU_GATE (0.017) -> FILL; a large jump (e.g. 2->50) gives
     # gap = 0.48 > TAU_GATE -> needs_key.  /50 would give 0.02 > TAU_GATE
@@ -92,8 +92,9 @@ class BoxRuntime:
     the CUDA-backed RIFE model is loaded exactly once and safely shared.
     """
 
-    rife_engine: object
-    rife_config: tuple[str, str, str] | None = None
+    interpolation_engine: object
+    interpolator: str
+    config_signature: tuple | None = None
 
 
 def _rife_config(settings: BoxSettings) -> tuple[str, str, str]:
@@ -173,47 +174,92 @@ def _build_box_runtime(settings: BoxSettings | None = None) -> BoxRuntime:
         return [a, mid_np, b]
 
     return BoxRuntime(
-        rife_engine=rife_engine,
-        rife_config=_rife_config(settings),
+        interpolation_engine=rife_engine,
+        interpolator="rife",
+        config_signature=_rife_config(settings),
     )
 
 
-_BOX_RUNTIME: BoxRuntime | None = None
+_BOX_RUNTIMES: dict[str, BoxRuntime] = {}
 _BOX_RUNTIME_LOCK = threading.Lock()
 
 
-def _get_box_runtime(settings: BoxSettings | None = None) -> BoxRuntime:
-    """Race-safe singleton; concurrent first requests cannot double-load CUDA."""
-    global _BOX_RUNTIME
-    settings = settings or BoxSettings.from_env()
-    if _BOX_RUNTIME is None:
+def _get_box_runtime(
+    interpolator: str,
+    *,
+    box_settings: BoxSettings | None = None,
+    gimm_settings: GimmSettings | None = None,
+) -> BoxRuntime:
+    """Race-safe per-model singleton; concurrent first requests load only once."""
+    if interpolator not in {"rife", "gimm"}:
+        raise UnknownEngine(f"Unknown interpolator: {interpolator!r}")
+    box_settings = box_settings or BoxSettings.from_env()
+    if interpolator == "rife":
+        expected_signature = _rife_config(box_settings)
+    else:
+        gimm_settings = gimm_settings or GimmSettings.from_env()
+        expected_signature = (
+            str(gimm_settings.root),
+            str(gimm_settings.config_path),
+            str(gimm_settings.checkpoint_path),
+            gimm_settings.device,
+            gimm_settings.ds_factor,
+        )
+
+    runtime = _BOX_RUNTIMES.get(interpolator)
+    if runtime is None:
         with _BOX_RUNTIME_LOCK:
-            if _BOX_RUNTIME is None:
-                _BOX_RUNTIME = _build_box_runtime(settings)
-    if (_BOX_RUNTIME.rife_config is not None
-            and _BOX_RUNTIME.rife_config != _rife_config(settings)):
+            runtime = _BOX_RUNTIMES.get(interpolator)
+            if runtime is None:
+                if interpolator == "rife":
+                    runtime = _build_box_runtime(box_settings)
+                else:
+                    from service.infrastructure.gimm import build_gimm_engine
+
+                    engine, signature = build_gimm_engine(gimm_settings)
+                    runtime = BoxRuntime(
+                        interpolation_engine=engine,
+                        interpolator="gimm",
+                        config_signature=signature,
+                    )
+                _BOX_RUNTIMES[interpolator] = runtime
+    if (
+        runtime.config_signature is not None
+        and runtime.config_signature != expected_signature
+    ):
         raise ConfigurationError(
-            "RIFE settings changed after the process runtime was initialized; "
+            f"{interpolator.upper()} settings changed after the process runtime "
+            "was initialized; "
             "restart the service to apply them"
         )
-    return _BOX_RUNTIME
+    return runtime
 
 
-def box_engines() -> EngineBundle:
-    """Real RIFE + served-VLM wiring. ALL box imports are lazy (inside this function).
+def box_engines(cfg=None, *, interpolator: str | None = None) -> EngineBundle:
+    """Real selectable interpolation + served-VLM wiring.
+
+    ALL box imports are lazy (inside this function).
     Raises ImportError/ModuleNotFoundError/OSError if not on the inference box.
     """
     import sys
 
     settings = BoxSettings.from_env()
+    selected_interpolator = (
+        interpolator
+        or getattr(cfg, "interpolator", None)
+        or "rife"
+    ).lower()
     if not settings.csq_artifact_path.is_file():
         raise ConfigurationError(
             "COPILOT_CSQ_ARTIFACT_PATH is not a file: "
             f"{settings.csq_artifact_path}"
         )
 
-    # --- process-scoped RIFE runtime (box-only; fails loudly off-box) ---
-    rife_engine = _get_box_runtime(settings).rife_engine
+    # --- process-scoped interpolation runtime (box-only; fails loudly off-box) ---
+    interpolation_engine = _get_box_runtime(
+        selected_interpolator,
+        box_settings=settings,
+    ).interpolation_engine
 
     # --- served VLM fns (transport = service/box_vlm.py adapter; prompts live
     # beside the validated perception prompts in inbetween_copilot/qa/perception) ---
@@ -297,7 +343,7 @@ def box_engines() -> EngineBundle:
         None,
         tau_hold=BOX_TAU_HOLD,
         tau_snap=BOX_TAU_SNAP,
-        rife_engine=rife_engine,
+        rife_engine=interpolation_engine,
         anisora_gen=anisora_gen,
         vlm_fn=vlm_fn,
         csq_artifact=art,
@@ -310,7 +356,9 @@ def box_engines() -> EngineBundle:
     return EngineBundle.from_ports(
         ports,
         vlm_struct_fn=vlm_struct_fn,
-        rife_engine=rife_engine,    # raw [a, mid, b] for the decimate-vs-GT demo
+        # Historical field name retained for compatibility; it now holds whichever
+        # raw [a, mid, b] interpolation model the request selected.
+        rife_engine=interpolation_engine,
         vlm_status=vlm_status,      # degraded-QA flag -> ResultEvent.qa_degraded
         csq_calibrator={
             "tau_pass": list(cal.tau_pass), "tau_flag": list(cal.tau_flag),
@@ -319,11 +367,11 @@ def box_engines() -> EngineBundle:
     )
 
 
-def resolve(name: str) -> EngineBundle:
+def resolve(name: str, *, interpolator: str = "rife") -> EngineBundle:
     """Map the request's `engines` field to an EngineBundle. The single place the
     stub|box choice is decoded (was duplicated in the session + demo routes)."""
     if name == "stub":
         return stub_engines()
     if name == "box":
-        return box_engines()
+        return box_engines(interpolator=interpolator)
     raise UnknownEngine(f"Unknown engines: {name!r}")

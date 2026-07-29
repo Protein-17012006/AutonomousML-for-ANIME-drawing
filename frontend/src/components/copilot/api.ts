@@ -106,6 +106,7 @@ async function pumpSSE(body: ReadableStream<Uint8Array>, h: SessionHandlers): Pr
 export async function runSession(
   files: File[],
   engines: string,
+  interpolator: string,
   cadence: string,
   smoothness: string,
   h: SessionHandlers,
@@ -114,6 +115,7 @@ export async function runSession(
   const fd = new FormData();
   for (const f of files) fd.append("keys", f);
   fd.append("engines", engines);
+  fd.append("interpolator", interpolator);
   fd.append("cadence", cadence || "12");
   fd.append("smoothness", smoothness || "2");
   if (historyPid) fd.append("history_pid", historyPid);
@@ -138,6 +140,7 @@ export async function runVideoSession(
   cadence: string,
   smoothness: string,
   engines: string,
+  interpolator: string,
   h: SessionHandlers,
   historyPid?: string | null,
 ): Promise<void> {
@@ -145,6 +148,7 @@ export async function runVideoSession(
   fd.append("video", video);
   fd.append("stride", stride || "2");
   fd.append("engines", engines);
+  fd.append("interpolator", interpolator);
   // cadence is derived server-side from the decoded video's native rate — the UI value
   // is still posted (best-effort hint) but the server is free to override it.
   fd.append("cadence", cadence || "12");
@@ -195,10 +199,16 @@ export async function askQuestion(
 }
 
 /** POST a full cut → side-by-side original-vs-RIFE comparison video. */
-export async function runDemo(files: File[], engines: string, fps: string): Promise<DemoResult> {
+export async function runDemo(
+  files: File[],
+  engines: string,
+  interpolator: string,
+  fps: string,
+): Promise<DemoResult> {
   const fd = new FormData();
   for (const f of files) fd.append("frames", f);
   fd.append("engines", engines);
+  fd.append("interpolator", interpolator);
   fd.append("fps", fps || "48");
   const resp = await authenticatedFetch("/demo", {
     method: "POST",

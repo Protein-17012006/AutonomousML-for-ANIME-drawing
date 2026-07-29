@@ -45,6 +45,7 @@ def post_session(
     request: Request,
     keys: List[UploadFile] = File(...),
     engines: str | None = Form(None),
+    interpolator: str = Form("rife"),
     cadence: int = Form(12),
     smoothness: int = Form(2),
     show: str = Form(""),
@@ -58,7 +59,7 @@ def post_session(
     owner_sub = request_user_sub(request)
     durable_pid = _owned_draft_pid(request, history_pid, owner_sub)
     return runtime.stream_session(
-        runtime.load_keys(keys), selected_engine,
+        runtime.load_keys(keys), selected_engine, interpolator=interpolator,
         cadence_fps=cadence, smoothness=smoothness, show=show or None,
         repository=repository, owner_sub=owner_sub, history_pid=durable_pid,
         workspace_input={
@@ -75,6 +76,7 @@ def post_session_video(
     video: UploadFile = File(...),
     stride: int = Form(2),
     engines: str | None = Form(None),
+    interpolator: str = Form("rife"),
     cadence: int = Form(12),
     smoothness: int = Form(2),
     show: str = Form(""),
@@ -99,7 +101,8 @@ def post_session_video(
     }
     selected_engine = engines or default_engine()
     return runtime.stream_session(
-        key_arrays, selected_engine, cadence_fps=cadence_fps,
+        key_arrays, selected_engine, interpolator=interpolator,
+        cadence_fps=cadence_fps,
         smoothness=smoothness, sampling=sampling, show=show or None,
         repository=repository, owner_sub=owner_sub, history_pid=durable_pid,
         workspace_input={

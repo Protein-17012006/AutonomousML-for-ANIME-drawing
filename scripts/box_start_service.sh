@@ -68,40 +68,26 @@ AWS_ENV="$HOME/.copilot_aws_env"
 if secure_env_file "$AWS_ENV" 0; then
   . "$AWS_ENV" || security_fail "could not load $AWS_ENV"
 fi
-# Memory and per-frame feedback are separate, optional persistence features.
-# Keep their current tables when configured; otherwise use the explicit
-# in-memory backend so Phase 2 session-history startup is not blocked by
-# infrastructure that has not been approved or provisioned.
-if [ -z "${COPILOT_MEMORY_TABLE:-}" ] && [ -z "${COPILOT_MEMORY_BACKEND:-}" ]; then
-  COPILOT_MEMORY_BACKEND=memory
-fi
-if [ -z "${COPILOT_FEEDBACK_TABLE:-}" ] && [ -z "${COPILOT_FEEDBACK_BACKEND:-}" ]; then
-  COPILOT_FEEDBACK_BACKEND=memory
-fi
-export COPILOT_MEMORY_BACKEND COPILOT_FEEDBACK_BACKEND
+[ -n "${COPILOT_MEMORY_TABLE:-}" ] || security_fail \
+  "COPILOT_MEMORY_TABLE must be set in $AWS_ENV or the launcher environment"
+[ -n "${COPILOT_FEEDBACK_TABLE:-}" ] || security_fail \
+  "COPILOT_FEEDBACK_TABLE must be set in $AWS_ENV or the launcher environment"
+export COPILOT_MEMORY_TABLE COPILOT_FEEDBACK_TABLE
 
-# Durable owned-session history and read-only workspace restoration use the
-# same publisher credentials and storage.  Do not start a production service
-# that can accept work but cannot publish or restore the completed session.
-[ "${AWS_PUBLISH:-}" = "1" ] || security_fail \
-  "AWS_PUBLISH=1 must be set in $AWS_ENV for durable session history"
-[ -n "${AWS_ARTIFACT_BUCKET:-}" ] || security_fail \
-  "AWS_ARTIFACT_BUCKET must be set in $AWS_ENV"
-[ -n "${AWS_SESSIONS_TABLE:-}" ] || security_fail \
-  "AWS_SESSIONS_TABLE must be set in $AWS_ENV"
-# This launcher is the production session-history service. Enable its history
-# composition by default once the publisher's durable storage is present; an
-# explicit false value still fails closed below.
-: "${COPILOT_SESSION_HISTORY_ENABLED:=1}"
-[ "${COPILOT_SESSION_HISTORY_ENABLED:-}" = "1" ] || security_fail \
-  "COPILOT_SESSION_HISTORY_ENABLED=1 must be set in $AWS_ENV"
-export AWS_PUBLISH AWS_ARTIFACT_BUCKET AWS_SESSIONS_TABLE \
-  COPILOT_SESSION_HISTORY_ENABLED
+# Optional GIMM-VFI paths. Defaults work for a checkout at ~/GIMM-VFI, while
+# this file supports Long's existing model location without hard-coding it in
+# git. The adapter validates paths only when a request selects GIMM.
+GIMM_ENV="$HOME/.copilot_gimm_env"
+if secure_env_file "$GIMM_ENV" 0; then
+  . "$GIMM_ENV" || security_fail "could not load $GIMM_ENV"
+fi
+export COPILOT_GIMM_ROOT COPILOT_GIMM_CONFIG COPILOT_GIMM_CHECKPOINT
+export COPILOT_GIMM_DEVICE COPILOT_GIMM_DS_FACTOR
 
-# The public app authenticates through the FastAPI-issued secure Cognito cookie.
-# ALB Cognito was removed so an old ALB browser session cannot survive logout.
-# Fail closed: this production launcher must never silently fall back to
-# ownerless sessions.
+# The public front door authenticates with ALB Cognito and forwards a signed
+# x-amzn-oidc-data token. The box verifies that signature and signer before
+# binding sessions/data to a Cognito subject. Fail closed: this production
+# launcher must never silently fall back to ownerless sessions.
 AUTH_ENV="$HOME/.copilot_auth_env"
 secure_env_file "$AUTH_ENV" 1
 . "$AUTH_ENV" || security_fail "could not load $AUTH_ENV"
