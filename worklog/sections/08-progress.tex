@@ -37,4 +37,6 @@ This section is the complete contribution record.
   \item \textbf{Mermaid authentication-diagram rendering.} Re-rendered both authentication diagrams directly from their Mermaid sources with Mermaid CLI and its \texttt{pdfFit} option, replacing the supplied letter-sized PDFs with tightly fitted outputs.
 
   \item \textbf{Worklog backend-section structure.} Moved Authentication and Storage and session history under Backend contribution as subsections, while preserving both Mermaid-generated authentication figures.
+
+  \item \textbf{Text-only co-pilot transcript.} Refactored the co-pilot chat transcript into focused upload, progress, Q\&A, error, and reusable text-bubble components. It acknowledges uploaded keyframes or video as text, shows aggregate processed-pair progress, preserves the final result card and Q\&A, and routes degraded-QA notices through the existing error presentation. Pair-specific previews and redraw prompts remain on the Review Board; obsolete flag and key-request chat components were removed.
 \end{enumerate}

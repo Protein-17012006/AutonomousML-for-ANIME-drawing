@@ -41,13 +41,6 @@ import {
   type PublishedSessionSummary,
 } from "@/lib/sessionApi";
 
-/* cadence value → human "shoot on Ns" label, shared by the upload bubble + the result sampling badge */
-const CADENCE_LABEL: Record<string, string> = {
-  "24": "on-1s",
-  "12": "on-2s",
-  "8": "on-3s",
-};
-
 function sidFromResult(r: ResultEvent | null) {
   const ref = r?.artifacts?.montage || r?.artifacts?.video;
   return ref?.startsWith("/session/") ? (ref.split("/")[2] ?? null) : null;
@@ -269,14 +262,15 @@ export default function App() {
     setQaTurns([]);
     setLiveSid(null);
     setUpload({
-      label: `${keys.files.length} keyframes · ${engines === "box" ? interpolator.toUpperCase() : "Demo"} · ${CADENCE_LABEL[cadence] ?? cadence} · ×${smoothness}`,
-      thumbs: keyUrls.slice(0, 6),
+      media: "keyframes",
+      count: keys.files.length,
     });
     setRunning(true);
     try {
       await runSession(
         keys.files,
         engines,
+        interpolator,
         cadence,
         smoothness,
         {
@@ -317,8 +311,8 @@ export default function App() {
     setQaTurns([]);
     setLiveSid(null);
     setUpload({
-      label: `${videoFile.name} · stride ${stride} · ${engines === "box" ? interpolator.toUpperCase() : "Demo"}`,
-      thumbs: [],
+      media: "video",
+      count: 1,
     });
     setRunning(true);
     try {
@@ -328,6 +322,7 @@ export default function App() {
         cadence,
         smoothness,
         engines,
+        interpolator,
         {
           onPair: (p) => setLog((prev) => [...prev, p]),
           onResult: (r) => {
@@ -482,8 +477,7 @@ export default function App() {
                 <ChatView
                   msgs={msgs}
                   keyUrls={effKeyUrls}
-                  onOpenBoard={openBoard}
-                  onRefill={refillKey}
+                  onOpenBoard={() => openBoard(null)}
                   onExport={downloadBundle}
                 />
               ) : (

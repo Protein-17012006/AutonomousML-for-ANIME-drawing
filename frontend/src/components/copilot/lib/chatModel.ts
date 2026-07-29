@@ -2,21 +2,16 @@
 // Derives the conversation from App state on each render instead of reducing SSE
 // events incrementally: the draw-key splice REPLACES the whole log, which an
 // incremental reducer cannot survive but a derive-function handles for free.
-import type { Explanation, PairEvent, ResultEvent } from "../types";
+import type { PairEvent, ResultEvent } from "../types";
 
 export type ChatMsg =
-  | { kind: "user-upload"; id: string; label: string; thumbs: string[] }
+  | { kind: "user-upload"; id: string; text: string }
   | {
       kind: "progress";
       id: string;
       done: number;
-      total: number | null;
-      passes: PairEvent[];
       running: boolean;
     }
-  | { kind: "flag"; id: string; pair: PairEvent; ex?: Explanation }
-  | { kind: "ask-key"; id: string; pair: PairEvent; resolved: boolean }
-  | { kind: "warning"; id: string; text: string }
   | { kind: "result"; id: string; result: ResultEvent }
   | {
       kind: "qa";
@@ -28,8 +23,8 @@ export type ChatMsg =
   | { kind: "error"; id: string; text: string };
 
 export interface UserTurn {
-  label: string;
-  thumbs: string[];
+  media: "keyframes" | "video";
+  count: number;
 }
 export interface QaTurn {
   q: string;
@@ -46,36 +41,25 @@ export function deriveMessages(i: {
   qa: QaTurn[];
 }): ChatMsg[] {
   const out: ChatMsg[] = [];
-  if (i.upload) out.push({ kind: "user-upload", id: "up", ...i.upload });
+  if (i.upload) {
+    const text =
+      i.upload.media === "video"
+        ? "1 video sent — please analyze the media."
+        : `${i.upload.count} keyframe${i.upload.count === 1 ? "" : "s"} sent — please analyze the media.`;
+    out.push({ kind: "user-upload", id: "up", text });
+  }
 
-  const passes = i.log.filter((p) => p.qa === "pass");
   if (i.log.length || i.running)
     out.push({
       kind: "progress",
       id: "prog",
       done: i.log.length,
-      total: i.result ? i.log.length : null,
-      passes,
       running: i.running,
     });
 
-  for (const p of i.log) {
-    const ex = i.result?.explanations?.[String(p.index)];
-    if (p.qa === "flag") {
-      out.push({ kind: "flag", id: `flag-${p.index}`, pair: p, ex });
-    } else if (p.action === "needs_key" || p.qa === "abstain") {
-      out.push({
-        kind: "ask-key",
-        id: `ask-${p.index}`,
-        pair: p,
-        resolved: p.action !== "needs_key" && p.qa !== "abstain",
-      });
-    }
-  }
-
   if (i.result?.qa_degraded)
     out.push({
-      kind: "warning",
+      kind: "error",
       id: "degraded",
       text: "The QA model was unreachable — verdicts degraded to softness/gate signals.",
     });
