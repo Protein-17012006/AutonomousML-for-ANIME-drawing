@@ -13,8 +13,8 @@ export interface PairEvent {
   route?: PairRoute | null;
   keys_requested?: number;
   reason?: string;
-  verdict_prob?: number | null;
-  uncertainty?: number | null;
+  verdict_prob?: number | null; // likelihood of error
+  uncertainty?: number | null; // level of uncertainty of verdict prob
   mid_url?: string | null;
   correction?: {
     status: string;
@@ -24,7 +24,7 @@ export interface PairEvent {
 }
 
 export interface CsqBand {
-  tau_pass: number[];
+  tau_pass: number[]; 
   tau_flag: number[];
   u_edges: number[];
   u_max: number;
@@ -38,6 +38,7 @@ export interface Explanation {
   annotated_url?: string;
 }
 
+//! REMOVE PLANTED PROPS
 export interface ResultEvent {
   n_autopass: number;
   n_corrected: number;
@@ -65,6 +66,7 @@ export interface ResultEvent {
   qa_degraded?: boolean;
 }
 
+//! REMOVE
 export interface DemoResult {
   video: string;
   video_orig?: string;

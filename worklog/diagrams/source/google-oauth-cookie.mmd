@@ -1,0 +1,21 @@
+sequenceDiagram
+    actor Artist
+    participant Client as Next.js client
+    participant Cognito as Cognito Hosted UI
+    participant Google as Google OAuth
+    participant API as FastAPI backend
+
+    Artist->>Client: Select Continue with Google
+    Client->>Cognito: Start OAuth code flow (PKCE)
+    Cognito->>Google: Redirect to Google authorization
+    Artist->>Google: Sign in and grant consent
+    Google-->>Cognito: Authorization response
+    Cognito-->>Client: Redirect /sso-callback with code
+    Client->>Cognito: Amplify exchanges code
+    Cognito-->>Client: Cognito ID token
+    Client->>API: POST /auth/session\nAuthorization: Bearer ID token
+    API->>Cognito: Validate signed JWT
+    Cognito-->>API: Verified claims
+    API-->>Client: Set-Cookie: HttpOnly application session
+    Client->>API: Protected API/SSE request\nCookie: application session
+    API-->>Client: Protected response or stream

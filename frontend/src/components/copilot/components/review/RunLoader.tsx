@@ -1,4 +1,4 @@
-// self-drawing run loader (a cel + peg-bar drawing themselves). Extracted from CopilotApp.tsx.
+//! CONSIDER REPLACE SVG WITH PRE-BUILT COMPONENT
 export function RunLoader() {
   return (
     <div className="runloader" role="status" aria-live="polite">

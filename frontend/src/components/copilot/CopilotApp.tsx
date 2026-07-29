@@ -6,7 +6,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { PairEvent, ResultEvent, DemoResult, InputMode } from "./types";
 import { runSession, runDemo, runVideoSession, askQuestion } from "./api";
-import { type ChatMsg, deriveMessages, type QaTurn, type UserTurn } from "./lib/chatModel";
+import {
+  type ChatMsg,
+  deriveMessages,
+  type QaTurn,
+  type UserTurn,
+} from "./lib/chatModel";
 import { useFileSet } from "./lib/useFileSet";
 import { downloadBundle } from "./lib/exportSession";
 import { ChatHeader } from "./components/chat/ChatHeader";
@@ -110,13 +115,15 @@ export default function App() {
       setHistoryCursor(page.next_cursor);
       return page.items;
     } catch (error) {
-      setHistoryError(error instanceof Error ? error.message : "Could not load sessions.");
+      setHistoryError(
+        error instanceof Error ? error.message : "Could not load sessions.",
+      );
       return [];
     } finally {
       setHistoryLoading(false);
     }
   }, []);
-// Account Setup
+  // Account Setup
   useEffect(() => {
     let active = true;
     getCookieSession()
@@ -177,19 +184,26 @@ export default function App() {
     }
     try {
       const selected = await getMySession(session.pid);
-      setHistory((items) => items.map((item) => item.pid === selected.pid ? selected : item));
+      setHistory((items) =>
+        items.map((item) => (item.pid === selected.pid ? selected : item)),
+      );
       // This API type contains only the safe sidebar summary contract; log it
       // after a successful selection in every build so production support can
       // confirm the owner-scoped record returned by FastAPI.
       console.info("[selected-session-summary]", selected);
     } catch (error) {
-      setHistoryError(error instanceof Error ? error.message : "Could not load session.");
+      setHistoryError(
+        error instanceof Error ? error.message : "Could not load session.",
+      );
     }
   };
 
   const createHistorySession = async (title: string) => {
     const created = await createMySession(title);
-    setHistory((items) => [created, ...items.filter((item) => item.pid !== created.pid)]);
+    setHistory((items) => [
+      created,
+      ...items.filter((item) => item.pid !== created.pid),
+    ]);
     setSelectedPid(created.pid);
     setActiveDraftPid(created.pid);
     clearAll();
@@ -198,7 +212,9 @@ export default function App() {
 
   const renameHistorySession = async (pid: string, title: string) => {
     const renamed = await renameMySession(pid, title);
-    setHistory((items) => items.map((item) => item.pid === pid ? renamed : item));
+    setHistory((items) =>
+      items.map((item) => (item.pid === pid ? renamed : item)),
+    );
   };
 
   const loadMoreHistory = async () => {
@@ -209,11 +225,17 @@ export default function App() {
       const page = await listMySessions(20, historyCursor);
       setHistory((items) => [
         ...items,
-        ...page.items.filter((next) => !items.some((item) => item.pid === next.pid)),
+        ...page.items.filter(
+          (next) => !items.some((item) => item.pid === next.pid),
+        ),
       ]);
       setHistoryCursor(page.next_cursor);
     } catch (error) {
-      setHistoryError(error instanceof Error ? error.message : "Could not load more sessions.");
+      setHistoryError(
+        error instanceof Error
+          ? error.message
+          : "Could not load more sessions.",
+      );
     } finally {
       setHistoryLoadingMore(false);
     }
@@ -251,16 +273,28 @@ export default function App() {
     });
     setRunning(true);
     try {
-      await runSession(keys.files, engines, cadence, smoothness, {
-        onPair: (p) => setLog((prev) => [...prev, p]),
-        onResult: (r) => {
-          setResult(r);
-          setLiveSid(sidFromResult(r));
+      await runSession(
+        keys.files,
+        engines,
+        cadence,
+        smoothness,
+        {
+          onPair: (p) => setLog((prev) => [...prev, p]),
+          onResult: (r) => {
+            setResult(r);
+            setLiveSid(sidFromResult(r));
+          },
+          onError: (m) => setBanner(m),
         },
-        onError: (m) => setBanner(m),
-      }, activeDraftPid);
+        activeDraftPid,
+      );
       const refreshed = await loadHistory();
-      if (activeDraftPid && refreshed.some((item) => item.pid === activeDraftPid && item.status === "complete")) {
+      if (
+        activeDraftPid &&
+        refreshed.some(
+          (item) => item.pid === activeDraftPid && item.status === "complete",
+        )
+      ) {
         setActiveDraftPid(null);
       }
     } catch (err) {
@@ -287,16 +321,29 @@ export default function App() {
     });
     setRunning(true);
     try {
-      await runVideoSession(videoFile, stride, cadence, smoothness, engines, {
-        onPair: (p) => setLog((prev) => [...prev, p]),
-        onResult: (r) => {
-          setResult(r);
-          setLiveSid(sidFromResult(r));
+      await runVideoSession(
+        videoFile,
+        stride,
+        cadence,
+        smoothness,
+        engines,
+        {
+          onPair: (p) => setLog((prev) => [...prev, p]),
+          onResult: (r) => {
+            setResult(r);
+            setLiveSid(sidFromResult(r));
+          },
+          onError: (m) => setBanner(m),
         },
-        onError: (m) => setBanner(m),
-      }, activeDraftPid);
+        activeDraftPid,
+      );
       const refreshed = await loadHistory();
-      if (activeDraftPid && refreshed.some((item) => item.pid === activeDraftPid && item.status === "complete")) {
+      if (
+        activeDraftPid &&
+        refreshed.some(
+          (item) => item.pid === activeDraftPid && item.status === "complete",
+        )
+      ) {
         setActiveDraftPid(null);
       }
     } catch (err) {
@@ -476,6 +523,7 @@ export default function App() {
           ) : (
             <>
               <div className="board-bar">
+                {/* //! REMOVE: USE ALREADY EXISTING MODE TOGGLE IN APP SIDEBAR */}
                 <Button
                   variant="outline"
                   type="button"

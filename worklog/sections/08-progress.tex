@@ -1,0 +1,40 @@
+\section{Progress}
+This section is the complete contribution record.
+
+\begin{enumerate}
+  \item \textbf{Initial interface and integration.} Implemented an initial main-region chatbox interface and sidebar without application logic. Merged it with the teammate's existing basic file-picker/composer-like component, which had no text input, and the preview-board layout. After the merge, took responsibility for the frontend and part of the backend work.
+
+  \item \textbf{Chat Composer refinement.} Refined the Chat Composer layout and fixed media-selection behaviour so media not belonging to the selected input mode is not imported.
+
+  \item \textbf{Interface copy correction.} Corrected typographical issues where Japanese and English text were mixed.
+
+  \item \textbf{Welcome state.} Replaced the main-region multiplane animation with a simpler Welcome Message component that provides quick media-import actions.
+
+  \item \textbf{Sidebar.} Added the sidebar as part of the artist workspace navigation.
+
+  \item \textbf{Landing and authentication pages.} Developed all landing-page sections and the authentication-related pages.
+
+  \item \textbf{Amplify authentication logic.} Implemented authentication with the AWS Amplify SDK, supporting sign-in, sign-up with email confirmation, and password reset.
+
+  \item \textbf{Cognito and Google authentication configuration.} Configured Cognito and Google Authentication for the authentication flow.
+
+  \item \textbf{Backend cookie-authentication routes.} Implemented \texttt{/auth/me}, \texttt{/auth/session}, and \texttt{/auth/signout} for client requests. Enforced client-cookie verification on existing routes so unauthenticated clients cannot request protected S3 or DynamoDB resources.
+
+  \item \textbf{Owner-scoped session metadata.} Modified DynamoDB \texttt{session\_metadata} to include \texttt{user\_sub}, added a global secondary index for faster queries, and configured the title attribute for sidebar display.
+
+  \item \textbf{Completed-workspace storage.} Added a mechanism that stores \texttt{workspace.json} in the S3 bucket after a session completes.
+
+  \item \textbf{History-session retrieval.} Implemented routes that retrieve the user's history sessions and allow the browser to display retrieved \texttt{session\_metadata} in the console.
+
+  \item \textbf{Hosting synchronisation.} Synchronised the backend codebase to the teammate's hosting computer.
+
+  \item \textbf{Recorded integration test.} Tested that a logged-in user can view their own sessions, and that creating a new session creates a new DynamoDB \texttt{session\_metadata} entry that is loaded in the sidebar.
+
+  \item \textbf{Worklog authentication-diagram maintenance.} Replaced the authentication section's Cognito figure reference with the supplied \texttt{cognito-auth-sequence.pdf} figure and retained the supplied \texttt{google-oauth-cookie.pdf} figure.
+
+  \item \textbf{Worklog figure-placement correction.} Forced both authentication figures to remain in the Authentication section, preventing LaTeX float placement from moving the Google OAuth diagram after the Progress heading.
+
+  \item \textbf{Mermaid authentication-diagram rendering.} Re-rendered both authentication diagrams directly from their Mermaid sources with Mermaid CLI and its \texttt{pdfFit} option, replacing the supplied letter-sized PDFs with tightly fitted outputs.
+
+  \item \textbf{Worklog backend-section structure.} Moved Authentication and Storage and session history under Backend contribution as subsections, while preserving both Mermaid-generated authentication figures.
+\end{enumerate}
