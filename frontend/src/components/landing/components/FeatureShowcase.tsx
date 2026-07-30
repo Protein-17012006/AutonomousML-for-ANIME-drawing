@@ -105,13 +105,23 @@ export function FeatureShowcase() {
               </h3>
             </div>
             <p className="font-body text-muted-foreground">{current.body}</p>
-            <div className="flex aspect-video items-center justify-center gap-2 rounded-xl bg-muted text-muted-foreground">
-              <CurrentIcon className="size-6" />
-              <span className="font-mono text-sm">Preview coming soon</span>
-            </div>
+            <FeaturePreview Icon={CurrentIcon} />
           </div>
         </div>
       </div>
     </section>
+  );
+}
+
+function FeaturePreview({ Icon }: { Icon: LucideIcon }) {
+  return (
+    <div
+      aria-hidden="true"
+      className="flex aspect-video min-h-56 items-center justify-center rounded-xl border border-line bg-screen p-5"
+    >
+      <div className="flex size-24 items-center justify-center rounded-2xl border border-ao/50 bg-sumi-2 text-ao shadow-sm sm:size-28">
+        <Icon className="size-12 stroke-[1.5] sm:size-14" />
+      </div>
+    </div>
   );
 }

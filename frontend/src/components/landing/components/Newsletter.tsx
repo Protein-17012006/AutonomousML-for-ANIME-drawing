@@ -3,38 +3,35 @@
 import { useState } from "react";
 import { Check, Mail, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 
-const NEWSLETTER_ENDPOINT = process.env.NEXT_PUBLIC_NEWSLETTER_ENDPOINT;
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export function Newsletter() {
   const [email, setEmail] = useState("");
-  const [subscribed, setSubscribed] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
+  const [subscribedEmail, setSubscribedEmail] = useState("");
+  const [dialogOpen, setDialogOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setError(null);
-    if (!NEWSLETTER_ENDPOINT) {
-      setError("Newsletter sign-up is not available yet.");
+  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const normalizedEmail = email.trim();
+    if (!EMAIL_PATTERN.test(normalizedEmail)) {
+      setError("Enter a valid email address.");
       return;
     }
 
-    setSubmitting(true);
-    try {
-      const response = await fetch(NEWSLETTER_ENDPOINT, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim() }),
-      });
-      if (!response.ok) throw new Error("Newsletter sign-up failed.");
-      setSubscribed(true);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Newsletter sign-up failed.");
-    } finally {
-      setSubmitting(false);
-    }
+    setError(null);
+    setSubscribedEmail(normalizedEmail);
+    setEmail("");
+    setDialogOpen(true);
   }
 
   return (
@@ -49,53 +46,63 @@ export function Newsletter() {
             what the co-pilot learned this month. No spam — unsubscribe anytime.
           </p>
 
-          {subscribed ? (
-            <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/50 px-3 py-2 font-body text-sm text-foreground">
-              <Check className="size-4 text-pass" />
-              Thanks — you&apos;re on the list.
-            </div>
-          ) : (
-            <form
-              onSubmit={handleSubmit}
-              className="flex flex-col gap-3 sm:flex-row"
-            >
-              <label htmlFor="newsletter-email" className="sr-only">
-                Email address
-              </label>
-              <Input
-                id="newsletter-email"
-                type="email"
-                required
-                name="email"
-                autoComplete="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@studio.com"
-                aria-label="Email address"
-                className="h-11 flex-1"
-              />
-              <Button
-                type="submit"
-                disabled={submitting}
-                className="h-11 px-5"
-              >
-                {submitting ? "Subscribing..." : "Subscribe"}
-                <Send />
-              </Button>
-            </form>
-          )}
+          <form onSubmit={handleSubmit} className="flex flex-col gap-3 sm:flex-row">
+            <label htmlFor="newsletter-email" className="sr-only">
+              Email address
+            </label>
+            <Input
+              id="newsletter-email"
+              type="email"
+              required
+              name="email"
+              autoComplete="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="you@studio.com"
+              aria-describedby={error ? "newsletter-email-error" : undefined}
+              aria-invalid={!!error}
+              className="h-11 flex-1"
+            />
+            <Button type="submit" className="h-11 px-5">
+              Subscribe
+              <Send />
+            </Button>
+          </form>
           {error && (
-            <p role="alert" className="text-sm text-destructive">
+            <p id="newsletter-email-error" role="alert" className="text-sm text-destructive">
               {error}
             </p>
           )}
         </div>
 
-        <div className="flex aspect-video items-center justify-center gap-2 rounded-xl bg-muted text-muted-foreground">
-          <Mail className="size-6" />
-          <span className="font-mono text-sm">Newsletter preview</span>
+        <div
+          aria-hidden="true"
+          className="flex aspect-video items-center justify-center rounded-xl border border-line bg-screen p-5 sm:p-6"
+        >
+          <div className="flex size-24 items-center justify-center rounded-2xl border border-ao/50 bg-sumi-2 text-ao shadow-sm sm:size-28">
+            <Mail className="size-12 stroke-[1.5] sm:size-14" />
+          </div>
         </div>
       </div>
+
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent className="border border-line bg-sumi-2 text-washi sm:max-w-md">
+          <DialogHeader className="items-center text-center">
+            <div className="flex size-14 items-center justify-center rounded-full border border-pass/50 bg-sumi-3 text-pass">
+              <Check className="size-7 stroke-[2.5]" />
+            </div>
+            <DialogTitle className="font-display text-xl text-washi">
+              You&apos;re subscribed
+            </DialogTitle>
+            <DialogDescription className="font-body text-ash">
+              {subscribedEmail} is on the local newsletter preview list.
+            </DialogDescription>
+          </DialogHeader>
+          <Button type="button" onClick={() => setDialogOpen(false)}>
+            Done
+          </Button>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }
