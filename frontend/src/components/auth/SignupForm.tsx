@@ -24,6 +24,7 @@ export function SignupForm() {
 
     const form = new FormData(e.currentTarget);
     const email = String(form.get("email") ?? "").trim();
+    const name = email.split("@", 1)[0]?.trim() || email;
     const password = String(form.get("password") ?? "");
     const confirm = String(form.get("confirm-password") ?? "");
     if (password !== confirm) {
@@ -37,7 +38,7 @@ export function SignupForm() {
         username: email,
         password,
         options: {
-          userAttributes: { email },
+          userAttributes: { email, name },
           autoSignIn: true,
         },
       });

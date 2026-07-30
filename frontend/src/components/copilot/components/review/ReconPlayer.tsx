@@ -12,7 +12,15 @@ type VideoWithFrameCallback = HTMLVideoElement & {
   cancelVideoFrameCallback?: (handle: number) => void;
 };
 
-export function ReconPlayer({ src, fps }: { src: string; fps: number }) {
+export function ReconPlayer({
+  src,
+  fps,
+  onError,
+}: {
+  src: string;
+  fps: number;
+  onError?: () => void;
+}) {
   const vref = useRef<HTMLVideoElement>(null);
   const railRef = useRef<HTMLDivElement>(null);
   const [playing, setPlaying] = useState(false);
@@ -86,6 +94,7 @@ export function ReconPlayer({ src, fps }: { src: string; fps: number }) {
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
         onEnded={() => setPlaying(false)}
+        onError={onError}
         onClick={toggle}
       />
       <div className="rplayer-ctl">

@@ -4,8 +4,8 @@
 // (this file used to be a ~1360-line monolith holding all of them).
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { PairEvent, ResultEvent, DemoResult, InputMode } from "./types";
-import { runSession, runDemo, runVideoSession, askQuestion } from "./api";
+import type { PairEvent, ResultEvent, InputMode } from "./types";
+import { runSession, runVideoSession, askQuestion } from "./api";
 import {
   type ChatMsg,
   deriveMessages,
@@ -19,11 +19,9 @@ import { ChatView } from "./components/chat/ChatView";
 import { ChatComposer } from "./components/chat/ChatComposer";
 import { ChatWelcome } from "./components/chat/ChatWelcome";
 import { ReviewWorkbench } from "./components/review/ReviewWorkbench";
-import { Compare } from "./components/review/Compare";
 import { Toast } from "./components/review/Toast";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { Button } from "@/components/ui/button";
 import {
   AppSidebar,
   type SidebarAccount,
@@ -49,7 +47,6 @@ function sidFromResult(r: ResultEvent | null) {
 export default function App() {
   const router = useRouter();
   const keys = useFileSet();
-  const demo = useFileSet();
   const [engines, setEngines] = useState("box");
   const [interpolator, setInterpolator] = useState("rife");
   // cadence = shoot-on-Ns rate the artist drew at (24/12/8); smoothness = the in-between
@@ -79,9 +76,6 @@ export default function App() {
   // ChatWelcome quick-import buttons share one source of truth.
   const [mode, setMode] = useState<InputMode>("frames");
 
-  const [demoBuilding, setDemoBuilding] = useState(false);
-  const [demoBanner, setDemoBanner] = useState<string | null>(null);
-  const [demoResult, setDemoResult] = useState<DemoResult | null>(null);
 
   // chat-first surface state (vault 'Chat-First Copilot Surface')
   const [view, setView] = useState<"chat" | "board">("chat");
@@ -124,8 +118,8 @@ export default function App() {
       .then((session) => {
         if (!active) return;
         setAccount({
-          name: session.username || "Animator",
-          email: session.username || undefined,
+          name: session.name,
+          username: session.username,
         });
         void loadHistory();
       })
@@ -388,24 +382,6 @@ export default function App() {
     }
   };
 
-  const buildDemo = async () => {
-    setDemoBanner(null);
-    setDemoResult(null);
-    setDemoBuilding(true);
-    try {
-      setDemoResult(await runDemo(demo.files, engines, interpolator, "24"));
-    } catch (err) {
-      setDemoBanner(`${err}`);
-    }
-    setDemoBuilding(false);
-  };
-
-  const clearDemo = () => {
-    demo.clear();
-    setDemoResult(null);
-    setDemoBanner(null);
-  };
-
   const onAsk = async (q: string) => {
     if (!liveSid) return;
     const n = qaTurns.length;
@@ -453,6 +429,7 @@ export default function App() {
   return (
     <TooltipProvider>
       <SidebarProvider className="copilot-shell">
+        {/* //! REMOVE: USE ALREADY EXISTING MODE TOGGLE IN APP SIDEBAR (your change) */}
         <AppSidebar
           account={account}
           onSignOut={handleSignOut}
@@ -467,6 +444,9 @@ export default function App() {
           onRenameSession={renameHistorySession}
           onRetryHistory={() => void loadHistory()}
           onLoadMore={() => void loadMoreHistory()}
+          view={view}
+          onViewChange={setView}
+          previewAvailable={running || log.length > 0}
         />
         <div className="app">
           {view === "chat" ? (
@@ -519,17 +499,6 @@ export default function App() {
             </div>
           ) : (
             <>
-              <div className="board-bar">
-                {/* //! REMOVE: USE ALREADY EXISTING MODE TOGGLE IN APP SIDEBAR */}
-                <Button
-                  variant="outline"
-                  type="button"
-                  className="font-mono text-[12.5px] tracking-[0.02em]"
-                  onClick={() => setView("chat")}
-                >
-                  ← Back to chat
-                </Button>
-              </div>
               <ReviewWorkbench
                 log={log}
                 result={result}
@@ -544,17 +513,6 @@ export default function App() {
                   24
                 }
                 initialFocus={boardFocus}
-                compareSlot={
-                  <Compare
-                    files={demo.files}
-                    onAdd={demo.add}
-                    onClear={clearDemo}
-                    onBuild={buildDemo}
-                    building={demoBuilding}
-                    banner={demoBanner}
-                    result={demoResult}
-                  />
-                }
               />
             </>
           )}

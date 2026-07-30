@@ -39,4 +39,45 @@ This section is the complete contribution record.
   \item \textbf{Worklog backend-section structure.} Moved Authentication and Storage and session history under Backend contribution as subsections, while preserving both Mermaid-generated authentication figures.
 
   \item \textbf{Text-only co-pilot transcript.} Refactored the co-pilot chat transcript into focused upload, progress, Q\&A, error, and reusable text-bubble components. It acknowledges uploaded keyframes or video as text, shows aggregate processed-pair progress, preserves the final result card and Q\&A, and routes degraded-QA notices through the existing error presentation. Pair-specific previews and redraw prompts remain on the Review Board; obsolete flag and key-request chat components were removed.
+
+  \item \textbf{Model-backed frontend development target.} Updated the frontend development API-target configuration and example to point at the model-hosting FastAPI service, replacing the prior localhost model-free authentication target while leaving the static-export deployment mode unchanged.
+
+  \item \textbf{Model-backed backend connectivity check.} Performed read-only checks against the deployed FastAPI service: its root and OpenAPI document responded successfully, while unauthenticated protected routes correctly returned HTTP 401. No media upload or inference run was performed.
+
+  \item \textbf{Session-history retrieval diagnosis.} Traced the frontend HTTP 503 session-list failure to the backend's unconfigured session-history catalog. The deployed backend must start with session-history enabled and its DynamoDB/S3 settings and server-side AWS credentials available.
+
+  \item \textbf{Model-box session-history configuration.} Updated and restarted the model-hosted FastAPI service with the supplied session-history DynamoDB table, S3 artifact bucket, region, owner index, and enable flag. Corrected the environment export boundary so all history settings are inherited by the live Uvicorn process; authenticated browser retrieval remains the final end-to-end check.
+
+  \item \textbf{Incremental SSE pair-progress rendering.} Updated the browser SSE reader to yield an animation frame after each valid streamed pair event, allowing React to paint the `log`-derived QA count incrementally when multiple SSE records arrive together. The backend event contract and chat design remain unchanged.
+
+  \item \textbf{Git Bash frontend-deployment path fix.} Corrected the AWS frontend upload path handling so the deployment script converts Git Bash static-export paths to Windows paths for \texttt{aws.exe}, while retaining the SSM parameter-name path-conversion safeguard.
+
+  \item \textbf{Review workbench simplification.} Refactored the preview board into a focused pair-and-frame review workflow with shared chat header, Filled/Pass/Abstain and Needs key filtering, full-region reconstruction playback, click-driven opposite-pane alignment, and left-only keyboard navigation. Connected the sidebar's Chat and Preview board controls to the app view state and added the run-first availability hint.
+
+  \item \textbf{Recon filter handoff.} Updated every review filter and subfilter so selecting it closes reconstruction playback and returns the user directly to the selected pair-review queue.
+
+  \item \textbf{QA unavailable-state and review-header refinement.} Replaced redundant empty and needs-key QA-panel copy with concise selection and pending states, consolidated those branches in the component's returned JSX, and added responsive horizontal space around the shared board header and review toolbar.
+
+  \item \textbf{QA empty-state clarification.} Updated the no-selection QA-panel subtext to state when the active review view has no pair with an available QA status.
+
+  \item \textbf{Streaming preview guard.} Deferred review-pane frame rendering until the final session result is available, showing the existing loader while video-derived preview-key URLs are incomplete.
+
+  \item \textbf{Reconstruction availability and playback states.} Made the review loader message-driven, prevented all-needs-key sessions from opening the backend's black placeholder reconstruction, and added browser video load/decode-failure feedback with an explicit reopen-to-retry path.
+
+  \item \textbf{Frontend demo-template retirement and QA text repair.} Removed unused browser comparison templates and their client-side DemoResult, API, rewrite, styling, and documentation references while preserving the backend capability; repaired malformed QA-panel punctuation and stale demo-engine wording.
+
+  \item \textbf{Explicit toast dismissal.} Removed the automatic error-toast timeout and visual countdown so artists retain run-error messages until they explicitly dismiss them.
+
+  \item \textbf{Account display and sign-up profile name.} Updated the sidebar account presentation to show a fixed Free badge and resolve the label from verified Cognito name, username, then Animator. Extended the authenticated session response with the verified name claim and supplied the email local part as the Cognito name attribute for new sign-ups.
+  \item \textbf{Focused QA-panel simplification.} Removed the obsolete score-missing condition, rigor tooltip, and duplicate empty and needs-key QA-panel templates. Reused the shared confidence meter for the focused calibrated read and moved the selected pair's explanation from every review row into the QA panel.
+  \item \textbf{Pair-action label ownership.} Made the focused QA panel the single review surface that displays a pair action, removed redundant action labels from pair rows and frame cards, and aligned the frontend action map with the current needs-key, filled, and generated service values.
+  \item \textbf{QA-label retirement.} Simplified frame-card captions to pair indices only, which removed the final frontend use of the QA label helper and allowed the obsolete QA label map to be retired.
+  \item \textbf{QA-panel availability states.} Added a concise no-pair QA-panel state and prevented needs-key gaps from rendering a confidence meter while retaining their contextual header and explanation.
+  \item \textbf{Pair rationale helper retirement.} Removed the unused frontend pair-rationale helper after its final review-row consumer was retired.
+  \item \textbf{Flip-player control simplification.} Removed the optional tween switch and line-test hint, leaving the review flip player to cycle through its complete supplied frame sequence with the existing playback controls.
+  \item \textbf{Verdict-control label simplification.} Removed the redundant per-row `Your call` label while retaining the artist's existing Keep and Redraw controls.
+  \item \textbf{Review-row prop cleanup.} Removed the unused calibrated-band prop from review rows; the focused QA panel remains its sole consumer.
+  \item \textbf{Frame-card line-test retirement.} Removed the frame-card line-test control and its conditional player so frame cards consistently present static key, in-between, and key strips.
+  \item \textbf{Needs-key upload control extraction.} Replaced the review-row upload label with a dedicated button component that encapsulates the hidden PNG input while preserving the existing key-refill callback.
+  \item \textbf{Frame-card key upload.} Reused the extracted upload control in needs-key frame cards and passed the existing refill callback through the review workbench.
 \end{enumerate}

@@ -22,18 +22,12 @@ const ERR_TYPE: Record<string, string> = {
   none: "",
 };
 
-//! REVIEW: CONFLICT WITH PAIR-ACTION INTERFACE
 const ACTION: Record<string, string> = {
-  needs_key: "needs a key",
-  filled: "filled",
-  fill: "filled",
+  needs_key: "Needs a key",
+  filled: "Filled",
+  generated: "Filled",
 };
 
-const QA: Record<string, string> = {
-  pass: "On-model",
-  abstain: "Unsure",
-  flag: "Off-model",
-};
 
 // GET REGION
 export const regionLabel = (r?: string): string => (r ? (REGION[r] ?? r) : "");
@@ -45,9 +39,6 @@ export const errTypeLabel = (e?: string): string =>
 // GET ACTION LABEL
 export const actionLabel = (a?: string): string =>
   a ? (ACTION[a] ?? a.replace(/_/g, " ")) : "";
-
-// GET QA LABEL
-export const qaLabel = (q?: string | null): string => (q ? (QA[q] ?? q) : "");
 
 // GET LIKELIHOOD OF ERROR + UNCERTAINTY FROM PAIR'S REASON PROP
 export function readableReason(reason?: string | null): string {

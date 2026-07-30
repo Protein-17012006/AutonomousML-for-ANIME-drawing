@@ -114,8 +114,15 @@ frontend() {
     echo "ERROR: static export is missing $dist/_next"
     exit 1
   }
+  # MSYS_NO_PATHCONV keeps SSM parameter names such as /copilot/... intact for
+  # aws.exe, but consequently aws.exe cannot resolve Git Bash's /c/... paths.
+  # Convert only this local filesystem argument before the upload.
+  local aws_dist="$dist"
+  if command -v cygpath >/dev/null 2>&1; then
+    aws_dist=$(cygpath -w "$dist")
+  fi
   echo "== upload frontend from $dist"
-  aws s3 sync "$dist" "s3://${BUCKET_PREFIX}-deploy/frontend/" --delete --region "$REGION"
+  aws s3 sync "$aws_dist" "s3://${BUCKET_PREFIX}-deploy/frontend/" --delete --region "$REGION"
   local iid
   iid=$(aws cloudformation describe-stacks --region "$REGION" --stack-name copilot-frontdoor \
     --query "Stacks[0].Outputs[?OutputKey=='InstanceId'].OutputValue" --output text)

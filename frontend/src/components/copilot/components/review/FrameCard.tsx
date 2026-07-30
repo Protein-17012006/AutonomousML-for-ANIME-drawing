@@ -1,94 +1,49 @@
-// right-column per-pair frames. FrameTrip = the static key·in-between·key strip (or a big
-// line-test on play); FrameCard wraps it as one reviewed pair (a mini multiplane rig,
-// cursor-craned, carrying the hero's grammar). Extracted from CopilotApp.tsx.
-import { useState } from "react";
 import type { Explanation, PairEvent } from "../../types";
 import { statusClass } from "../../lib/pairView";
-import { actionLabel, errTypeLabel, qaLabel } from "../../labels";
-import { FlipPlayer, type Frame } from "./FlipPlayer";
+import { errTypeLabel } from "../../labels";
+import { KeyframeUploadButton } from "./KeyframeUploadButton";
 import { StatusGlyph } from "./StatusGlyph";
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
-import { Pencil, Play, Square } from "lucide-react";
+import { Pencil } from "lucide-react";
 
 /* eslint-disable @next/next/no-img-element -- review frames are dynamic session/object URLs. */
 
-/* static key·in-between·key, or a big line-test on play */
 function FrameTrip({
   p,
   a,
   b,
   mid,
   ex,
+  onRefill,
 }: {
   p: PairEvent;
   a?: string;
   b?: string;
   mid?: string;
   ex?: Explanation;
+  onRefill: (index: number, file: File) => void;
 }) {
-  const [play, setPlay] = useState(false);
-  const canPlay = !!(a && b);
-  const frames: Frame[] =
-    mid && a && b
-      ? [
-          { url: a, label: "key A" },
-          { url: mid, label: "in-between" },
-          { url: b, label: "key B" },
-        ]
-      : a && b
-        ? [
-            { url: a, label: "key A" },
-            { url: b, label: "key B" },
-          ]
-        : [];
   return (
     <>
       <figcaption>
         <span className={`sglyph sglyph-${statusClass(p)}`} aria-hidden="true">
           <StatusGlyph pair={p} />
         </span>
-        pair {p.index} · {actionLabel(p.action)}
-        {p.qa ? ` · ${qaLabel(p.qa)}` : ""}
-        {canPlay && (
-          <Button
-            variant="link"
-            type="button"
-            className="ml-auto h-auto p-0 font-mono text-[11px] tracking-[0.04em] text-ao hover:bg-transparent hover:text-washi"
-            onClick={(e) => {
-              e.stopPropagation();
-              setPlay((v) => !v);
-            }}
-          >
-            {play ? (
-              <>
-                <Square className="mr-1 inline size-3" aria-hidden="true" /> Show frames
-              </>
-            ) : (
-              <>
-                <Play className="mr-1 inline size-3" aria-hidden="true" /> Play line-test
-              </>
-            )}
-          </Button>
-        )}
+        pair {p.index}
       </figcaption>
-      {play && frames.length >= 2 ? (
-        <div className="trip-player">
-          <FlipPlayer frames={frames} />
-        </div>
-      ) : (
-        <div className="frametrip">
+
+      <div className="frametrip">
           {a ? (
             <img src={a} alt="key A" />
           ) : (
             <div className="fcell-empty">A</div>
           )}
+
           {mid ? (
             <div className="fcell-wrap">
               <img src={mid} alt="in-between" />
+              {/* //! REVIEW: ERROR BOX CURRENTLY NOT IN USE */}
               {ex?.box && ex.box.length === 4 && (
-                // the akaire correction box, with a 作監-style margin tag naming the defect,
-                // tethered to the exact region so the frame, the place, and the why read as one note
                 <span
                   className="region-box"
                   style={{
@@ -107,27 +62,28 @@ function FrameTrip({
             </div>
           ) : p.action === "needs_key" ? (
             <div className="fcell-draw">
-              <Pencil className="mr-1 inline size-3.5" aria-hidden="true" />
-              draw a key here
+              {/* //! REDESIGN: IMPORT KEYFRAMEUPLOAD COMPONENT INTO THIS ONE, MAKE THIS ONE IMPORTABLE (your change) */}
+              <KeyframeUploadButton
+                className="w-full justify-center pt-0"
+                buttonClassName="h-auto w-full border-0 bg-transparent px-0 py-0 uppercase hover:bg-transparent hover:text-akaire-ink"
+                label="Draw a key here"
+                onFileSelect={(file) => onRefill(p.index, file)}
+              />
             </div>
           ) : (
             <div className="fcell-empty">in-between</div>
           )}
+
           {b ? (
             <img src={b} alt="key B" />
           ) : (
             <div className="fcell-empty">B</div>
           )}
-        </div>
-      )}
+      </div>
     </>
   );
 }
 
-/* one reviewed pair as a mini multiplane rig (cursor-craned, carries the hero's grammar).
-   On hover the three cells separate onto glass planes (the two keys recede, the co-pilot's
-   in-between lifts forward + lit) and the rig cranes to the cursor. The thing under QA is
-   physically presented forward — depth that does a job, not decoration. */
 export function FrameCard({
   p,
   a,
@@ -137,6 +93,7 @@ export function FrameCard({
   i,
   focused,
   onFocus,
+  onRefill,
 }: {
   p: PairEvent;
   a?: string;
@@ -146,6 +103,7 @@ export function FrameCard({
   i: number;
   focused: boolean;
   onFocus: () => void;
+  onRefill: (index: number, file: File) => void;
 }) {
   return (
     <figure
@@ -164,7 +122,7 @@ export function FrameCard({
         }
       }}
     >
-      <FrameTrip p={p} a={a} b={b} mid={mid} ex={ex} />
+      <FrameTrip p={p} a={a} b={b} mid={mid} ex={ex} onRefill={onRefill} />
     </figure>
   );
 }

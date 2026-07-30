@@ -24,6 +24,7 @@ def _claims(**patch):
         "aud": "client-1",
         "exp": time.time() + 300,
         "username": "artist@example.com",
+        "name": "Artist",
     }
     claims.update(patch)
     return claims
@@ -154,6 +155,7 @@ def test_cookie_bootstrap_me_and_logout(monkeypatch, injected_verifier):
     me = client.get("/auth/me")
     assert me.status_code == 200
     assert me.json()["user_sub"] == "user-sub-1"
+    assert me.json()["name"] == "Artist"
     assert me.json()["expires_at"] > time.time()
 
     logged_out = client.post("/auth/logout", headers={"Origin": ORIGIN})

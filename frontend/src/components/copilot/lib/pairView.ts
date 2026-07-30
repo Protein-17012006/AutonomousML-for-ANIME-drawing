@@ -1,15 +1,5 @@
 import type { CsqBand, PairEvent } from "../types";
 
-// DECISION REQUIRED PER PAIR
-export function whyText(p: PairEvent): string {
-  if (p.action === "needs_key")
-    return `Gap too large — draw ${p.keys_requested ?? 1} breakdown key${(p.keys_requested ?? 1) > 1 ? "s" : ""} here`;
-  if (p.qa === "pass") return "On-model — the co-pilot is confident";
-  if (p.qa === "abstain") return "Unsure — worth a second look";
-  if (p.qa === "flag") return "Likely off-model — review / redraw";
-  return "";
-}
-
 // GET PAIR ACTION STATUS
 export function statusClass(p: PairEvent): string {
   return p.action === "needs_key" ? "needs_key" : (p.qa ?? "");

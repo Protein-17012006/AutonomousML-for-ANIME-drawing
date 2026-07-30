@@ -9,6 +9,7 @@ import {
 export interface CookieSession {
   user_sub: string;
   username: string | null;
+  name?: string | null;
   expires_at: number;
 }
 
@@ -17,7 +18,10 @@ function isCookieSession(value: unknown): value is CookieSession {
     typeof value === "object" &&
     value !== null &&
     typeof (value as CookieSession).user_sub === "string" &&
-    typeof (value as CookieSession).expires_at === "number"
+    typeof (value as CookieSession).expires_at === "number" &&
+    (!Object.hasOwn(value, "name") ||
+      (value as CookieSession).name === null ||
+      typeof (value as CookieSession).name === "string")
   );
 }
 

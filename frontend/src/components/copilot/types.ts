@@ -67,13 +67,4 @@ export interface ResultEvent {
   qa_degraded?: boolean;
 }
 
-//! REMOVE
-export interface DemoResult {
-  video: string;
-  video_orig?: string;
-  video_rife?: string;
-  frames: number;
-  src: number;
-  gt: number;
-  interpolator?: "rife" | "gimm";
-}
+//! REMOVE (your change): obsolete frontend DemoResult removed with the comparison templates.
