@@ -9,16 +9,18 @@ import { Input } from "@/components/ui/input";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { configureAmplify } from "@/lib/amplify";
+import { clearAuthFlow, readAuthFlow } from "@/lib/authFlow";
 
 const CODE_LENGTH = 6;
 
 export function ResetPasswordForm() {
   const [done, setDone] = useState(false);
-  const pendingEmail = useSyncExternalStore(
+  const flow = useSyncExternalStore(
     () => () => undefined,
-    () => sessionStorage.getItem("copilot:pendingEmail") ?? "",
-    () => "",
+    readAuthFlow,
+    () => null,
   );
+  const pendingEmail = flow?.intent === "reset-password" ? flow.email : "";
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -49,6 +51,7 @@ export function ResetPasswordForm() {
         confirmationCode: code,
         newPassword: password,
       });
+      clearAuthFlow();
       setDone(true);
     } catch (err) {
       setError(

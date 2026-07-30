@@ -16,17 +16,19 @@ import {
 } from "@/components/ui/input-otp";
 import { configureAmplify, getCurrentIdToken } from "@/lib/amplify";
 import { establishCookieSession } from "@/lib/authenticatedApi";
+import { readAuthFlow } from "@/lib/authFlow";
 
 const CODE_LENGTH = 6;
 
 export function VerifyEmailForm() {
   const router = useRouter();
   const [value, setValue] = useState("");
-  const email = useSyncExternalStore(
+  const flow = useSyncExternalStore(
     () => () => undefined,
-    () => sessionStorage.getItem("copilot:pendingEmail") ?? "",
-    () => "",
+    readAuthFlow,
+    () => null,
   );
+  const email = flow?.intent === "verify-email" ? flow.email : "";
   const [verified, setVerified] = useState(false);
   const [sessionPending, setSessionPending] = useState(false);
   const [error, setError] = useState<string | null>(null);

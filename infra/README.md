@@ -42,7 +42,8 @@ From the repository root:
 The command builds `frontend/out/`, validates it, syncs it to the private deploy bucket,
 waits for the EC2 SSM refresh, atomically switches the nginx-served directory, and checks the
 public HTTPS root. An optional relative path is resolved from the directory where you invoke the
-command; normally do not supply one.
+command; normally do not supply one. On Git Bash for Windows, an explicit `C:/...` export path is
+also accepted and treated as absolute.
 
 ## Phase 2 session-history backend deploy
 

@@ -15,6 +15,18 @@ REGION="${REGION:-ap-southeast-1}"
 ENABLE_GOOGLE_OAUTH="${ENABLE_GOOGLE_OAUTH:-false}"
 GOOGLE_OAUTH_SECRET_VERSION_ID="${GOOGLE_OAUTH_SECRET_VERSION_ID:-PENDING}"
 
+is_absolute_path() {
+  [[ "$1" == /* || "$1" =~ ^[A-Za-z]:[/\\].* || "$1" == \\\\* ]]
+}
+
+null_device() {
+  if [ "${OS:-}" = "Windows_NT" ] || [ -n "${MSYSTEM:-}" ]; then
+    printf 'NUL'
+  else
+    printf '/dev/null'
+  fi
+}
+
 # conditionally forwards remaining args as --parameter-overrides; ${1:+...} is safe under set -u
 dep() {  # dep <stack> <template> <region> [param-overrides...]
   local stack="$1" tpl="$2" region="$3"; shift 3
@@ -98,7 +110,7 @@ sync_userdata() {   # push a changed ec2-userdata.sh; reboot does NOT re-run it 
 
 frontend() {
   local dist="${1:-$REPO_ROOT/frontend/out}"
-  if [ -n "${1:-}" ] && [[ "$dist" != /* ]]; then
+  if [ -n "${1:-}" ] && ! is_absolute_path "$dist"; then
     dist="$CALLER_DIR/$dist"
   fi
   echo "== build static frontend export"
@@ -140,7 +152,7 @@ frontend() {
   aws ssm get-command-invocation --region "$REGION" --command-id "$command_id" \
     --instance-id "$iid" --query '[Status,StandardOutputContent,StandardErrorContent]' --output text
   echo "== smoke test public frontend"
-  curl --fail --silent --show-error --max-time 30 -o /dev/null "https://${APP_DOMAIN}/"
+  curl --fail --silent --show-error --max-time 30 -o "$(null_device)" "https://${APP_DOMAIN}/"
   echo "frontend deployed and verified at https://${APP_DOMAIN}/"
 }
 

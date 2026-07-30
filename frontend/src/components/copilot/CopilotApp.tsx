@@ -429,7 +429,6 @@ export default function App() {
   return (
     <TooltipProvider>
       <SidebarProvider className="copilot-shell">
-        {/* //! REMOVE: USE ALREADY EXISTING MODE TOGGLE IN APP SIDEBAR (your change) */}
         <AppSidebar
           account={account}
           onSignOut={handleSignOut}

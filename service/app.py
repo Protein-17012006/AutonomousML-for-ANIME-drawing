@@ -56,7 +56,8 @@ async def _cognito_session_gate(request: Request, call_next):
 
     path = request.url.path
     protected_route = (
-        path == "/session" or path.startswith("/session/")
+        path == "/auth/me"
+        or path == "/session" or path.startswith("/session/")
         or path == "/demo" or path.startswith("/demo/")
         or path == "/tools" or path.startswith("/tools/")
     )

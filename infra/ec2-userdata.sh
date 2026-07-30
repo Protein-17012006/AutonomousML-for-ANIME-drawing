@@ -42,6 +42,9 @@ trap cleanup EXIT
 aws s3 sync "s3://${BUCKET_PREFIX}-deploy/frontend/" "\$stage/" --delete --exact-timestamps --region ${REGION}
 test -f "\$stage/index.html"
 test -d "\$stage/_next"
+# mktemp creates a root-only directory. Give nginx read/traverse access before
+# the atomic move, otherwise a fresh frontend publish serves 403 responses.
+chmod -R a+rX "\$stage"
 rm -rf /var/www/copilot.previous
 if [ -d /var/www/copilot ]; then
   mv /var/www/copilot /var/www/copilot.previous
@@ -94,6 +97,10 @@ http {
     server {
         listen 80 default_server;
         server_name _;
+        # CloudFront terminates viewer TLS but reaches this nginx origin over HTTP.
+        # Directory canonicalization (for example /copilot -> /copilot/) must be
+        # relative, otherwise nginx exposes the origin hop as an http:// redirect.
+        absolute_redirect off;
         root /var/www/copilot;
         index index.html;
         client_max_body_size 200m;          # video uploads <= ~2 min

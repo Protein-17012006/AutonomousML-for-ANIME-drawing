@@ -45,8 +45,8 @@ frontend/docs/teammate/*
 !frontend/docs/plans/phase-2-read-only-session-workspace-restoration.md
 !frontend/docs/teammate/PHASE-2-BACKEND-SESSION-HISTORY-HANDOFF.md
 worklog
-!worklog/
-!worklog/**
+worklog/
+worklog/**
 worklog/output/*.aux
 worklog/output/*.log
 worklog/output/*.out

@@ -4,13 +4,18 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Hub } from "aws-amplify/utils";
-import { configureAmplify } from "@/lib/amplify";
-import { establishCookieSession } from "@/lib/authenticatedApi";
+import { Button } from "@/components/ui/button";
+import { configureAmplify, getCurrentIdToken } from "@/lib/amplify";
+import { establishCookieSession, isAuthRequestError } from "@/lib/authenticatedApi";
+
+const SSO_TOTAL_TIMEOUT_MS = 10_000;
 
 export default function SsoCallbackPage() {
   const router = useRouter();
   const [message, setMessage] = useState("Finishing sign in...");
   const [failed, setFailed] = useState(false);
+  const [retryable, setRetryable] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
 
   useEffect(() => {
     configureAmplify();
@@ -20,13 +25,15 @@ export default function SsoCallbackPage() {
       if (finishing) return;
       finishing = true;
       let lastError: unknown;
-      for (let attempt = 0; attempt < 20 && active; attempt += 1) {
+      const deadline = Date.now() + SSO_TOTAL_TIMEOUT_MS;
+      for (; active && Date.now() < deadline;) {
         try {
-          await establishCookieSession();
+          await establishCookieSession(Math.max(1, deadline - Date.now()));
           if (active) router.replace("/copilot");
           return;
         } catch (error) {
           lastError = error;
+          if (isAuthRequestError(error, "unavailable")) break;
           // The OAuth listener exchanges Cognito's code asynchronously after
           // a full-page redirect. Wait briefly for tokens instead of treating
           // the first token lookup as a completed authentication failure.
@@ -35,9 +42,19 @@ export default function SsoCallbackPage() {
       }
       finishing = false;
       if (active) {
-        setFailed(true);
+        let hasToken = false;
+        try {
+          await getCurrentIdToken();
+          hasToken = true;
+        } catch {
+          hasToken = false;
+        }
+        setRetryable(hasToken && isAuthRequestError(lastError, "unavailable"));
+        setFailed(!hasToken || !isAuthRequestError(lastError, "unavailable"));
         setMessage(
-          lastError instanceof Error
+          hasToken && isAuthRequestError(lastError, "unavailable")
+            ? "Cognito sign-in succeeded, but the co-pilot service is temporarily unavailable."
+            : lastError instanceof Error
             ? lastError.message
             : "Sign in failed. Return to login and try again.",
         );
@@ -57,7 +74,14 @@ export default function SsoCallbackPage() {
       active = false;
       stop();
     };
-  }, [router]);
+  }, [retryCount, router]);
+
+  function retry() {
+    setFailed(false);
+    setRetryable(false);
+    setMessage("Finishing sign in...");
+    setRetryCount((count) => count + 1);
+  }
 
   return (
     <main className="grid min-h-screen place-items-center bg-background text-foreground">
@@ -69,6 +93,11 @@ export default function SsoCallbackPage() {
           <Link href="/login" className="text-sm font-medium underline underline-offset-4">
             Return to login
           </Link>
+        )}
+        {retryable && (
+          <Button type="button" variant="link" onClick={retry}>
+            Retry
+          </Button>
         )}
       </div>
     </main>

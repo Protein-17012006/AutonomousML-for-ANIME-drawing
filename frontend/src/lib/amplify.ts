@@ -5,6 +5,7 @@ import { Amplify } from "aws-amplify";
 import { fetchAuthSession, signOut } from "aws-amplify/auth";
 import { cognitoUserPoolsTokenProvider } from "aws-amplify/auth/cognito";
 import { sessionStorage as amplifySessionStorage } from "aws-amplify/utils";
+import { clearAuthFlow } from "@/lib/authFlow";
 
 let configured = false;
 
@@ -114,6 +115,6 @@ export async function clearTemporaryAmplifySession() {
     // storage keys alone can leave the previous identity active in this tab.
     await signOut();
   } finally {
-    window.sessionStorage.removeItem("copilot:pendingEmail");
+    clearAuthFlow();
   }
 }

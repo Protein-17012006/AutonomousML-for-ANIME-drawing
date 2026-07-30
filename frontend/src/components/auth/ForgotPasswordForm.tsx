@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { configureAmplify } from "@/lib/amplify";
+import { setAuthFlow } from "@/lib/authFlow";
 
 export function ForgotPasswordForm() {
   const router = useRouter();
@@ -25,7 +26,7 @@ export function ForgotPasswordForm() {
     setSubmitting(true);
     try {
       await resetPassword({ username: email.trim() });
-      sessionStorage.setItem("copilot:pendingEmail", email.trim());
+      setAuthFlow("reset-password", email);
       setSent(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not send reset code.");
