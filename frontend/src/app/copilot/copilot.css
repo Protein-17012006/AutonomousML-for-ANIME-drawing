@@ -7,7 +7,7 @@ body,
 #root {
   height: 100%;
 }
-body {
+body:has(.copilot-shell) {
   margin: 0;
   background: var(--color-sumi);
   color: var(--color-washi);
@@ -36,7 +36,7 @@ body {
 /* Retint the shadcn Sidebar to the copilot ink palette. Set on <body> (not just .copilot-shell)
    so it also reaches the Radix-portaled mobile Sheet drawer, which mounts as a body child.
    Route-scoped (copilot.css only loads on /copilot); theme-reactive via the --color-* ink tokens. */
-body {
+body:has(.copilot-shell) {
   --sidebar: var(--color-sumi-2);
   --sidebar-foreground: var(--color-washi);
   --sidebar-border: var(--color-line);
@@ -99,7 +99,7 @@ body {
   stroke: var(--color-akaire);
   stroke-width: 1.4;
 } */
-h1 {
+.copilot-shell h1 {
   position: relative;
   margin: 0;
   font-family: var(--font-display);
@@ -1618,7 +1618,7 @@ h1 {
   #root {
     height: auto;
   }
-  body {
+  body:has(.copilot-shell) {
     overflow-y: auto;
     overflow-x: hidden;
   } /* mobile: page scrolls + no horizontal bleed */

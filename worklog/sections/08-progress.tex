@@ -80,4 +80,10 @@ This section is the complete contribution record.
   \item \textbf{Frame-card line-test retirement.} Removed the frame-card line-test control and its conditional player so frame cards consistently present static key, in-between, and key strips.
   \item \textbf{Needs-key upload control extraction.} Replaced the review-row upload label with a dedicated button component that encapsulates the hidden PNG input while preserving the existing key-refill callback.
   \item \textbf{Frame-card key upload.} Reused the extracted upload control in needs-key frame cards and passed the existing refill callback through the review workbench.
+
+  \item \textbf{Project and frontend orientation.} Completed a read-only handoff of the current co-pilot architecture and frontend boundaries: the Next.js static export, Cognito-to-HttpOnly-cookie authentication transition, same-origin SSE session flow, and chat/review workspace ownership. No runtime, infrastructure, or production configuration was changed or exercised.
+
+  \item \textbf{Public-domain availability diagnosis.} Performed a read-only AWS and model-host investigation of the unavailable public domain. Route 53, CloudFront, and its certificate were healthy; the origin ALB's sole proxy target was unhealthy because its root health check returned HTTP 403 rather than HTTP 200. Verified that the separate model host's local FastAPI service returns HTTP 200 on port 8000. The remaining proxy-instance inspection was not run because the AWS MCP credentials expired; no production configuration was changed.
+
+  \item \textbf{Landing navigation scroll and hero fix.} Scoped the co-pilot stylesheet's body-level desktop and responsive overflow rules to the mounted `.copilot-shell`, and scoped its wordmark `h1` selector to `.copilot-shell h1`. This prevents the cached `/copilot` route stylesheet from leaving the landing page locked, restyled, or with its hero headline overridden after an auth-route round trip. Frontend lint and static export build passed; interactive browser verification was unavailable in this environment.
 \end{enumerate}
