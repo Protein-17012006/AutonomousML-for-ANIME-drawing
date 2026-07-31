@@ -52,6 +52,19 @@ def build_session_context(state: dict) -> str:
             brief = str(triage.get("brief") or "").strip()
             if brief:
                 row += f" | brief: {brief}"
+        # What the vision model actually saw, and where. Computed by explain_pairs
+        # and stored on the session, but never shown to the agent before — so the
+        # agent could offer the picture and still not say what was in it.
+        exp = (state.get("explanations") or {})
+        info = exp.get(p.index) or exp.get(str(p.index))
+        if isinstance(info, dict) and info:
+            row += (f" | vlm[{info.get('err_type', '?')}"
+                    f" @ {info.get('region', '?')}]")
+            note = str(info.get("explanation") or "").strip()
+            if note:
+                row += f" {note}"
+            if info.get("annotated_url"):
+                row += " | annotated image available"
         lines.append(row)
         if sum(len(ln) + 1 for ln in lines) > _MAX_CTX:
             lines.append(f"... (truncated at pair {p.index} of {len(res.pairs)})")

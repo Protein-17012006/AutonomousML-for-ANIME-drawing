@@ -324,3 +324,24 @@ def build_compare(result: CopilotResult, keys: List[np.ndarray], out_dir: str,
     stacked = [side_by_side(l, r) for l, r in zip(left, right)]
     encode_h264(stacked, os.path.join(out_dir, "compare.mp4"), fps)
     return "compare.mp4"
+
+
+def write_transcript(session_dir: str, state: dict):
+    """Write the agent-to-agent conversation as markdown for the exported bundle.
+
+    Returns the filename, or None when the session has no transcript. NEVER
+    raises — an artifact failure must not affect the session. The orchestration
+    import is deliberately inside the function: media must not depend on the
+    orchestration package at module level."""
+    try:
+        from service.orchestration.transcript import entries_for, render_markdown
+        entries = entries_for(state)
+        if not entries:
+            return None
+        name = "agent_conversation.md"
+        with open(os.path.join(session_dir, name), "w", encoding="utf-8") as fh:
+            fh.write(render_markdown(entries))
+        return name
+    except Exception as exc:    # noqa: BLE001 — by contract this never raises
+        print(f"[artifacts] WARN transcript not written: {exc}", flush=True)
+        return None
