@@ -337,3 +337,27 @@ def test_session_pair_order_matches_index():
     assert len(pairs) >= 2
     indices = [json.loads(p)["index"] for p in pairs]
     assert indices == sorted(indices), f"pairs out of order: {indices}"
+
+
+def test_result_event_carries_the_session_id():
+    """The client must not have to parse an artifact URL to learn the sid.
+
+    A published session is re-served with /sessions/{pid}/artifacts/... URLs, so
+    URL-parsing silently yields no sid there and the grounded Q&A box goes dead.
+    """
+    import json
+    import re
+
+    c = TestClient(app)
+    files = [
+        ("keys", ("0.png", _png(5), "image/png")),
+        ("keys", ("1.png", _png(10), "image/png")),
+    ]
+    r = c.post("/session", files=files, data={"engines": "stub"})
+    assert r.status_code == 200
+
+    data = json.loads(re.search(r"event: result\ndata: (.+)", r.text).group(1))
+    sid_from_url = data["artifacts"]["montage"].split("/")[2]
+
+    assert "sid" in data, "result event has no sid field"
+    assert str(data["sid"]) == sid_from_url

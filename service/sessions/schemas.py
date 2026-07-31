@@ -104,6 +104,12 @@ class PairEvent(BaseModel):
 
 
 class ResultEvent(BaseModel):
+    # The session id, sent explicitly. Clients used to recover it by slicing
+    # artifacts.montage ("/session/{sid}/..."); a republished session serves the
+    # same artifacts under "/sessions/{pid}/artifacts/...", so that slice yielded
+    # nothing and the grounded Q&A box silently went dead. None only for payloads
+    # rebuilt without a live session.
+    sid: Optional[int] = None
     n_autopass: int
     n_corrected: int
     keys_requested_total: int
@@ -130,7 +136,8 @@ class ResultEvent(BaseModel):
     @classmethod
     def from_result(cls, result, artifacts: dict = None, explanations: dict = None,
                     pair_mids: dict = None, csq: dict = None, key_urls: dict = None,
-                    sampling: dict = None, qa_degraded: bool = False) -> "ResultEvent":
+                    sampling: dict = None, qa_degraded: bool = False,
+                    sid: int | None = None) -> "ResultEvent":
         if artifacts is None:
             artifacts = {}
         if explanations is None:
@@ -141,6 +148,7 @@ class ResultEvent(BaseModel):
             key_urls = {}
         needs_key = [p.index for p in result.pairs if p.action == "needs_key"]
         return cls(
+            sid=sid,
             n_autopass=result.n_autopass,
             n_corrected=result.n_corrected,
             keys_requested_total=result.keys_requested_total,

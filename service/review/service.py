@@ -187,6 +187,7 @@ class ReviewSession:
 
         return SessionOutcome(
             result=new_result,
+            sid=sid,
             artifact_urls=metadata.artifact_urls,
             explanations=metadata.explanations,
             pair_mids=metadata.pair_mids,

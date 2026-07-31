@@ -40,6 +40,8 @@ export interface Explanation {
 
 //! REMOVE PLANTED PROPS
 export interface ResultEvent {
+  // sent explicitly by the server; absent only on sessions stored before it existed
+  sid?: number | null;
   n_autopass: number;
   n_corrected: number;
   flagged: number[];
