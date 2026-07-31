@@ -14,17 +14,8 @@ from typing import Callable, List
 import numpy as np
 
 from inbetween_copilot.reporting.compare import build_comparison_frames, build_split_sequences
-
-
-def _encode_h264(frames: List[np.ndarray], path: str, fps: int) -> str:
-    """Encode frames to a browser-playable H.264/yuv420p mp4 (EVEN dims required)."""
-    h, w = frames[0].shape[:2]
-    h2, w2 = h - (h % 2), w - (w % 2)
-    frames = [f[:h2, :w2] for f in frames]
-    import imageio
-    imageio.mimwrite(path, frames, fps=fps, codec="libx264",
-                     pixelformat="yuv420p", macro_block_size=None)
-    return path
+# the one H.264/yuv420p encoder (also renders the per-session compare.mp4)
+from service.media.artifacts import encode_h264 as _encode_h264
 
 
 def _decimate_rife(frames_full: List[np.ndarray], rife_engine: Callable):

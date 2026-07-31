@@ -12,6 +12,7 @@ import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { SocialAuthButtons } from "./SocialAuthButtons";
 import { configureAmplify } from "@/lib/amplify";
 import { establishCookieSession } from "@/lib/authenticatedApi";
+import { clearAuthFlow, setAuthFlow } from "@/lib/authFlow";
 
 export function LoginForm() {
   const router = useRouter();
@@ -32,12 +33,18 @@ export function LoginForm() {
       // A password submission is an explicit request to authenticate these
       // credentials. Never reuse a different cached Cognito/OAuth identity.
       await signOut();
+      clearAuthFlow();
       const result = await signIn({ username: email, password });
-      sessionStorage.setItem("copilot:pendingEmail", email);
       if (result.nextStep.signInStep === "CONFIRM_SIGN_UP") {
+        setAuthFlow("verify-email", email);
         router.push("/verify-email");
       } else if (result.nextStep.signInStep === "RESET_PASSWORD") {
         router.push("/forgot-password");
+      } else if (
+        result.nextStep.signInStep === "CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIRED"
+      ) {
+        setAuthFlow("new-password", email);
+        router.push("/new-password");
       } else if (result.isSignedIn) {
         await establishCookieSession();
         router.replace("/copilot");

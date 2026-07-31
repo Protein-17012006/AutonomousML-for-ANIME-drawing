@@ -1,17 +1,25 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { getCookieSession } from "@/lib/authenticatedApi";
+import { getCookieSession, isAuthRequestError } from "@/lib/authenticatedApi";
 
 interface AuthPageGuardProps {
   children: ReactNode;
 }
 
+type AuthPageAvailability = "available" | "unavailable";
+const AuthPageAvailabilityContext = createContext<AuthPageAvailability>("available");
+
+export function useAuthPageAvailability() {
+  return useContext(AuthPageAvailabilityContext);
+}
+
 export function AuthPageGuard({ children }: AuthPageGuardProps) {
   const router = useRouter();
   const [checking, setChecking] = useState(true);
+  const [availability, setAvailability] = useState<AuthPageAvailability>("available");
 
   useEffect(() => {
     let active = true;
@@ -20,10 +28,15 @@ export function AuthPageGuard({ children }: AuthPageGuardProps) {
       try {
         await getCookieSession();
         if (active) router.replace("/copilot");
-      } catch {
+      } catch (error) {
         // A missing, expired, or unavailable cookie session must not prevent
         // the user from reaching the page where they can authenticate.
-        if (active) setChecking(false);
+        if (active) {
+          if (isAuthRequestError(error, "unavailable")) {
+            setAvailability("unavailable");
+          }
+          setChecking(false);
+        }
       }
     }
 
@@ -44,5 +57,9 @@ export function AuthPageGuard({ children }: AuthPageGuardProps) {
     );
   }
 
-  return children;
+  return (
+    <AuthPageAvailabilityContext.Provider value={availability}>
+      {children}
+    </AuthPageAvailabilityContext.Provider>
+  );
 }

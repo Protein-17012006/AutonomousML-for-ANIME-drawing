@@ -28,9 +28,10 @@ bucket names, raw object keys, or another user's Cognito `sub`.
 npm install
 npm run dev            # http://localhost:3000
 ```
-Dev proxies the API to the configured service: `next.config.ts` rewrites `/auth/:path*`,
-`/me/:path*`, `/session`, `/session/:path*`, `/sessions`, `/sessions/:path*`, and `/demo` to `NEXT_PUBLIC_API_TARGET`
-(default `http://100.71.161.102:8000`; `.env.example` uses local `http://127.0.0.1:8000`).
+Dev proxies the API to the model-backed service: `next.config.ts` rewrites `/auth/:path*`,
+`/me/:path*`, `/session`, `/session/:path*`, `/sessions`, and `/sessions/:path*` to `NEXT_PUBLIC_API_TARGET`
+(default and `.env.example` target: `http://100.71.161.102:8000`). Override
+`NEXT_PUBLIC_API_TARGET` only when deliberately testing another reachable backend.
 
 For the no-model session-retrieval proof, configure these backend-only values in
 `service/.env.local` and run `uvicorn service.auth_dev_app:app --reload --env-file service/.env.local`:

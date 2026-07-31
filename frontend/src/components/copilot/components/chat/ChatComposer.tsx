@@ -83,7 +83,7 @@ export function ChatComposer(p: {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="box">Co-pilot (GPU)</SelectItem>
-                <SelectItem value="stub">Demo (no GPU)</SelectItem>
+                <SelectItem value="stub">Local stub (no GPU)</SelectItem>
               </SelectContent>
             </Select>
           </Field>

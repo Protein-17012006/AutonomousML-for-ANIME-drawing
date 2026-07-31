@@ -54,10 +54,13 @@ def establish_session(request: Request, response: Response) -> None:
 
 
 @router.get("/me")
-def get_me(user: CurrentUser = Depends(require_current_user)) -> dict:
+def get_me(response: Response, user: CurrentUser = Depends(require_current_user)) -> dict:
+    response.headers["Cache-Control"] = "no-store"
+    name = user.claims.get("name")
     return {
         "user_sub": user.sub,
         "username": user.username,
+        "name": name if isinstance(name, str) else None,
         "expires_at": int(float(user.claims.get("exp", 0))),
     }
 

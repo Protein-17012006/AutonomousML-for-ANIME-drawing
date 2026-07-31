@@ -13,8 +13,8 @@ export interface PairEvent {
   route?: PairRoute | null;
   keys_requested?: number;
   reason?: string;
-  verdict_prob?: number | null;
-  uncertainty?: number | null;
+  verdict_prob?: number | null; // likelihood of error
+  uncertainty?: number | null; // level of uncertainty of verdict prob
   mid_url?: string | null;
   correction?: {
     status: string;
@@ -24,7 +24,7 @@ export interface PairEvent {
 }
 
 export interface CsqBand {
-  tau_pass: number[];
+  tau_pass: number[]; 
   tau_flag: number[];
   u_edges: number[];
   u_max: number;
@@ -38,13 +38,16 @@ export interface Explanation {
   annotated_url?: string;
 }
 
+//! REMOVE PLANTED PROPS
 export interface ResultEvent {
   n_autopass: number;
   n_corrected: number;
   flagged: number[];
   abstained: number[];
   keys_requested_total: number;
-  artifacts?: { montage: string; video: string; report?: string };
+  // compare = box-style side-by-side ORIGINAL|RECON loop (absent on older sessions
+  // and when every gap was gate-refused)
+  artifacts?: { montage: string; video: string; report?: string; compare?: string };
   explanations?: Record<string, Explanation>;
   pair_mids?: Record<string, string>;
   key_urls?: Record<string, string>;
@@ -66,12 +69,4 @@ export interface ResultEvent {
   qa_degraded?: boolean;
 }
 
-export interface DemoResult {
-  video: string;
-  video_orig?: string;
-  video_rife?: string;
-  frames: number;
-  src: number;
-  gt: number;
-  interpolator?: "rife" | "gimm";
-}
+//! REMOVE (your change): obsolete frontend DemoResult removed with the comparison templates.

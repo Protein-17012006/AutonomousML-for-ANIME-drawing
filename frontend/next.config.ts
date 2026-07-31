@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 
 // Two build modes:
 //  • DEV / normal build — the co-pilot SPA fetches the FastAPI service with
-//    same-origin relative paths (/session, /session/video, /demo, /session/{sid}/…).
+//    same-origin relative paths (/session, /session/video, /session/{sid}/…).
 //    localhost != box origin, so we proxy them to the box via rewrites (the Next
 //    equivalent of the old Vite dev proxy). Override target with NEXT_PUBLIC_API_TARGET.
 //  • BUILD_EXPORT=1 — a STATIC export (`out/`) served same-origin by the box FastAPI
@@ -28,7 +28,6 @@ const nextConfig: NextConfig = EXPORT
           { source: "/session/:path*", destination: `${API_TARGET}/session/:path*` },
           { source: "/sessions", destination: `${API_TARGET}/sessions` },
           { source: "/sessions/:path*", destination: `${API_TARGET}/sessions/:path*` },
-          { source: "/demo", destination: `${API_TARGET}/demo` },
         ];
       },
     };

@@ -36,7 +36,21 @@ EOF
 cat > /usr/local/bin/refresh-frontend.sh <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
-aws s3 sync "s3://${BUCKET_PREFIX}-deploy/frontend/" /var/www/copilot/ --delete --exact-timestamps --region ${REGION}
+stage=\$(mktemp -d /var/www/copilot.next.XXXXXX)
+cleanup() { rm -rf "\$stage"; }
+trap cleanup EXIT
+aws s3 sync "s3://${BUCKET_PREFIX}-deploy/frontend/" "\$stage/" --delete --exact-timestamps --region ${REGION}
+test -f "\$stage/index.html"
+test -d "\$stage/_next"
+# mktemp creates a root-only directory. Give nginx read/traverse access before
+# the atomic move, otherwise a fresh frontend publish serves 403 responses.
+chmod -R a+rX "\$stage"
+rm -rf /var/www/copilot.previous
+if [ -d /var/www/copilot ]; then
+  mv /var/www/copilot /var/www/copilot.previous
+fi
+mv "\$stage" /var/www/copilot
+trap - EXIT
 systemctl reload nginx
 EOF
 chmod +x /usr/local/bin/refresh-frontend.sh
@@ -83,6 +97,10 @@ http {
     server {
         listen 80 default_server;
         server_name _;
+        # CloudFront terminates viewer TLS but reaches this nginx origin over HTTP.
+        # Directory canonicalization (for example /copilot -> /copilot/) must be
+        # relative, otherwise nginx exposes the origin hop as an http:// redirect.
+        absolute_redirect off;
         root /var/www/copilot;
         index index.html;
         client_max_body_size 200m;          # video uploads <= ~2 min
@@ -90,7 +108,11 @@ http {
 
         location /artifacts/ { return 404; }   # CloudFront serves these from S3, never via the box
 
-        location ~ ^/(session|demo) {
+        # API routes must reach FastAPI rather than falling through to the static
+        # Next export. The plural sessions route serves durable owned-session
+        # history and workspace snapshots; the auth route bootstraps the
+        # application cookie.
+        location ~ ^/(auth|sessions|session|demo)(?:/|$) {
             limit_req zone=sess burst=3 nodelay;
             limit_req zone=inter burst=10 nodelay;
             proxy_pass http://${BOX_HOST}:8000;

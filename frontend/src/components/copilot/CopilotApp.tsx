@@ -4,9 +4,14 @@
 // (this file used to be a ~1360-line monolith holding all of them).
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { PairEvent, ResultEvent, DemoResult, InputMode } from "./types";
-import { runSession, runDemo, runVideoSession, askQuestion } from "./api";
-import { type ChatMsg, deriveMessages, type QaTurn, type UserTurn } from "./lib/chatModel";
+import type { PairEvent, ResultEvent, InputMode } from "./types";
+import { runSession, runVideoSession, askQuestion } from "./api";
+import {
+  type ChatMsg,
+  deriveMessages,
+  type QaTurn,
+  type UserTurn,
+} from "./lib/chatModel";
 import { useFileSet } from "./lib/useFileSet";
 import { downloadBundle } from "./lib/exportSession";
 import { ChatHeader } from "./components/chat/ChatHeader";
@@ -14,11 +19,9 @@ import { ChatView } from "./components/chat/ChatView";
 import { ChatComposer } from "./components/chat/ChatComposer";
 import { ChatWelcome } from "./components/chat/ChatWelcome";
 import { ReviewWorkbench } from "./components/review/ReviewWorkbench";
-import { Compare } from "./components/review/Compare";
 import { Toast } from "./components/review/Toast";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { Button } from "@/components/ui/button";
 import {
   AppSidebar,
   type SidebarAccount,
@@ -36,13 +39,6 @@ import {
   type PublishedSessionSummary,
 } from "@/lib/sessionApi";
 
-/* cadence value → human "shoot on Ns" label, shared by the upload bubble + the result sampling badge */
-const CADENCE_LABEL: Record<string, string> = {
-  "24": "on-1s",
-  "12": "on-2s",
-  "8": "on-3s",
-};
-
 function sidFromResult(r: ResultEvent | null) {
   const ref = r?.artifacts?.montage || r?.artifacts?.video;
   return ref?.startsWith("/session/") ? (ref.split("/")[2] ?? null) : null;
@@ -51,7 +47,6 @@ function sidFromResult(r: ResultEvent | null) {
 export default function App() {
   const router = useRouter();
   const keys = useFileSet();
-  const demo = useFileSet();
   const [engines, setEngines] = useState("box");
   const [interpolator, setInterpolator] = useState("rife");
   // cadence = shoot-on-Ns rate the artist drew at (24/12/8); smoothness = the in-between
@@ -81,9 +76,6 @@ export default function App() {
   // ChatWelcome quick-import buttons share one source of truth.
   const [mode, setMode] = useState<InputMode>("frames");
 
-  const [demoBuilding, setDemoBuilding] = useState(false);
-  const [demoBanner, setDemoBanner] = useState<string | null>(null);
-  const [demoResult, setDemoResult] = useState<DemoResult | null>(null);
 
   // chat-first surface state (vault 'Chat-First Copilot Surface')
   const [view, setView] = useState<"chat" | "board">("chat");
@@ -111,21 +103,23 @@ export default function App() {
       setHistoryCursor(page.next_cursor);
       return page.items;
     } catch (error) {
-      setHistoryError(error instanceof Error ? error.message : "Could not load sessions.");
+      setHistoryError(
+        error instanceof Error ? error.message : "Could not load sessions.",
+      );
       return [];
     } finally {
       setHistoryLoading(false);
     }
   }, []);
-// Account Setup
+  // Account Setup
   useEffect(() => {
     let active = true;
     getCookieSession()
       .then((session) => {
         if (!active) return;
         setAccount({
-          name: session.username || "Animator",
-          email: session.username || undefined,
+          name: session.name,
+          username: session.username,
         });
         void loadHistory();
       })
@@ -178,18 +172,26 @@ export default function App() {
     }
     try {
       const selected = await getMySession(session.pid);
-      setHistory((items) => items.map((item) => item.pid === selected.pid ? selected : item));
-      if (process.env.NODE_ENV === "development") {
-        console.info("[selected-session-summary]", selected);
-      }
+      setHistory((items) =>
+        items.map((item) => (item.pid === selected.pid ? selected : item)),
+      );
+      // This API type contains only the safe sidebar summary contract; log it
+      // after a successful selection in every build so production support can
+      // confirm the owner-scoped record returned by FastAPI.
+      console.info("[selected-session-summary]", selected);
     } catch (error) {
-      setHistoryError(error instanceof Error ? error.message : "Could not load session.");
+      setHistoryError(
+        error instanceof Error ? error.message : "Could not load session.",
+      );
     }
   };
 
   const createHistorySession = async (title: string) => {
     const created = await createMySession(title);
-    setHistory((items) => [created, ...items.filter((item) => item.pid !== created.pid)]);
+    setHistory((items) => [
+      created,
+      ...items.filter((item) => item.pid !== created.pid),
+    ]);
     setSelectedPid(created.pid);
     setActiveDraftPid(created.pid);
     clearAll();
@@ -198,7 +200,9 @@ export default function App() {
 
   const renameHistorySession = async (pid: string, title: string) => {
     const renamed = await renameMySession(pid, title);
-    setHistory((items) => items.map((item) => item.pid === pid ? renamed : item));
+    setHistory((items) =>
+      items.map((item) => (item.pid === pid ? renamed : item)),
+    );
   };
 
   const loadMoreHistory = async () => {
@@ -209,11 +213,17 @@ export default function App() {
       const page = await listMySessions(20, historyCursor);
       setHistory((items) => [
         ...items,
-        ...page.items.filter((next) => !items.some((item) => item.pid === next.pid)),
+        ...page.items.filter(
+          (next) => !items.some((item) => item.pid === next.pid),
+        ),
       ]);
       setHistoryCursor(page.next_cursor);
     } catch (error) {
-      setHistoryError(error instanceof Error ? error.message : "Could not load more sessions.");
+      setHistoryError(
+        error instanceof Error
+          ? error.message
+          : "Could not load more sessions.",
+      );
     } finally {
       setHistoryLoadingMore(false);
     }
@@ -246,21 +256,34 @@ export default function App() {
     setQaTurns([]);
     setLiveSid(null);
     setUpload({
-      label: `${keys.files.length} keyframes · ${engines === "box" ? interpolator.toUpperCase() : "Demo"} · ${CADENCE_LABEL[cadence] ?? cadence} · ×${smoothness}`,
-      thumbs: keyUrls.slice(0, 6),
+      media: "keyframes",
+      count: keys.files.length,
     });
     setRunning(true);
     try {
-      await runSession(keys.files, engines, interpolator, cadence, smoothness, {
-        onPair: (p) => setLog((prev) => [...prev, p]),
-        onResult: (r) => {
-          setResult(r);
-          setLiveSid(sidFromResult(r));
+      await runSession(
+        keys.files,
+        engines,
+        interpolator,
+        cadence,
+        smoothness,
+        {
+          onPair: (p) => setLog((prev) => [...prev, p]),
+          onResult: (r) => {
+            setResult(r);
+            setLiveSid(sidFromResult(r));
+          },
+          onError: (m) => setBanner(m),
         },
-        onError: (m) => setBanner(m),
-      }, activeDraftPid);
+        activeDraftPid,
+      );
       const refreshed = await loadHistory();
-      if (activeDraftPid && refreshed.some((item) => item.pid === activeDraftPid && item.status === "complete")) {
+      if (
+        activeDraftPid &&
+        refreshed.some(
+          (item) => item.pid === activeDraftPid && item.status === "complete",
+        )
+      ) {
         setActiveDraftPid(null);
       }
     } catch (err) {
@@ -282,21 +305,35 @@ export default function App() {
     setQaTurns([]);
     setLiveSid(null);
     setUpload({
-      label: `${videoFile.name} · stride ${stride} · ${engines === "box" ? interpolator.toUpperCase() : "Demo"}`,
-      thumbs: [],
+      media: "video",
+      count: 1,
     });
     setRunning(true);
     try {
-      await runVideoSession(videoFile, stride, cadence, smoothness, engines, interpolator, {
-        onPair: (p) => setLog((prev) => [...prev, p]),
-        onResult: (r) => {
-          setResult(r);
-          setLiveSid(sidFromResult(r));
+      await runVideoSession(
+        videoFile,
+        stride,
+        cadence,
+        smoothness,
+        engines,
+        interpolator,
+        {
+          onPair: (p) => setLog((prev) => [...prev, p]),
+          onResult: (r) => {
+            setResult(r);
+            setLiveSid(sidFromResult(r));
+          },
+          onError: (m) => setBanner(m),
         },
-        onError: (m) => setBanner(m),
-      }, activeDraftPid);
+        activeDraftPid,
+      );
       const refreshed = await loadHistory();
-      if (activeDraftPid && refreshed.some((item) => item.pid === activeDraftPid && item.status === "complete")) {
+      if (
+        activeDraftPid &&
+        refreshed.some(
+          (item) => item.pid === activeDraftPid && item.status === "complete",
+        )
+      ) {
         setActiveDraftPid(null);
       }
     } catch (err) {
@@ -343,24 +380,6 @@ export default function App() {
       console.error("add-key failed:", err);
       setBanner("Couldn't add your key — is the service running? Try again.");
     }
-  };
-
-  const buildDemo = async () => {
-    setDemoBanner(null);
-    setDemoResult(null);
-    setDemoBuilding(true);
-    try {
-      setDemoResult(await runDemo(demo.files, engines, interpolator, "24"));
-    } catch (err) {
-      setDemoBanner(`${err}`);
-    }
-    setDemoBuilding(false);
-  };
-
-  const clearDemo = () => {
-    demo.clear();
-    setDemoResult(null);
-    setDemoBanner(null);
   };
 
   const onAsk = async (q: string) => {
@@ -424,6 +443,9 @@ export default function App() {
           onRenameSession={renameHistorySession}
           onRetryHistory={() => void loadHistory()}
           onLoadMore={() => void loadMoreHistory()}
+          view={view}
+          onViewChange={setView}
+          previewAvailable={running || log.length > 0}
         />
         <div className="app">
           {view === "chat" ? (
@@ -434,8 +456,7 @@ export default function App() {
                 <ChatView
                   msgs={msgs}
                   keyUrls={effKeyUrls}
-                  onOpenBoard={openBoard}
-                  onRefill={refillKey}
+                  onOpenBoard={() => openBoard(null)}
                   onExport={downloadBundle}
                 />
               ) : (
@@ -477,16 +498,6 @@ export default function App() {
             </div>
           ) : (
             <>
-              <div className="board-bar">
-                <Button
-                  variant="outline"
-                  type="button"
-                  className="font-mono text-[12.5px] tracking-[0.02em]"
-                  onClick={() => setView("chat")}
-                >
-                  ← Back to chat
-                </Button>
-              </div>
               <ReviewWorkbench
                 log={log}
                 result={result}
@@ -501,17 +512,6 @@ export default function App() {
                   24
                 }
                 initialFocus={boardFocus}
-                compareSlot={
-                  <Compare
-                    files={demo.files}
-                    onAdd={demo.add}
-                    onClear={clearDemo}
-                    onBuild={buildDemo}
-                    building={demoBuilding}
-                    banner={demoBanner}
-                    result={demoResult}
-                  />
-                }
               />
             </>
           )}

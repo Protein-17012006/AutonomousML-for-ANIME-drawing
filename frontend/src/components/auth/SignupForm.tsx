@@ -11,6 +11,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { SocialAuthButtons } from "./SocialAuthButtons";
 import { configureAmplify } from "@/lib/amplify";
+import { setAuthFlow } from "@/lib/authFlow";
 
 export function SignupForm() {
   const router = useRouter();
@@ -24,6 +25,7 @@ export function SignupForm() {
 
     const form = new FormData(e.currentTarget);
     const email = String(form.get("email") ?? "").trim();
+    const name = email.split("@", 1)[0]?.trim() || email;
     const password = String(form.get("password") ?? "");
     const confirm = String(form.get("confirm-password") ?? "");
     if (password !== confirm) {
@@ -33,16 +35,20 @@ export function SignupForm() {
 
     setSubmitting(true);
     try {
-      await signUp({
+      const result = await signUp({
         username: email,
         password,
         options: {
-          userAttributes: { email },
+          userAttributes: { email, name },
           autoSignIn: true,
         },
       });
-      sessionStorage.setItem("copilot:pendingEmail", email);
-      router.push("/verify-email");
+      if (result.nextStep.signUpStep === "CONFIRM_SIGN_UP") {
+        setAuthFlow("verify-email", email);
+        router.push("/verify-email");
+      } else {
+        router.push("/login");
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sign up failed.");
     } finally {

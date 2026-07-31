@@ -7,7 +7,6 @@ import {
 } from "lucide-react";
 import type { PairEvent } from "../../types";
 
-/** Semantic status mark shared by the chat-adjacent review surfaces. */
 export function StatusGlyph({ pair }: { pair: PairEvent }) {
   const Icon =
     pair.action === "needs_key"

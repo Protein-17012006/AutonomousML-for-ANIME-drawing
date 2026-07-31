@@ -24,6 +24,7 @@ def _claims(**patch):
         "aud": "client-1",
         "exp": time.time() + 300,
         "username": "artist@example.com",
+        "name": "Artist",
     }
     claims.update(patch)
     return claims
@@ -154,12 +155,29 @@ def test_cookie_bootstrap_me_and_logout(monkeypatch, injected_verifier):
     me = client.get("/auth/me")
     assert me.status_code == 200
     assert me.json()["user_sub"] == "user-sub-1"
+    assert me.json()["name"] == "Artist"
     assert me.json()["expires_at"] > time.time()
+    assert me.headers["cache-control"] == "no-store"
 
     logged_out = client.post("/auth/logout", headers={"Origin": ORIGIN})
     assert logged_out.status_code == 204
     assert "Max-Age=0" in logged_out.headers["set-cookie"]
     assert client.get("/auth/me").status_code == 401
+
+
+def test_auth_me_clears_an_invalid_cookie(monkeypatch, injected_verifier):
+    monkeypatch.setenv("COPILOT_AUTH_REQUIRED", "1")
+    client = _client()
+    assert _bootstrap(client).status_code == 204
+
+    class RejectingVerifier:
+        def verify(self, token):
+            raise ValueError("bad signature")
+
+    app.state.auth_verifier = RejectingVerifier()
+    response = client.get("/auth/me")
+    assert response.status_code == 401
+    assert "Max-Age=0" in response.headers["set-cookie"]
 
 
 def test_session_gate_requires_cookie_when_enabled(monkeypatch):

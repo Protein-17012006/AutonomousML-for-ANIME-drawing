@@ -18,7 +18,7 @@ BOX_DIR="${BOX_DIR:-~/copilot_svc}"
 PORT="${PORT:-8000}"
 DEST="${BOX_USER}@${BOX_HOST}"
 
-# what to ship: the service, the vanilla web UI (fallback), the core lib, its RUNTIME
+# what to ship: the service, the core lib, its RUNTIME
 # imports (inbetween_copilot/signals/* imports benchmark.{lib,smallgap} at import time,
 # and wiring's qa_fn needs vision_common — omitting them left stale copies on the box:
 # the audit's #3 finding, 2026-07-02), and the daemon launcher.

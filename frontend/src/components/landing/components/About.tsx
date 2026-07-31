@@ -3,11 +3,11 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 // About / background + mission on the left, placeholder team on the right.
 // Two-up on desktop via grid, stacked on mobile. Team photos are placeholder avatars.
 const TEAM = [
-  { initials: "AN", name: "A. Nguyen", role: "Founder" },
-  { initials: "MT", name: "M. Tran", role: "ML Lead" },
-  { initials: "KS", name: "K. Sato", role: "Design" },
-  { initials: "RL", name: "R. Lee", role: "Animation" },
-  { initials: "DL", name: "D. Le", role: "Backend" },
+  { initials: "LD", name: "Long D.", role: "Unassigned" },
+  { initials: "HN", name: "Hoang N.", role: "Unassigned" },
+  { initials: "HT", name: "Ha Tr.", role: "Unassigned" },
+  { initials: "KB", name: "Khang B.", role: "Unassigned" },
+  { initials: "PL", name: "Phong L.", role: "Unassigned" },
 ] as const;
 
 export function About() {

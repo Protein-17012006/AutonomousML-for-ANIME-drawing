@@ -1,0 +1,19 @@
+sequenceDiagram
+    actor Artist
+    participant Client as Next.js client
+    participant Cognito as Cognito User Pool
+    participant API as FastAPI backend
+
+    Artist->>Client: Enter email and password
+    Client->>Cognito: signUp(email, password)
+    Cognito-->>Artist: Send confirmation code by email
+    Artist->>Client: Enter confirmation code
+    Client->>Cognito: confirmSignUp(code)
+    Client->>Cognito: signIn(email, password)
+    Cognito-->>Client: Cognito ID token
+    Client->>API: POST /auth/session\nAuthorization: Bearer ID token
+    API->>Cognito: Validate signed JWT
+    Cognito-->>API: Verified claims
+    API-->>Client: Set-Cookie: HttpOnly application session
+    Client->>API: Protected API/SSE request\nCookie: application session
+    API-->>Client: Protected response or stream

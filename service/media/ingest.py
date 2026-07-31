@@ -183,7 +183,9 @@ def _load_frames_from_video(
     that is a bit over the cap just runs. A clip still over MAX_KEYS at that ceiling is too long
     for one cut → it fails loudly with the exact stride to use (we refuse to silently decimate
     it to a sparse, unfaithful set). Returns
-    `(keys, effective_stride, source_frame_count, source_fps)` — `source_fps` is the clip's
+    `(keys, gt_frames, effective_stride, source_frame_count, source_fps)` — `gt_frames[g]` is
+    the middle dropped frame of gap g (the compare artifact's ORIGINAL pane; all None at
+    stride 1) and `source_fps` is the clip's
     native fps (cadence derivation reads it downstream). cv2 is imported lazily so the PNG
     /session path never depends on opencv. Raises HTTPException on a non-video, an undecodable
     clip, a too-long clip, or < 2 keys."""
@@ -288,6 +290,28 @@ def _load_frames_from_video(
                                 f"limit of {settings.max_key_total_pixels}"),
                     )
             idx += 1
+
+        # --- second pass: the middle dropped frame of each gap, for the compare
+        # artifact's ORIGINAL pane. Runs before the finally-block deletes the tmp
+        # file. eff_stride is final here, so key g sits at frame g*eff_stride and
+        # the gap's middle at g*eff_stride + eff_stride//2. Bounded: <= len(keys)-1
+        # extra frames (MAX_KEYS-capped). eff_stride == 1 drops nothing -> all None.
+        gt_frames: "List[np.ndarray | None]" = [None] * max(len(keys) - 1, 0)
+        if not overflow and eff_stride >= 2 and len(keys) >= 2:
+            wanted = {g * eff_stride + eff_stride // 2: g
+                      for g in range(len(keys) - 1)}
+            cap.release()
+            cap = cv2.VideoCapture(tmp_path)
+            frame_no = 0
+            while wanted and cap.isOpened():
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                gap = wanted.pop(frame_no, None)
+                if gap is not None:
+                    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    gt_frames[gap] = np.asarray(rgb, dtype=np.uint8)
+                frame_no += 1
     finally:
         if cap is not None:
             cap.release()          # deterministic release even if cv2.read() raised mid-loop
@@ -319,4 +343,4 @@ def _load_frames_from_video(
         # surfaced in uvicorn.log — the clip was lightly auto-decimated to fit the MAX_KEYS ceiling
         print(f"[session/video] auto-fit stride {stride} -> {eff_stride} "
               f"({idx} frames -> {len(keys)} keys, cap {settings.max_keys})", flush=True)
-    return keys, eff_stride, idx, src_fps
+    return keys, gt_frames, eff_stride, idx, src_fps

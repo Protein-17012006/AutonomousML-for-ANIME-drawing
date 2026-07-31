@@ -42,8 +42,8 @@ import {
 } from "lucide-react";
 
 export interface SidebarAccount {
-  name: string;
-  email?: string;
+  name?: string | null;
+  username?: string | null;
 }
 
 interface AppSidebarProps {
@@ -60,10 +60,17 @@ interface AppSidebarProps {
   onRenameSession: (pid: string, title: string) => Promise<void>;
   onRetryHistory: () => void;
   onLoadMore: () => void;
+  view: "chat" | "board";
+  onViewChange: (view: "chat" | "board") => void;
+  previewAvailable: boolean;
+}
+
+function accountName(account: SidebarAccount | null) {
+  return account?.name?.trim() || account?.username?.trim() || "Animator";
 }
 
 function initials(account: SidebarAccount | null) {
-  const source = account?.name || account?.email || "Animator";
+  const source = accountName(account);
   return source
     .split(/\s|@/)
     .filter(Boolean)
@@ -86,6 +93,9 @@ export function AppSidebar({
   onRenameSession,
   onRetryHistory,
   onLoadMore,
+  view,
+  onViewChange,
+  previewAvailable,
 }: AppSidebarProps) {
   const { state, isMobile, toggleSidebar } = useSidebar();
   const collapsedRail = state === "collapsed" && !isMobile;
@@ -183,13 +193,28 @@ export function AppSidebar({
         <SidebarGroup>
           <SidebarMenu>
             <SidebarMenuItem>
-              <SidebarMenuButton isActive tooltip="Chat">
+              <SidebarMenuButton
+                type="button"
+                isActive={view === "chat"}
+                onClick={() => onViewChange("chat")}
+                tooltip="Chat"
+              >
                 <MessageSquare />
                 <span>Chat</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
             <SidebarMenuItem>
-              <SidebarMenuButton tooltip="Preview board">
+              <SidebarMenuButton
+                type="button"
+                isActive={view === "board"}
+                disabled={!previewAvailable}
+                onClick={() => onViewChange("board")}
+                tooltip={
+                  previewAvailable
+                    ? "Preview board"
+                    : "Run a session first to open the preview board."
+                }
+              >
                 <LayoutGrid />
                 <span>Preview board</span>
               </SidebarMenuButton>
@@ -342,10 +367,10 @@ export function AppSidebar({
                   </Avatar>
                   <div className="flex flex-col gap-0.5 group-data-[collapsible=icon]:hidden">
                     <span className="truncate text-sm text-washi">
-                      {account?.name || "Animator"}
+                      {accountName(account)}
                     </span>
                     <Badge variant="outline" className="border-line text-ash">
-                      {account?.email || "Signed in"}
+                      Free
                     </Badge>
                   </div>
                 </SidebarMenuButton>

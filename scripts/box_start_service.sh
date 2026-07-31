@@ -62,6 +62,15 @@ if secure_env_file "$DEEPSEEK_ENV" 0; then
   . "$DEEPSEEK_ENV" || security_fail "could not load $DEEPSEEK_ENV"
 fi
 
+# Deployment tuning (e.g. export COPILOT_TAU_GATE=0.05 for line-art demos — the
+# colored-anime calibrated 0.017 sits BELOW the whole line-art gap_score range
+# 0.019-0.031, so every pair blocked NEEDS_KEY forever; root-caused 2026-07-23).
+# Optional and fail-soft — absent file = calibrated code defaults.
+TUNING_ENV="$HOME/.copilot_tuning_env"
+if secure_env_file "$TUNING_ENV" 0; then
+  . "$TUNING_ENV" || security_fail "could not load $TUNING_ENV"
+fi
+
 # AWS publisher (front door sub-project 3): S3 artifacts + DynamoDB session records.
 # Env-gated (AWS_PUBLISH=1 inside the file) and fail-soft — absent file = publisher off.
 AWS_ENV="$HOME/.copilot_aws_env"
@@ -94,9 +103,7 @@ secure_env_file "$AUTH_ENV" 1
 [ -n "$COPILOT_COGNITO_REGION" ] || security_fail "COPILOT_COGNITO_REGION missing from $AUTH_ENV"
 [ -n "$COPILOT_COGNITO_USER_POOL_ID" ] || security_fail "COPILOT_COGNITO_USER_POOL_ID missing from $AUTH_ENV"
 [ -n "$COPILOT_COGNITO_APP_CLIENT_ID" ] || security_fail "COPILOT_COGNITO_APP_CLIENT_ID missing from $AUTH_ENV"
-[ -n "$COPILOT_ALB_ARN" ] || security_fail "COPILOT_ALB_ARN missing from $AUTH_ENV"
-export COPILOT_COGNITO_REGION COPILOT_COGNITO_USER_POOL_ID
-export COPILOT_COGNITO_APP_CLIENT_ID COPILOT_ALB_ARN
+export COPILOT_COGNITO_REGION COPILOT_COGNITO_USER_POOL_ID COPILOT_COGNITO_APP_CLIENT_ID
 
 if [ -n "$PID" ]; then echo "killing old server pid $PID on :$PORT"; kill "$PID"; sleep 2; fi
 
@@ -104,7 +111,7 @@ cd "$DIR" || { echo "FATAL: no $DIR"; exit 1; }
 # COPILOT_WEB_DIR=dist serves the team's canonical Next.js static export
 # (~/copilot_svc/dist, deployed separately from the export repo — NOT from this repo;
 # the old Vite frontend/ was removed 2026-07-05); falls back to web/ in app.py if dist absent.
-COPILOT_AUTH_REQUIRED=1 COPILOT_TRUST_ALB_OIDC=1 COPILOT_ENGINES=box \
+COPILOT_AUTH_REQUIRED=1 COPILOT_TRUST_ALB_OIDC=0 COPILOT_ENGINES=box \
   COPILOT_WEB_DIR="${COPILOT_WEB_DIR:-dist}" nohup setsid "$UVICORN" service.app:app \
   --host 0.0.0.0 --port "$PORT" >"$DIR/uvicorn.log" 2>&1 </dev/null &
 disown 2>/dev/null || true
@@ -121,5 +128,12 @@ if [ "$AUTH_CODE" != "401" ]; then
   NEW_PID="$(ss -ltnp 2>/dev/null | grep ":$PORT" | grep -oP 'pid=\K[0-9]+' | head -1)"
   [ -z "$NEW_PID" ] || kill "$NEW_PID" 2>/dev/null || true
   security_fail "auth health check expected HTTP 401, got ${AUTH_CODE:-no response}"
+fi
+HISTORY_CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 \
+  "http://127.0.0.1:$PORT/sessions" || true)
+if [ "$HISTORY_CODE" != "401" ]; then
+  NEW_PID="$(ss -ltnp 2>/dev/null | grep ":$PORT" | grep -oP 'pid=\K[0-9]+' | head -1)"
+  [ -z "$NEW_PID" ] || kill "$NEW_PID" 2>/dev/null || true
+  security_fail "session-history health check expected HTTP 401, got ${HISTORY_CODE:-no response}"
 fi
 echo "OK: listening on :$PORT with authentication enforced"

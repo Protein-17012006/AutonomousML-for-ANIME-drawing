@@ -19,6 +19,7 @@ class RenderedSessionArtifacts:
     key_files: dict[int, str]
     frame_count: int
     duration: float
+    compare_file: "str | None" = None   # compare.mp4 basename; None when nothing filled
 
 
 def render_session_artifacts(
@@ -32,6 +33,7 @@ def render_session_artifacts(
     mid_engine: Callable | None = None,
     vlm_struct_fn: Callable | None = None,
     softness_fn: Callable | None = None,
+    gt_frames: list | None = None,
 ) -> RenderedSessionArtifacts:
     """Write every final-session artifact from one shared render calculation.
 
@@ -89,6 +91,11 @@ def render_session_artifacts(
     )
     pair_files = artifacts.build_pair_frames(result, out_dir)
     key_files = artifacts.build_key_frames(keys, out_dir)
+    # box-style side-by-side ORIGINAL|RECON. cadence*2 = the restored full rate
+    # (on-2s 12 -> 24fps, the box compare_video rate) — NOT output_fps, which
+    # differs at smoothness 1.
+    compare_file = artifacts.build_compare(
+        result, keys, out_dir, fps=cadence_fps * 2, gt_frames=gt_frames)
 
     return RenderedSessionArtifacts(
         explanations=explanations,
@@ -97,4 +104,5 @@ def render_session_artifacts(
         key_files=key_files,
         frame_count=len(frames),
         duration=duration,
+        compare_file=compare_file,
     )

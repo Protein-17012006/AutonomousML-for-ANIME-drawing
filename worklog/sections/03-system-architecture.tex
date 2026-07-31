@@ -1,0 +1,4 @@
+\section{System architecture}
+The frontend is a static Next.js application served with the FastAPI service in production. In development, relative API requests are rewritten to the configured service target. The browser submits media to the service and consumes its decision log through server-sent events read with \texttt{fetch()} and a \texttt{ReadableStream}.
+
+The frontend provides the artist interaction surface, while the backend runs the generation and QA pipeline, returns per-pair and final events, and exposes protected session resources.

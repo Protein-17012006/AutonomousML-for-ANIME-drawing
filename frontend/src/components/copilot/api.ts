@@ -1,21 +1,22 @@
 // API layer — talks to the FastAPI co-pilot service (same contract as the old web/app.js).
-import type { PairEvent, ResultEvent, DemoResult } from "./types";
+import type { PairEvent, ResultEvent } from "./types";
 import { authenticatedFetch } from "@/lib/authenticatedApi";
 
 interface SSEEvent {
   name: string;
-  // SSE payloads are validated server-side; shape depends on event name.
   data: unknown;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
-
 function isPairEvent(value: unknown): value is PairEvent {
-  return isRecord(value) && typeof value.index === "number" && typeof value.action === "string";
+  return (
+    isRecord(value) &&
+    typeof value.index === "number" &&
+    typeof value.action === "string"
+  );
 }
-
 function isResultEvent(value: unknown): value is ResultEvent {
   return (
     isRecord(value) &&
@@ -26,22 +27,16 @@ function isResultEvent(value: unknown): value is ResultEvent {
     Array.isArray(value.abstained)
   );
 }
-
 function isErrorEvent(value: unknown): value is { message: string } {
   return isRecord(value) && typeof value.message === "string";
 }
-
-function isAskResponse(value: unknown): value is { answer: string; grounded: boolean } {
-  return isRecord(value) && typeof value.answer === "string" && typeof value.grounded === "boolean";
-}
-
-function isDemoResult(value: unknown): value is DemoResult {
+function isAskResponse(
+  value: unknown,
+): value is { answer: string; grounded: boolean } {
   return (
     isRecord(value) &&
-    typeof value.video === "string" &&
-    typeof value.frames === "number" &&
-    typeof value.src === "number" &&
-    typeof value.gt === "number"
+    typeof value.answer === "string" &&
+    typeof value.grounded === "boolean"
   );
 }
 
@@ -69,8 +64,26 @@ export interface SessionHandlers {
   onError: (msg: string) => void;
 }
 
-/** Read an SSE body to completion, dispatching pair/result/error to the handlers. */
-async function pumpSSE(body: ReadableStream<Uint8Array>, h: SessionHandlers): Promise<void> {
+/** Give React a paint opportunity after a streamed pair update. A proxy can
+ * coalesce several valid SSE blocks into one read, otherwise React batches all
+ * `onPair` state updates and the artist sees only the final pair count. */
+function paintPairProgress(): Promise<void> {
+  if (
+    typeof window === "undefined" ||
+    typeof window.requestAnimationFrame !== "function"
+  ) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) =>
+    window.requestAnimationFrame(() => resolve()),
+  );
+}
+
+/** Read an SSE body to completion, dispatching pair/result/error to handlers. */
+async function pumpSSE(
+  body: ReadableStream<Uint8Array>,
+  h: SessionHandlers,
+): Promise<void> {
   const reader = body.getReader();
   const dec = new TextDecoder();
   let buf = "";
@@ -89,8 +102,10 @@ async function pumpSSE(body: ReadableStream<Uint8Array>, h: SessionHandlers): Pr
     buf = rest;
     for (const e of events) {
       if (e.name === "pair") {
-        if (isPairEvent(e.data)) h.onPair(e.data);
-        else h.onError("The co-pilot returned an invalid pair event.");
+        if (isPairEvent(e.data)) {
+          h.onPair(e.data);
+          await paintPairProgress();
+        } else h.onError("The co-pilot returned an invalid pair event.");
       } else if (e.name === "result") {
         if (isResultEvent(e.data)) h.onResult(e.data);
         else h.onError("The co-pilot returned an invalid result event.");
@@ -119,7 +134,6 @@ export async function runSession(
   fd.append("cadence", cadence || "12");
   fd.append("smoothness", smoothness || "2");
   if (historyPid) fd.append("history_pid", historyPid);
-
   const resp = await authenticatedFetch("/session", {
     method: "POST",
     body: fd,
@@ -131,9 +145,7 @@ export async function runSession(
   await pumpSSE(resp.body, h);
 }
 
-/** POST a single video; the server decodes + stride-decimates it into keys, then
- *  streams the SAME session SSE as runSession. 422 guard errors arrive as JSON
- *  {detail}, so surface that message (cap / bad-format / too-few-keys). */
+/** POST a single video; the server decodes + stride-decimates it into keys, then streams the same session SSE. */
 export async function runVideoSession(
   video: File,
   stride: string,
@@ -149,28 +161,25 @@ export async function runVideoSession(
   fd.append("stride", stride || "2");
   fd.append("engines", engines);
   fd.append("interpolator", interpolator);
-  // cadence is derived server-side from the decoded video's native rate — the UI value
-  // is still posted (best-effort hint) but the server is free to override it.
   fd.append("cadence", cadence || "12");
   fd.append("smoothness", smoothness || "2");
   if (historyPid) fd.append("history_pid", historyPid);
-
   const resp = await authenticatedFetch("/session/video", {
     method: "POST",
     body: fd,
   });
   if (!resp.ok || !resp.body) {
     let detail = `POST /session/video failed: ${resp.status}`;
-    if (resp.status === 413) {
-      // The reverse proxy (nginx client_max_body_size) rejects an oversized upload at the
-      // edge before it reaches the API, and its 413 body is HTML — so surface a human
-      // message instead of the raw "413". The cap is ~200 MB (a short cut, not a full episode).
-      detail = "Video too large to upload (max ~200 MB). Trim it to a short cut (a few seconds to ~2 min) and try again.";
-    } else {
+    if (resp.status === 413)
+      detail =
+        "Video too large to upload (max ~200 MB). Trim it to a short cut (a few seconds to ~2 min) and try again.";
+    else {
       try {
         const j: unknown = await resp.json();
         if (isRecord(j) && typeof j.detail === "string") detail = j.detail;
-      } catch { /* body wasn't JSON */ }
+      } catch {
+        /* body wasn't JSON */
+      }
     }
     h.onError(detail);
     return;
@@ -178,11 +187,7 @@ export async function runVideoSession(
   await pumpSSE(resp.body, h);
 }
 
-/** Planted-error demo cases (labeled): the server plants a stored bad in-between from a
- *  frozen suite and the REAL QA/annotate path judges it — exists because the live gate
- *  yields no natural flags. */
-/** Grounded session Q&A — answers ONLY from the retained session facts;
- *  grounded=false marks the deterministic offline fallback. */
+/** Grounded session Q&A — answers only from retained session facts. */
 export async function askQuestion(
   sid: string,
   question: string,
@@ -195,27 +200,5 @@ export async function askQuestion(
   if (!resp.ok) throw new Error(`/ask failed: ${resp.status}`);
   const data: unknown = await resp.json();
   if (!isAskResponse(data)) throw new Error("Invalid /ask response");
-  return data;
-}
-
-/** POST a full cut → side-by-side original-vs-RIFE comparison video. */
-export async function runDemo(
-  files: File[],
-  engines: string,
-  interpolator: string,
-  fps: string,
-): Promise<DemoResult> {
-  const fd = new FormData();
-  for (const f of files) fd.append("frames", f);
-  fd.append("engines", engines);
-  fd.append("interpolator", interpolator);
-  fd.append("fps", fps || "48");
-  const resp = await authenticatedFetch("/demo", {
-    method: "POST",
-    body: fd,
-  });
-  if (!resp.ok) throw new Error(`/demo failed: ${resp.status}`);
-  const data: unknown = await resp.json();
-  if (!isDemoResult(data)) throw new Error("Invalid /demo response");
   return data;
 }

@@ -1,3 +1,5 @@
+"use client";
+
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
@@ -10,7 +12,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { AuthPageGuard } from "./AuthPageGuard";
+import { AuthPageGuard, useAuthPageAvailability } from "./AuthPageGuard";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 // Shared shell for the /login and /signup pages: a slim top bar (back-to-home + theme toggle)
 // and a centered auth card. Centering is done with flex (items-center/justify-center), not margin.
@@ -23,6 +26,16 @@ interface AuthShellProps {
 export function AuthShell({ title, description, children }: AuthShellProps) {
   return (
     <AuthPageGuard>
+      <AuthShellContent title={title} description={description}>
+        {children}
+      </AuthShellContent>
+    </AuthPageGuard>
+  );
+}
+
+function AuthShellContent({ title, description, children }: AuthShellProps) {
+  const availability = useAuthPageAvailability();
+  return (
       <div className="flex min-h-screen flex-col bg-sumi">
         <header className="flex justify-center px-6 py-4">
           <div className="flex w-full max-w-6xl items-center justify-between">
@@ -47,9 +60,18 @@ export function AuthShell({ title, description, children }: AuthShellProps) {
               <CardDescription>{description}</CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-5">{children}</CardContent>
+            {availability === "unavailable" && (
+              <div className="px-6 pb-6">
+                <Alert>
+                  <AlertDescription>
+                    The co-pilot service is temporarily unavailable. You can still
+                    manage your Cognito account, but cannot enter the workspace until it recovers.
+                  </AlertDescription>
+                </Alert>
+              </div>
+            )}
           </Card>
         </main>
       </div>
-    </AuthPageGuard>
   );
 }

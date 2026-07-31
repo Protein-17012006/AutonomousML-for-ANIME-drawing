@@ -90,7 +90,7 @@ def post_session_video(
     clip's own native fps / effective stride, not guessed, so the badge reflects reality."""
     owner_sub = request_user_sub(request)
     durable_pid = _owned_draft_pid(request, history_pid, owner_sub)
-    key_arrays, eff_stride, source_frames, source_fps = runtime.load_video_keys(
+    key_arrays, gt_frames, eff_stride, source_frames, source_fps = runtime.load_video_keys(
         video, stride)
     cadence_fps = round(source_fps / eff_stride) or 1
     sampling = {
@@ -104,6 +104,7 @@ def post_session_video(
         key_arrays, selected_engine, interpolator=interpolator,
         cadence_fps=cadence_fps,
         smoothness=smoothness, sampling=sampling, show=show or None,
+        gt_frames=gt_frames,
         repository=repository, owner_sub=owner_sub, history_pid=durable_pid,
         workspace_input={
             "mode": "video",
