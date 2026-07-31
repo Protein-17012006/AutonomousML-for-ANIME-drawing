@@ -40,6 +40,11 @@ import {
 } from "@/lib/sessionApi";
 
 function sidFromResult(r: ResultEvent | null) {
+  // The server sends the id outright. Slicing an artifact URL is the fallback for
+  // sessions stored before that field existed: a republished session serves them
+  // under "/sessions/{pid}/artifacts/...", which this slice cannot read, and the
+  // grounded Q&A box then goes dead with no visible cause.
+  if (r?.sid != null) return String(r.sid);
   const ref = r?.artifacts?.montage || r?.artifacts?.video;
   return ref?.startsWith("/session/") ? (ref.split("/")[2] ?? null) : null;
 }

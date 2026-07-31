@@ -80,6 +80,7 @@ def _workspace_snapshot(outcome, uploaded_names: set[str], workspace_input) -> W
         pairs.append(event)
     final = ResultEvent.from_result(
         result,
+        sid=getattr(outcome, "sid", None),
         artifacts=artifacts,
         explanations=explanations,
         pair_mids=pair_mids,

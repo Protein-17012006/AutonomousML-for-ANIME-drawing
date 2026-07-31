@@ -164,6 +164,7 @@ def stream_session(key_arrays: list[np.ndarray], engines: str, *,
                     yield sse("result", ResultEvent.from_result(
                         outcome.result,
                         outcome.artifact_urls,
+                        sid=outcome.sid,
                         explanations=outcome.explanations,
                         pair_mids=outcome.pair_mids,
                         key_urls=outcome.key_urls,

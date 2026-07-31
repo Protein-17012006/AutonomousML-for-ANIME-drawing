@@ -25,6 +25,10 @@ class SessionWorkflowAdapters:
 @dataclass
 class SessionOutcome:
     result: Any
+    # the session this outcome belongs to, so clients never have to recover it by
+    # parsing an artifact URL (a published session re-serves those under a
+    # different prefix, which silently yielded no id and killed grounded Q&A)
+    sid: int
     artifact_urls: dict
     explanations: dict
     pair_mids: dict
@@ -81,6 +85,7 @@ class RunSession:
         })
         return SessionOutcome(
             result=result,
+            sid=sid,
             artifact_urls=metadata.artifact_urls,
             explanations=metadata.explanations,
             pair_mids=metadata.pair_mids,
