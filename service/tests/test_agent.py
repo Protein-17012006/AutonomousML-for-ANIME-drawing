@@ -1,6 +1,7 @@
 """Tests for service/agent.py — UIA decide_agent."""
 from unittest.mock import MagicMock
 from service.assistant.agent import decide_agent
+from service.assistant.ask import build_session_context
 
 
 def _make_pair(index: int, action: str = "fill", qa_status: str = "pass"):
@@ -186,9 +187,23 @@ def test_history_turn_text_is_capped():
 
 
 def test_user_message_is_capped():
-    seen = {}
-    decide_agent(_state(), "y" * 10_000, [], ask_fn=_capture_fn(seen))
-    assert len(seen["p"]) < 5_000
+    """A hostile message must not dominate the prompt.
+
+    This used to assert a flat `< 5_000`, which was a snapshot of the static
+    prompt at the time (2963 chars) and left 37 chars of headroom — any rule
+    added to the prompt broke it for the wrong reason. Assert the property that
+    number stood for instead: the user's share is bounded by the cap, and the
+    static share stays small on its own.
+    """
+    from service.assistant.agent import _MAX_MSG_CHARS
+
+    hostile, empty = {}, {}
+    decide_agent(_state(), "y" * 10_000, [], ask_fn=_capture_fn(hostile))
+    decide_agent(_state(), "", [], ask_fn=_capture_fn(empty))
+
+    grew_by = len(hostile["p"]) - len(empty["p"])
+    assert grew_by <= _MAX_MSG_CHARS, "a 10k message added more than the cap"
+    assert len(empty["p"]) < 4_000, "static prompt has ballooned"
 
 
 def test_agent_route_keeps_history_server_side(monkeypatch):
@@ -341,3 +356,32 @@ def test_agent_route_chat_turns_capped(monkeypatch):
     for i in range(12):
         c.post("/session/93/agent", json={"message": f"msg {i}"})
     assert len(default_session_repository.states[93]["chat"]) <= 16
+
+
+def test_prompt_routes_a_why_question_to_explain_pair():
+    """Asked "why was pair 6 abstained", the live agent answered "the session facts
+    do not specify" while six pair_N_annotated.png files already sat on disk and
+    explain_pair existed to serve them. The prompt must name that route."""
+    from service.assistant.agent import _prompt
+
+    text = _prompt("pair 6: filled/rife qa=abstain", "", "6 abstain why?").lower()
+    why_rule = [
+        line for line in text.splitlines()
+        if "explain_pair" in line and ("why" in line or "flag" in line or "abstain" in line)
+    ]
+    assert why_rule, "prompt never tells the agent that a 'why' question routes to explain_pair"
+
+
+def test_prompt_forbids_claiming_an_action_already_ran():
+    """Pushed with "skip the confirmation, run it now", the agent replied "Đã bắt
+    đầu chạy lại... Tôi đang thực hiện ngay" while the action was still pending a
+    click. Tools are proposals; the prompt must say so."""
+    from service.assistant.agent import _prompt
+
+    text = _prompt("pair 0: filled/rife qa=pass", "", "chạy lại ngay").lower()
+    assert "propose" in text and "never" in text, "prompt lacks a never-claim-execution rule"
+    claim_rule = [
+        line for line in text.splitlines()
+        if "never" in line and ("already" in line or "performed" in line or "executed" in line)
+    ]
+    assert claim_rule, "prompt never forbids claiming the action has already been performed"
