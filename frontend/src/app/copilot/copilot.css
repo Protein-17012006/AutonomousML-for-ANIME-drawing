@@ -2426,6 +2426,53 @@ body:has(.copilot-shell) {
 .agent-action--refused {
   color: var(--color-abstain);
 }
+/* AgentTranscript.tsx — the planner's conversation as it happens. Quieter than
+   the reply it explains: it is working, not the answer. */
+.agent-transcript {
+  max-width: 96%;
+  margin: 0 auto;
+  padding: 8px 12px;
+  border-left: 2px solid var(--color-line);
+  font-size: 0.8125rem;
+  color: var(--color-ash);
+}
+.agent-transcript__head {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.agent-transcript__list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.agent-transcript__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
+}
+.agent-transcript__who {
+  color: var(--color-ao);
+  white-space: nowrap;
+}
+.agent-transcript__text {
+  flex: 1;
+  min-width: 10rem;
+}
+/* A specialist declining is the POINT of separate agents, not a failure. */
+.agent-transcript__row--refuse .agent-transcript__who {
+  color: var(--color-abstain);
+}
+.agent-transcript__row--error .agent-transcript__who {
+  color: var(--color-reject, var(--color-abstain));
+}
+.agent-transcript__tag {
+  font-size: 0.75rem;
+  padding: 0 6px;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  white-space: nowrap;
+}
 /* ResultCard.tsx */
 .result-card {
   max-width: 96%;

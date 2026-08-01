@@ -14,7 +14,10 @@ import {
   rememberMemory,
   submitReplacementKeys,
   submitVerdicts,
+  sendFeedback,
+  runOrchestration,
   type AgentAction,
+  type TranscriptEntry,
 } from "./api";
 import {
   type ChatMsg,
@@ -109,7 +112,7 @@ export default function App() {
   const [stagedRefills, setStagedRefills] = useState<Record<number, { file: File; url: string }>>({});
   const stagedRefillsRef = useRef<Record<number, { file: File; url: string }>>({});
   const [reviewSubmit, setReviewSubmit] = useState<{ kind: "verdicts" | "keys"; phase: string; error?: string } | null>(null);
-  const setVerdict = (idx: number, v: "accept" | "reject") =>
+  const setVerdict = (idx: number, v: "accept" | "reject") => {
     setVerdicts((prev) => {
       const n = { ...prev };
       if (n[idx] === v)
@@ -117,6 +120,16 @@ export default function App() {
       else n[idx] = v;
       return n;
     });
+    // The artist's own keep/redraw call IS the per-show calibration signal the
+    // QA thresholds are refit against. This control existed and never left the
+    // browser. Toggling OFF sends nothing: there is no retraction endpoint, and
+    // inventing one here would be guessing at what a withdrawn vote means.
+    if (liveSid && verdicts[idx] !== v) {
+      void sendFeedback(liveSid, idx, v === "accept" ? "up" : "down").catch(
+        (err) => console.warn("could not record that verdict", err),
+      );
+    }
+  };
 
   const discardStagedRefills = useCallback(() => {
     for (const item of Object.values(stagedRefillsRef.current)) URL.revokeObjectURL(item.url);
@@ -142,6 +155,10 @@ export default function App() {
   const [upload, setUpload] = useState<UserTurn | null>(null);
   const [qaTurns, setQaTurns] = useState<QaTurn[]>([]);
   const [actionBusy, setActionBusy] = useState(false);
+  // Opt-in. The planner has never been user-facing, and deciding what to do with
+  // an artist's cut is a bigger promise than answering their question — so it is
+  // a choice they make per message, not a default applied to all of them.
+  const [planMode, setPlanMode] = useState(false);
 
   // Auth
   const [account, setAccount] = useState<SidebarAccount | null>(null);
@@ -843,6 +860,31 @@ export default function App() {
     if (!liveSid || !durablePid) return;
     const n = qaTurns.length;
     setQaTurns((prev) => [...prev, { q, answer: null }]);
+
+    if (planMode) {
+      const entries: TranscriptEntry[] = [];
+      noteTurn(n, { transcript: entries });
+      await runOrchestration(liveSid, q, {
+        onEntry: (entry) => {
+          // Pushed live so the artist watches the agents work instead of a
+          // spinner; a specialist refusing is the interesting part.
+          entries.push(entry);
+          noteTurn(n, { transcript: [...entries] });
+        },
+        onDecision: (r) =>
+          noteTurn(n, {
+            answer: r.say,
+            grounded: r.grounded,
+            action: r.action,
+            rejectedTool: r.rejected_tool,
+            followups: r.followups,
+          }),
+        onError: (message) =>
+          noteTurn(n, { answer: message, grounded: false }),
+      });
+      return;
+    }
+
     try {
       const r = await askAgent(liveSid, q);
       setQaTurns((prev) =>
@@ -1207,6 +1249,8 @@ export default function App() {
                 askEnabled={!!result?.artifacts && !!liveSid && !!durablePid}
                 askSaving={!!result?.artifacts && !!liveSid && !durablePid}
                 onAsk={onAsk}
+                planMode={planMode}
+                onPlanModeChange={setPlanMode}
               />
             </div>
           ) : (

@@ -3,7 +3,7 @@
 // events incrementally: the draw-key splice REPLACES the whole log, which an
 // incremental reducer cannot survive but a derive-function handles for free.
 import type { PairEvent, ResultEvent } from "../types";
-import type { AgentAction } from "../api";
+import type { AgentAction, TranscriptEntry } from "../api";
 
 export type ChatMsg =
   | { kind: "user-upload"; id: string; text: string }
@@ -25,6 +25,7 @@ export type ChatMsg =
       actionNote?: string | null;
       rejectedTool?: string;
       followups?: string[];
+      transcript?: TranscriptEntry[];
     }
   | { kind: "error"; id: string; text: string };
 
@@ -47,6 +48,8 @@ export interface QaTurn {
    *  that action, so this is shown rather than swallowed. */
   rejectedTool?: string;
   followups?: string[];
+  /** Present only for a planned turn: who said what, in order. */
+  transcript?: TranscriptEntry[];
 }
 
 export function deriveMessages(i: {
