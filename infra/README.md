@@ -33,6 +33,12 @@ Then: Cognito users, box publisher key, frontend — see the vault runbook
 `06 - Operations/Running the AWS Front Door.md` (bring-up §, demo-day checklist,
 auth-bypass emergency command, teardown).
 
+Set `ENABLE_GOOGLE_OAUTH=true` in the git-ignored `infra/params.env` before a
+frontend deployment when Google Cognito sign-in is enabled. `deploy.sh frontend`
+passes that value into the static Next.js build as
+`NEXT_PUBLIC_GOOGLE_OAUTH_ENABLED`; it no longer relies on a developer-local
+`frontend/.env.local` value.
+
 ## Frontend deploy
 
 From the repository root:
@@ -63,6 +69,11 @@ For the public AWS path, sync this updated nginx configuration and re-run it on
 the EC2 proxy before smoke-testing `/sessions` through the front door:
 
     bash infra/deploy.sh sync-userdata
+
+The proxy configuration also forwards `/me`, `/tools`, and `/active-workspace`
+to FastAPI. This is required for authenticated memory, image-edit, and box-local
+active-workspace recovery routes; do not remove these prefixes when reconciling
+nginx changes.
 
 ## Teardown (back to ~$0)
     # empty the buckets first:

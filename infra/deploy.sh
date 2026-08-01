@@ -15,6 +15,11 @@ REGION="${REGION:-ap-southeast-1}"
 ENABLE_GOOGLE_OAUTH="${ENABLE_GOOGLE_OAUTH:-false}"
 GOOGLE_OAUTH_SECRET_VERSION_ID="${GOOGLE_OAUTH_SECRET_VERSION_ID:-PENDING}"
 
+case "$ENABLE_GOOGLE_OAUTH" in
+  true|false) ;;
+  *) echo "ERROR: ENABLE_GOOGLE_OAUTH must be true or false"; exit 1 ;;
+esac
+
 is_absolute_path() {
   [[ "$1" == /* || "$1" =~ ^[A-Za-z]:[/\\].* || "$1" == \\\\* ]]
 }
@@ -116,7 +121,10 @@ frontend() {
   echo "== build static frontend export"
   (
     cd "$REPO_ROOT/frontend"
-    BUILD_EXPORT=1 npm run build
+    # This is compiled into the static export. Tie the client button to the
+    # same setting used to configure Cognito, rather than relying on an ignored
+    # developer-local .env file.
+    NEXT_PUBLIC_GOOGLE_OAUTH_ENABLED="$ENABLE_GOOGLE_OAUTH" BUILD_EXPORT=1 npm run build
   )
   [ -f "$dist/index.html" ] || {
     echo "ERROR: static export is missing $dist/index.html"

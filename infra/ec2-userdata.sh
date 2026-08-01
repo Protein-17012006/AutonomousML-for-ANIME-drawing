@@ -110,9 +110,10 @@ http {
 
         # API routes must reach FastAPI rather than falling through to the static
         # Next export. The plural sessions route serves durable owned-session
-        # history and workspace snapshots; the auth route bootstraps the
-        # application cookie.
-        location ~ ^/(auth|sessions|session|demo|active-workspace)(?:/|$) {
+        # history and workspace snapshots; auth bootstraps the application cookie;
+        # me/tools serve authenticated memory and image-edit APIs. active-workspace
+        # remains box-local temporary recovery storage, not an S3/DynamoDB route.
+        location ~ ^/(auth|me|tools|sessions|session|demo|active-workspace)(?:/|$) {
             limit_req zone=sess burst=3 nodelay;
             limit_req zone=inter burst=10 nodelay;
             proxy_pass http://${BOX_HOST}:8000;
