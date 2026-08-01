@@ -108,6 +108,7 @@ def test_history_reaches_prompt():
 
 # --- Task A2: POST /session/{sid}/agent (route) ---------------------------------
 import re
+import tempfile
 
 import cv2
 import numpy as np
@@ -115,6 +116,23 @@ from fastapi.testclient import TestClient
 
 from service.sessions.dependencies import default_session_repository
 from service.app import app
+
+
+def _seed_session(sid: int, state: dict | None = None) -> dict:
+    """Seed a session through the repository API instead of poking `.states`.
+
+    A session is only well-formed once it has a registered artifact path: the
+    agent route opens `session_transaction(sid)`, which pins the path and raises
+    `KeyError('unknown session <sid>')` when there is none — and the route turns
+    that into a 404. Writing `repo.states[sid] = ...` directly skips
+    `register_path` and produces a session that reads back fine from
+    `state_for()` yet 404s the moment any route tries to mutate it, which is
+    exactly how these tests used to fail. `save_state` enforces the same
+    invariant, so route the seed through both calls.
+    """
+    default_session_repository.register_path(sid, tempfile.mkdtemp(prefix=f"test_{sid}_"))
+    default_session_repository.save_state(sid, state if state is not None else _state())
+    return default_session_repository.states[sid]
 
 
 def test_agent_route_404_on_unknown_sid():
@@ -125,7 +143,7 @@ def test_agent_route_404_on_unknown_sid():
 
 def test_agent_route_degraded_shape(monkeypatch):
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)   # force degrade path
-    default_session_repository.states[91] = _state()
+    _seed_session(91)
     c = TestClient(app)
     r = c.post("/session/91/agent", json={"message": "hi", "history": []})
     assert r.status_code == 200
@@ -221,7 +239,7 @@ def test_agent_route_keeps_history_server_side(monkeypatch):
         return fn
 
     monkeypatch.setattr("service.infrastructure.director_llm.make_ask_fn", fake_make_ask_fn)
-    default_session_repository.states[92] = _state()
+    _seed_session(92)
     c = TestClient(app)
     c.post("/session/92/agent", json={"message": "why flagged?"})
     c.post("/session/92/agent", json={"message": "and now?"})
@@ -268,7 +286,7 @@ def test_agent_stream_route_sse_contract(monkeypatch):
         return fn
 
     monkeypatch.setattr("service.infrastructure.director_llm.make_ask_stream_fn", fake_make_stream)
-    default_session_repository.states[97] = _state()
+    _seed_session(97)
     c = TestClient(app)
     r = c.post("/session/97/agent/stream", json={"message": "hi"})
     assert r.status_code == 200
@@ -306,7 +324,7 @@ def test_regenerate_reasks_last_user_turn(monkeypatch):
         return fn
 
     monkeypatch.setattr("service.infrastructure.director_llm.make_ask_fn", fake_make_ask_fn)
-    default_session_repository.states[94] = _state()
+    _seed_session(94)
     c = TestClient(app)
     c.post("/session/94/agent", json={"message": "why flagged?"})
     r = c.post("/session/94/agent", json={"regenerate": True})
@@ -318,7 +336,7 @@ def test_regenerate_reasks_last_user_turn(monkeypatch):
 
 
 def test_regenerate_422_when_nothing_to_regenerate():
-    default_session_repository.states[95] = _state()
+    _seed_session(95)
     c = TestClient(app)
     assert c.post("/session/95/agent", json={"regenerate": True}).status_code == 422
 
@@ -326,7 +344,7 @@ def test_regenerate_422_when_nothing_to_regenerate():
 def test_agent_rate_limited_429(monkeypatch):
     monkeypatch.setenv("COPILOT_AGENT_RPM", "2")
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
-    default_session_repository.states[96] = _state()
+    _seed_session(96)
     c = TestClient(app)
     assert c.post("/session/96/agent", json={"message": "1"}).status_code == 200
     assert c.post("/session/96/agent", json={"message": "2"}).status_code == 200
@@ -356,7 +374,7 @@ def test_followups_garbage_dropped():
 
 def test_agent_route_chat_turns_capped(monkeypatch):
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)   # degrade path still logs chat
-    default_session_repository.states[93] = _state()
+    _seed_session(93)
     c = TestClient(app)
     for i in range(12):
         c.post("/session/93/agent", json={"message": f"msg {i}"})

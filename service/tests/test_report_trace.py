@@ -8,6 +8,10 @@ from service.media.artifacts import build_report
 
 _F = [np.zeros((4, 4, 3), np.uint8)] * 3
 
+# Sampling metadata is a required part of build_report's contract; these tests
+# assert on the director trace, not the badge, but must still supply it.
+_SAMPLING = dict(cadence_fps=12, smoothness=2, output_fps=24, duration=2.0)
+
 
 def test_report_renders_director_trace(tmp_path):
     rounds = [CorrectionRound("region_refill", None, None, reason="director: localized ghost"),
@@ -20,7 +24,7 @@ def test_report_renders_director_trace(tmp_path):
     ]
     res = CopilotResult(pairs=pairs, keys_requested_total=0, flagged=[],
                         n_autopass=1, n_corrected=1)
-    path = build_report(res, str(tmp_path))
+    path = build_report(res, str(tmp_path), **_SAMPLING)
     text = open(path, encoding="utf-8").read()
     assert "Correction loop (director trace)" in text
     assert "pair 1: resolved after 2 round(s)" in text
@@ -31,5 +35,5 @@ def test_report_renders_director_trace(tmp_path):
 def test_report_omits_trace_when_no_corrections(tmp_path):
     pairs = [PairResult(0, "filled", "rife", _F, FrameQA(status="pass", reason=""), 0)]
     res = CopilotResult(pairs=pairs, keys_requested_total=0, flagged=[], n_autopass=1)
-    text = open(build_report(res, str(tmp_path)), encoding="utf-8").read()
+    text = open(build_report(res, str(tmp_path), **_SAMPLING), encoding="utf-8").read()
     assert "Correction loop" not in text

@@ -7,6 +7,17 @@ from PIL import Image
 pytest.importorskip("fastapi")   # box cogvideo-venv only; skip (not error) off-box
 from fastapi.testclient import TestClient
 from service.app import app
+from service.core.config import WebSettings
+
+# The static UI mount is CONDITIONAL (`if _WEB_DIR.is_dir()` in service/app.py).
+# This lineage ships no vanilla `web/` — the canonical UI is the team's Next.js
+# export, deployed separately and served via COPILOT_WEB_DIR=dist. So the three
+# tests below assert something that is true only where a UI directory is actually
+# mounted; skip rather than fail where none is, instead of deleting a test that
+# still guards the fallback UI wherever it is present.
+_needs_ui = pytest.mark.skipif(
+    not WebSettings.from_env().directory.is_dir(),
+    reason="no UI directory mounted on this lineage (COPILOT_WEB_DIR is absent)")
 
 
 def _png(v: int) -> io.BytesIO:
@@ -16,6 +27,7 @@ def _png(v: int) -> io.BytesIO:
     return b
 
 
+@_needs_ui
 def test_serves_ui_index():
     c = TestClient(app)
     r = c.get("/")
@@ -23,12 +35,14 @@ def test_serves_ui_index():
     assert "In-Between Co-pilot" in r.text and 'id="log"' in r.text
 
 
+@_needs_ui
 def test_serves_static_assets():
     c = TestClient(app)
     assert c.get("/app.js").status_code == 200
     assert c.get("/style.css").status_code == 200
 
 
+@_needs_ui
 def test_ui_exposes_demo_controls():
     """The demo-mode (decimate-vs-GT comparison) controls are wired into the served UI."""
     c = TestClient(app)
@@ -261,10 +275,15 @@ def test_demo_respects_cadence_and_smoothness_fps():
 
 
 def test_session_smoothness_4_gated_returns_422(monkeypatch):
-    """Merge-blocker (final-review I1a): smoothness=4 (Extra) is gated behind
-    COPILOT_SMOOTHNESS_X4. With the flag unset, POST /session must return an
-    actionable 422 (pydantic ValidationError -> HTTPException), never a raw 500."""
-    monkeypatch.delenv("COPILOT_SMOOTHNESS_X4", raising=False)
+    """Merge-blocker (final-review I1a): POST /session with smoothness=4 must return
+    an actionable 422 (pydantic ValidationError -> HTTPException), never a raw 500.
+
+    ×4 was originally gated behind COPILOT_SMOOTHNESS_X4; it has since been DESCOPED
+    outright — ×2 is the ceiling and the flag no longer exists in production code.
+    The 422-not-500 guarantee is what this test is for and it is unchanged; only the
+    detail wording moved, so assert the message the validator actually emits.
+    Setting the retired flag must not change the outcome."""
+    monkeypatch.setenv("COPILOT_SMOOTHNESS_X4", "1")   # retired flag: must not unlock
     c = TestClient(app)
     files = [
         ("keys", ("0.png", _png(0),  "image/png")),
@@ -272,7 +291,7 @@ def test_session_smoothness_4_gated_returns_422(monkeypatch):
     ]
     r = c.post("/session", files=files, data={"engines": "stub", "smoothness": "4"})
     assert r.status_code == 422
-    assert "COPILOT_SMOOTHNESS_X4" in r.json()["detail"]
+    assert "smoothness must be 1 or 2" in r.json()["detail"]
 
 
 def test_session_invalid_smoothness_returns_422():
@@ -291,16 +310,19 @@ def test_session_invalid_smoothness_returns_422():
 def test_stream_session_assembles_frames_once_not_twice(monkeypatch):
     """M2 regression: `_stream_session` used to call `_assemble_frames` TWICE per
     session — once (directly) to compute the duration badge, and again inside
-    `build_video`. At smoothness=4, `_assemble_frames` -> `expand_pair(factor=4)`
-    calls the (GPU, RIFE-backed) mid_engine per rife pair, so the duplicate
-    assembly wastefully doubled RIFE work. Spy on BOTH the `service.sessions.streaming` and
-    `service.media.artifacts` bindings of `_assemble_frames` (streaming.py imported its own
-    reference at module load, so patching only one module would miss calls routed
-    through the other) and assert the combined call count is 1, not 2."""
-    import service.sessions.streaming as streaming_mod
-    import service.media.artifacts as artifacts_mod
+    `build_video`, and each assembly runs the (GPU, RIFE-backed) mid_engine per
+    rife pair, so the duplicate assembly wastefully doubled RIFE work. The single
+    assembly now lives in `service.media.rendering`, which reaches it as
+    `artifacts._assemble_frames` and threads the result into `build_video(frames=...)`
+    — so spying on the `service.media.artifacts` binding catches every call.
 
-    monkeypatch.setenv("COPILOT_SMOOTHNESS_X4", "1")   # unblock smoothness=4
+    (Rewritten: this test used to also patch a `service.sessions.streaming` binding
+    and force `smoothness=4`. Streaming no longer imports `_assemble_frames` at all
+    after the service re-modularization, and ×4 was descoped — ×2 is the ceiling —
+    so both made the test fail for reasons unrelated to the invariant it guards.
+    The invariant is factor-independent: assemble once per session, whatever the
+    smoothness.)"""
+    import service.media.artifacts as artifacts_mod
 
     calls = []
     orig = artifacts_mod._assemble_frames
@@ -309,7 +331,6 @@ def test_stream_session_assembles_frames_once_not_twice(monkeypatch):
         calls.append(1)
         return orig(*a, **k)
 
-    monkeypatch.setattr(streaming_mod, "_assemble_frames", _counting)
     monkeypatch.setattr(artifacts_mod, "_assemble_frames", _counting)
 
     c = TestClient(app)
@@ -317,7 +338,7 @@ def test_stream_session_assembles_frames_once_not_twice(monkeypatch):
         ("keys", ("0.png", _png(0), "image/png")),
         ("keys", ("1.png", _png(1), "image/png")),   # gap 0.01 < tau_gate -> FILLS
     ]
-    r = c.post("/session", files=files, data={"engines": "stub", "smoothness": "4"})
+    r = c.post("/session", files=files, data={"engines": "stub", "smoothness": "2"})
     assert r.status_code == 200
     assert calls == [1], f"_assemble_frames called {len(calls)}x per session — expected exactly once"
 
