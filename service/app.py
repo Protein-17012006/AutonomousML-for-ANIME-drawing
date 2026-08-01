@@ -28,6 +28,8 @@ from service.session_history import api as session_history_routes
 from service.session_history.dependencies import configure_session_history
 from service.sessions import api as session_routes
 from service.sessions.http_dependencies import session_repository_for
+from service.active_workspace import api as active_workspace_routes
+from service.active_workspace.dependencies import configure_active_workspaces
 from service.core.config import AuthSettings, WebSettings
 
 app = FastAPI(title="In-Between Co-pilot Service")
@@ -39,6 +41,7 @@ app.state.session_http_runtime = build_session_http_runtime()
 app.state.review_http_runtime = build_review_http_runtime()
 app.state.image_edit_http_runtime = build_image_edit_http_runtime()
 configure_session_history(app)
+configure_active_workspaces(app)
 
 
 @app.middleware("http")
@@ -57,6 +60,7 @@ async def _cognito_session_gate(request: Request, call_next):
     path = request.url.path
     protected_route = (
         path == "/auth/me"
+        or path == "/active-workspace" or path.startswith("/active-workspace/")
         or path == "/session" or path.startswith("/session/")
         or path == "/demo" or path.startswith("/demo/")
         or path == "/tools" or path.startswith("/tools/")
@@ -131,6 +135,7 @@ async def _no_cache_html(request, call_next):
 # name="feedback"), and the static mount must come last so API routes take precedence.
 app.include_router(auth_api.router)
 app.include_router(session_history_routes.router)
+app.include_router(active_workspace_routes.router)
 app.include_router(feedback_routes.router)
 app.include_router(session_routes.router)
 app.include_router(demo_routes.router)

@@ -115,6 +115,28 @@ class SessionSettings:
 
 
 @dataclass(frozen=True)
+class ActiveWorkspaceSettings:
+    """Bounded, box-local recovery storage for unfinished artist work."""
+
+    root: Path
+    ttl_seconds: int = 24 * 60 * 60
+    workspace_bytes: int = 4 * 1024 * 1024 * 1024
+    global_bytes: int = 32 * 1024 * 1024 * 1024
+    free_reserve_bytes: int = 20 * 1024 * 1024 * 1024
+
+    @classmethod
+    def from_env(cls) -> "ActiveWorkspaceSettings":
+        root = Path(_text("COPILOT_ACTIVE_WORKSPACE_DIR", str(_REPO_ROOT / ".active_workspaces")) or ".active_workspaces")
+        return cls(
+            root=root,
+            ttl_seconds=_integer("COPILOT_ACTIVE_WORKSPACE_TTL", 24 * 60 * 60, minimum=60),
+            workspace_bytes=_integer("COPILOT_ACTIVE_WORKSPACE_MAX_BYTES", 4 * 1024 * 1024 * 1024, minimum=1),
+            global_bytes=_integer("COPILOT_ACTIVE_WORKSPACE_GLOBAL_BYTES", 32 * 1024 * 1024 * 1024, minimum=1),
+            free_reserve_bytes=_integer("COPILOT_ACTIVE_WORKSPACE_FREE_RESERVE_BYTES", 20 * 1024 * 1024 * 1024, minimum=0),
+        )
+
+
+@dataclass(frozen=True)
 class AdmissionSettings:
     max_concurrent_sessions: int = 8
     max_concurrent_gpu_jobs: int = 1

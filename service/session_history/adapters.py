@@ -18,6 +18,8 @@ from service.session_history.models import (
     SessionSummary,
     SessionSummaryCounts,
     StoredArtifact,
+    QaTranscriptSnapshot,
+    QaTranscriptTurn,
     WorkspaceSnapshot,
 )
 
@@ -70,6 +72,16 @@ def _safe_snapshot_key(pid: str, value) -> str | None:
     return expected if value == expected else None
 
 
+def _safe_message_snapshot_key(pid: str, value) -> str | None:
+    if not isinstance(value, str):
+        return None
+    prefix = f"artifacts/{pid}/messages.v1/"
+    if not value.startswith(prefix) or not value.endswith(".json"):
+        return None
+    relative = value[len(prefix):]
+    return value if relative and "/" not in relative and "\\" not in relative else None
+
+
 def _safe_artifact_keys(pid: str, value) -> dict[str, str]:
     prefix = f"artifacts/{pid}/"
     safe: dict[str, str] = {}
@@ -96,6 +108,10 @@ def _summary_from_row(row: dict) -> PublishedSession | None:
     artifact_keys = _safe_artifact_keys(pid, row.get("artifact_keys"))
     snapshot_version = _integer(row.get("snapshot_version")) or None
     snapshot_key = _safe_snapshot_key(pid, row.get("snapshot_key"))
+    message_version = _integer(row.get("message_version")) or None
+    message_snapshot_key = _safe_message_snapshot_key(
+        pid, row.get("message_snapshot_key")
+    )
     status = str(row.get("status") or "complete")
     if status not in {"draft", "complete"}:
         return None
@@ -136,6 +152,8 @@ def _summary_from_row(row: dict) -> PublishedSession | None:
         owner_sort=owner_sort,
         snapshot_key=snapshot_key,
         snapshot_version=snapshot_version,
+        message_snapshot_key=message_snapshot_key,
+        message_version=message_version,
     )
 
 
@@ -311,3 +329,95 @@ class S3ArtifactStore:
             if isinstance(exc, (json.JSONDecodeError, UnicodeDecodeError, ValidationError)):
                 return None
             raise
+
+    def get_transcript(self, key: str) -> QaTranscriptSnapshot | None:
+        try:
+            response = self.client.get_object(Bucket=self.bucket, Key=key)
+            payload = json.loads(response["Body"].read())
+            return QaTranscriptSnapshot.model_validate(payload)
+        except Exception as exc:
+            from botocore.exceptions import ClientError
+
+            if isinstance(exc, ClientError) and exc.response.get("Error", {}).get(
+                "Code"
+            ) in {"NoSuchKey", "404", "NotFound"}:
+                return None
+            if isinstance(exc, (json.JSONDecodeError, UnicodeDecodeError, ValidationError)):
+                return None
+            raise
+
+
+class TranscriptStoreError(RuntimeError):
+    pass
+
+
+class DynamoTranscriptStore:
+    """Versioned transcript pointer in the owned session row, payload in S3."""
+
+    def __init__(self, table, artifacts: S3ArtifactStore):
+        self.table = table
+        self.artifacts = artifacts
+
+    def append_turn(self, pid: str, owner_sub: str, *, question: str,
+                    answer: str, grounded: bool) -> QaTranscriptTurn:
+        from botocore.exceptions import ClientError
+
+        for _ in range(4):
+            row = self.table.get_item(Key={"pid": pid}, ConsistentRead=True).get("Item")
+            if not isinstance(row, dict) or str(row.get("owner_sub") or "") != owner_sub:
+                raise TranscriptStoreError("durable session not found")
+            if str(row.get("status") or "") != "complete":
+                raise TranscriptStoreError("durable session is not ready")
+            previous_version = _integer(row.get("message_version"))
+            previous_key = _safe_message_snapshot_key(pid, row.get("message_snapshot_key"))
+            transcript = self.artifacts.get_transcript(previous_key) if previous_key else None
+            if previous_key and transcript is None:
+                raise TranscriptStoreError("stored Q&A transcript is unavailable")
+            turns = list(transcript.turns) if transcript else []
+            timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            turn = QaTranscriptTurn(
+                turn_id=uuid.uuid4().hex,
+                question=question,
+                answer=answer,
+                grounded=grounded,
+                answered_at=timestamp,
+            )
+            turns.append(turn)
+            next_version = previous_version + 1
+            key = f"artifacts/{pid}/messages.v1/{next_version}-{uuid.uuid4().hex}.json"
+            snapshot = QaTranscriptSnapshot(
+                schema_version=1, pid=pid, turns=turns
+            )
+            self.artifacts.client.put_object(
+                Bucket=self.artifacts.bucket,
+                Key=key,
+                Body=snapshot.model_dump_json().encode("utf-8"),
+                ContentType="application/json",
+            )
+            try:
+                self.table.update_item(
+                    Key={"pid": pid},
+                    UpdateExpression=(
+                        "SET message_snapshot_key = :key, message_version = :next, "
+                        "message_count = :count, messages_updated_at = :updated"
+                    ),
+                    ConditionExpression=(
+                        "owner_sub = :owner AND #status = :complete AND "
+                        "(attribute_not_exists(message_version) OR message_version = :previous)"
+                    ),
+                    ExpressionAttributeNames={"#status": "status"},
+                    ExpressionAttributeValues={
+                        ":key": key,
+                        ":next": next_version,
+                        ":count": len(turns),
+                        ":updated": int(time.time()),
+                        ":owner": owner_sub,
+                        ":complete": "complete",
+                        ":previous": previous_version,
+                    },
+                )
+                return turn
+            except ClientError as exc:
+                if exc.response.get("Error", {}).get("Code") != "ConditionalCheckFailedException":
+                    raise
+        raise TranscriptStoreError("Q&A transcript changed; retry")

@@ -1,6 +1,7 @@
 """SSE inbound adapter for the run-session application use case."""
 from __future__ import annotations
 
+import json
 import queue
 import threading
 from dataclasses import dataclass
@@ -56,7 +57,9 @@ def stream_session(key_arrays: list[np.ndarray], engines: str, *,
                    smoothness: int = 2, sampling: dict = None, show: str = None,
                    owner_sub: str | None = None,
                    history_pid: str | None = None,
-                   workspace_input: dict | None = None) -> StreamingResponse:
+                   workspace_input: dict | None = None,
+                   source_video: bytes | None = None,
+                   active_workspace=None) -> StreamingResponse:
     """Start one run and adapt its pair/result callbacks to an SSE response."""
     cfg = model_or_422(
         SessionCfg,
@@ -84,6 +87,7 @@ def stream_session(key_arrays: list[np.ndarray], engines: str, *,
             return
 
         sid = None
+        active_manifest = None
         try:
             eng = ports.resolve_engine(
                 engines, interpolator=cfg.interpolator
@@ -91,6 +95,16 @@ def stream_session(key_arrays: list[np.ndarray], engines: str, *,
             sid, session_dir = repository.create("copilot_session", pin=True)
             if owner_sub:
                 repository.set_owner(sid, owner_sub)
+                if active_workspace is not None:
+                    active_manifest = active_workspace.create_or_get(
+                        owner_sub, history_pid=history_pid)
+                    active_workspace.stage_input_arrays(owner_sub, key_arrays)
+                    if source_video is not None:
+                        active_workspace.stage_input_video(owner_sub, source_video)
+                    active_workspace.append_event(owner_sub, "workspace", {
+                        "workspace_id": active_manifest.workspace_id,
+                        "revision": active_manifest.revision,
+                    })
         except Exception as exc:
             if sid is not None:
                 repository.unpin(sid)
@@ -109,11 +123,37 @@ def stream_session(key_arrays: list[np.ndarray], engines: str, *,
                     continue
             return False
 
+        def _journal(kind, payload):
+            if active_manifest is None:
+                return
+            if kind == "pair":
+                pair, mid_url = payload
+                body = PairEvent.from_pair(pair, mid_url=mid_url).model_dump()
+            elif kind == "result":
+                outcome = payload
+                body = ResultEvent.from_result(
+                    outcome.result, outcome.artifact_urls,
+                    explanations=outcome.explanations, pair_mids=outcome.pair_mids,
+                    key_urls=outcome.key_urls, sampling=outcome.sampling,
+                    csq=outcome.csq, qa_degraded=outcome.qa_degraded,
+                ).model_dump()
+            elif kind == "publish":
+                body = dict(payload)
+            else:
+                body = {"message": str(payload)}
+            active_workspace.append_event(owner_sub, kind, body)
+
         def emit(kind, payload):
+            # Persist before delivery. A browser disconnect only detaches this
+            # response; it no longer cancels an authenticated active job.
+            _journal(kind, payload)
+            if disconnected.is_set() and active_manifest is not None:
+                return
             if disconnected.is_set():
                 raise _ClientDisconnected()
             if not put_event((kind, payload)):
-                raise _ClientDisconnected()
+                if active_manifest is None:
+                    raise _ClientDisconnected()
 
         def worker():
             try:
@@ -122,6 +162,19 @@ def stream_session(key_arrays: list[np.ndarray], engines: str, *,
                     emit_pair=lambda pair, url: emit("pair", (pair, url)),
                 )
                 emit("result", outcome)
+                if active_manifest is not None:
+                    active_workspace.stage_generated(owner_sub, session_dir)
+                    active_workspace.set_state(
+                        owner_sub, "ready", snapshot={
+                            "upload": workspace_input or {},
+                            "pairs": [event.data for event in active_workspace.get(owner_sub).events if event.name == "pair"],
+                            "result": ResultEvent.from_result(
+                                outcome.result, outcome.artifact_urls,
+                                explanations=outcome.explanations, pair_mids=outcome.pair_mids,
+                                key_urls=outcome.key_urls, sampling=outcome.sampling,
+                                csq=outcome.csq, qa_degraded=outcome.qa_degraded,
+                            ).model_dump(),
+                        })
                 published = use_case.publish(
                     sid,
                     session_dir,
@@ -130,14 +183,31 @@ def stream_session(key_arrays: list[np.ndarray], engines: str, *,
                     workspace_input=workspace_input,
                 )
                 if published.get("published"):
+                    published_pid = published.get("pid")
+                    state = repository.state_for(sid)
+                    if state is not None and isinstance(published_pid, str):
+                        repository.save_state(sid, {**state, "published_pid": published_pid})
+                    if active_manifest is not None:
+                        active_workspace.set_state(owner_sub, "published", published_pid=published_pid)
+                    emit("publish", {"pid": published_pid, "published": True})
                     print(
                         f"[publisher] published {len(published['s3_keys'])} objects",
                         flush=True,
                     )
+                elif active_manifest is not None:
+                    active_workspace.set_state(owner_sub, "publish_pending")
+                    error = published.get("error")
+                    emit("publish", {
+                        "published": False,
+                        "error": error if isinstance(error, str) else "Durable publication needs a retry.",
+                    })
             except _ClientDisconnected:
                 pass
             except Exception as exc:
-                if not disconnected.is_set():
+                if active_manifest is not None:
+                    active_workspace.set_state(owner_sub, "failed")
+                    _journal("error", exc)
+                elif not disconnected.is_set():
                     emit("error", exc)
             finally:
                 try:
@@ -172,6 +242,8 @@ def stream_session(key_arrays: list[np.ndarray], engines: str, *,
                 elif kind == "error":
                     yield sse("error", ErrorEvent(message=str(payload)))
                     break
+                elif kind == "publish":
+                    yield f"event: publish\ndata: {json.dumps(payload)}\n\n"
         finally:
             disconnected.set()
             # The worker retains the repository pin + runtime lease until it

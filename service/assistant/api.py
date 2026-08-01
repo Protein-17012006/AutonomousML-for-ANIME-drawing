@@ -10,8 +10,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from service.core.auth import CurrentUser, require_current_user
 from service.core.config import AgentRateLimitSettings
 from service.memory.dependencies import memory_store_for
+from service.session_history.adapters import TranscriptStoreError
+from service.session_history.dependencies import get_history_transcripts
 from service.sessions.repository import SessionRepository
 from service.sessions.http_dependencies import get_session_repository
 
@@ -112,14 +115,33 @@ def _state_with_private_chat(state: dict) -> dict:
 
 
 @router.post("/session/{sid}/ask")
-def post_ask(sid: int, req: AskReq,
-             sessions: SessionRepository = Depends(get_session_repository)):
+def post_ask(
+    sid: int,
+    req: AskReq,
+    user: CurrentUser = Depends(require_current_user),
+    sessions: SessionRepository = Depends(get_session_repository),
+    transcripts=Depends(get_history_transcripts),
+):
     state = sessions.state_for(sid)
     if state is None:
         raise HTTPException(status_code=404, detail="Unknown session (or no result yet)")
+    pid = state.get("published_pid")
+    if not isinstance(pid, str) or not pid:
+        raise HTTPException(status_code=409, detail="Session is still being saved")
     from service.assistant.ask import answer_question
     from service.infrastructure.director_llm import make_ask_fn
-    return answer_question(state, req.question, make_ask_fn())
+    answer = answer_question(state, req.question, make_ask_fn())
+    try:
+        turn = transcripts.append_turn(
+            pid,
+            user.sub,
+            question=req.question,
+            answer=answer["answer"],
+            grounded=answer["grounded"],
+        )
+    except TranscriptStoreError as exc:
+        raise HTTPException(status_code=503, detail="Could not save Q&A; retry") from exc
+    return {**answer, "turn": turn.model_dump()}
 
 
 @router.post("/session/{sid}/agent")

@@ -11,7 +11,11 @@ import pytest
 
 from service.auth_dev_app import app
 from service.core.auth import CognitoJwtVerifier
-from service.session_history.adapters import DynamoSessionCatalog, S3ArtifactStore
+from service.session_history.adapters import (
+    DynamoSessionCatalog,
+    DynamoTranscriptStore,
+    S3ArtifactStore,
+)
 
 
 ORIGIN = "https://testserver"
@@ -100,6 +104,7 @@ def history_runtime(monkeypatch):
     old_verifier = getattr(app.state, "auth_verifier", None)
     old_catalog = getattr(app.state, "session_catalog", None)
     old_artifacts = getattr(app.state, "history_artifacts", None)
+    old_transcripts = getattr(app.state, "history_transcripts", None)
     app.state.auth_verifier = _verifier()
     with mock_aws():
         dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
@@ -108,11 +113,15 @@ def history_runtime(monkeypatch):
         s3.create_bucket(Bucket=BUCKET)
         app.state.session_catalog = DynamoSessionCatalog(table)
         app.state.history_artifacts = S3ArtifactStore(s3, bucket=BUCKET)
+        app.state.history_transcripts = DynamoTranscriptStore(
+            table, app.state.history_artifacts
+        )
         yield table, s3
     for name, old in (
         ("auth_verifier", old_verifier),
         ("session_catalog", old_catalog),
         ("history_artifacts", old_artifacts),
+        ("history_transcripts", old_transcripts),
     ):
         if old is None:
             try:
@@ -268,3 +277,59 @@ def test_workspace_is_validated_owned_and_rewrites_artifacts(history_runtime):
     assert workspace["pairs"][0]["mid_url"] == "/sessions/snapshot/artifacts/montage.png"
     assert workspace["result"]["artifacts"]["report"] == "/sessions/snapshot/artifacts/report.md"
     assert _login("user-b").get("/sessions/snapshot/workspace").status_code == 404
+
+
+def test_workspace_hydrates_the_versioned_qa_transcript(history_runtime):
+    table, s3 = history_runtime
+    row = _row("snapshot", "user-a", 100)
+    row.update(
+        snapshot_key="artifacts/snapshot/workspace.v1.json",
+        snapshot_version=1,
+        message_snapshot_key="artifacts/snapshot/messages.v1/1-first.json",
+        message_version=1,
+    )
+    table.put_item(Item=row)
+    payload = {
+        "schema_version": 1,
+        "upload": {"mode": "frames", "label": "2 keyframes", "filenames": ["a.png", "b.png"]},
+        "pairs": [],
+        "result": {
+            "n_autopass": 1, "n_corrected": 0, "keys_requested_total": 0,
+            "flagged": [], "abstained": [], "needs_key": [],
+            "artifacts": {}, "pair_mids": {}, "key_urls": {},
+        },
+    }
+    transcript = {
+        "schema_version": 1,
+        "pid": "snapshot",
+        "turns": [{
+            "turn_id": "turn-1", "question": "Why?", "answer": "The gate passed.",
+            "grounded": True, "answered_at": "2026-08-01T00:00:00Z",
+        }],
+    }
+    s3.put_object(Bucket=BUCKET, Key=row["snapshot_key"], Body=json.dumps(payload).encode())
+    s3.put_object(
+        Bucket=BUCKET, Key=row["message_snapshot_key"], Body=json.dumps(transcript).encode()
+    )
+
+    response = _login("user-a").get("/sessions/snapshot/workspace")
+    assert response.status_code == 200
+    assert response.json()["qa"] == transcript["turns"]
+
+
+def test_transcript_turns_are_versioned_and_owned(history_runtime):
+    table, s3 = history_runtime
+    table.put_item(Item=_row("session", "user-a", 100))
+    store = DynamoTranscriptStore(table, S3ArtifactStore(s3, bucket=BUCKET))
+
+    first = store.append_turn("session", "user-a", question="Why?", answer="Because.", grounded=True)
+    second = store.append_turn("session", "user-a", question="How?", answer="Carefully.", grounded=False)
+    row = table.get_item(Key={"pid": "session"})["Item"]
+
+    assert row["message_version"] == 2
+    assert row["message_count"] == 2
+    transcript = store.artifacts.get_transcript(row["message_snapshot_key"])
+    assert transcript is not None
+    assert [turn.turn_id for turn in transcript.turns] == [first.turn_id, second.turn_id]
+    with pytest.raises(Exception):
+        store.append_turn("session", "user-b", question="Steal?", answer="No.", grounded=True)

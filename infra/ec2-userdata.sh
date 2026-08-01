@@ -112,7 +112,7 @@ http {
         # Next export. The plural sessions route serves durable owned-session
         # history and workspace snapshots; the auth route bootstraps the
         # application cookie.
-        location ~ ^/(auth|sessions|session|demo)(?:/|$) {
+        location ~ ^/(auth|sessions|session|demo|active-workspace)(?:/|$) {
             limit_req zone=sess burst=3 nodelay;
             limit_req zone=inter burst=10 nodelay;
             proxy_pass http://${BOX_HOST}:8000;

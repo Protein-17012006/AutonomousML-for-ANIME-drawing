@@ -67,6 +67,26 @@ class WorkspaceSnapshot(BaseModel):
     result: ResultEvent
 
 
+class QaTranscriptTurn(BaseModel):
+    turn_id: str
+    question: str
+    answer: str
+    grounded: bool
+    answered_at: str
+
+
+class QaTranscriptSnapshot(BaseModel):
+    schema_version: Literal[1]
+    pid: str
+    turns: list[QaTranscriptTurn] = Field(default_factory=list)
+
+
+class WorkspaceHydration(WorkspaceSnapshot):
+    """Owner-authorized workspace response, enriched with a separate transcript."""
+
+    qa: list[QaTranscriptTurn] = Field(default_factory=list)
+
+
 @dataclass(frozen=True)
 class PublishedSession:
     summary: SessionSummary
@@ -75,6 +95,8 @@ class PublishedSession:
     owner_sort: str
     snapshot_key: str | None = None
     snapshot_version: int | None = None
+    message_snapshot_key: str | None = None
+    message_version: int | None = None
 
 
 @dataclass(frozen=True)
