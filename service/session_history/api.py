@@ -17,7 +17,7 @@ from service.session_history.models import (
     SessionListResponse,
     SessionSummary,
     SessionTitleRequest,
-    WorkspaceSnapshot,
+    WorkspaceHydration,
 )
 
 
@@ -84,7 +84,7 @@ def _workspace_artifact_url(pid: str, session, value) -> str | None:
     return f"/sessions/{pid}/artifacts/{name}"
 
 
-@router.get("/{pid}/workspace", response_model=WorkspaceSnapshot)
+@router.get("/{pid}/workspace", response_model=WorkspaceHydration)
 def get_workspace(
     pid: str,
     user: CurrentUser = Depends(require_current_user),
@@ -124,7 +124,13 @@ def get_workspace(
             explanation["annotated_url"] = _workspace_artifact_url(
                 pid, session, explanation.get("annotated_url")
             )
-    return WorkspaceSnapshot.model_validate(value)
+    transcript = (
+        artifacts.get_transcript(session.message_snapshot_key)
+        if session.message_snapshot_key is not None
+        else None
+    )
+    value["qa"] = [turn.model_dump() for turn in (transcript.turns if transcript else [])]
+    return WorkspaceHydration.model_validate(value)
 
 
 @router.get("/{pid}/artifacts/{name}")

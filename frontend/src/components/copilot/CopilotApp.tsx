@@ -2,7 +2,7 @@
 // Co-pilot app shell — owns all session state and switches the chat ⇄ board surfaces.
 // The presentational pieces were split out into ./components/* and the logic into ./lib/*
 // (this file used to be a ~1360-line monolith holding all of them).
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { PairEvent, ResultEvent, InputMode } from "./types";
 import { runSession, runVideoSession, askQuestion } from "./api";
@@ -19,13 +19,14 @@ import { ChatView } from "./components/chat/ChatView";
 import { ChatComposer } from "./components/chat/ChatComposer";
 import { ChatWelcome } from "./components/chat/ChatWelcome";
 import { ReviewWorkbench } from "./components/review/ReviewWorkbench";
+import { ActiveWorkspaceDialog } from "./components/common/ActiveWorkspaceDialog";
 import { Toast } from "./components/review/Toast";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import {
   AppSidebar,
   type SidebarAccount,
-} from "@/components/common/AppSidebar";
+} from "./components/common/AppSidebar";
 import {
   authenticatedFetch,
   getCookieSession,
@@ -34,10 +35,13 @@ import {
 import {
   createMySession,
   getMySession,
+  getMySessionWorkspace,
   listMySessions,
   renameMySession,
   type PublishedSessionSummary,
 } from "@/lib/sessionApi";
+import { discardActiveWorkspace, getActiveWorkspace, retryActiveWorkspacePublish, subscribeActiveWorkspace, type ActiveWorkspace } from "@/lib/activeWorkspace";
+import { clearCache, deleteActiveWorkspaceDatabase, loadCache, purgeForeignCaches, saveAssets, saveState, type CachedState } from "@/lib/activeWorkspaceCache";
 
 function sidFromResult(r: ResultEvent | null) {
   // The server sends the id outright. Slicing an artifact URL is the fallback for
@@ -49,10 +53,18 @@ function sidFromResult(r: ResultEvent | null) {
   return ref?.startsWith("/session/") ? (ref.split("/")[2] ?? null) : null;
 }
 
+type PendingRun =
+  | { kind: "frames"; files: File[] }
+  | { kind: "video"; file: File };
+
 export default function App() {
   const router = useRouter();
+  // `keys` are media belonging to the displayed session. The
+  // composer gets its own staging buffer, so editing a prospective new run can
+  // never erase a selected completed session.
   const keys = useFileSet();
-  const [engines, setEngines] = useState("box");
+  const stagedKeys = useFileSet();
+  const engines = "box";
   const [interpolator, setInterpolator] = useState("rife");
   // cadence = shoot-on-Ns rate the artist drew at (24/12/8); smoothness = the in-between
   // multiplier applied on top (1=off, 2=standard, 4=extra — Phase 2 enables Extra).
@@ -75,11 +87,12 @@ export default function App() {
       return n;
     });
 
-  const [videoFile, setVideoFile] = useState<File | null>(null);
+  const [stagedVideoFile, setStagedVideoFile] = useState<File | null>(null);
   const [stride, setStride] = useState("2");
   // Composer input mode, lifted here (was in ChatComposer) so BOTH the dropzone and the
   // ChatWelcome quick-import buttons share one source of truth.
-  const [mode, setMode] = useState<InputMode>("frames");
+  const [stagedMode, setStagedMode] = useState<InputMode>("frames");
+  const [sessionMode, setSessionMode] = useState<InputMode>("frames");
 
 
   // chat-first surface state (vault 'Chat-First Copilot Surface')
@@ -90,7 +103,9 @@ export default function App() {
 
   // Auth
   const [account, setAccount] = useState<SidebarAccount | null>(null);
+  const [ownerSub, setOwnerSub] = useState<string | null>(null);
   const [liveSid, setLiveSid] = useState<string | null>(null);
+  const [durablePid, setDurablePid] = useState<string | null>(null);
   const [history, setHistory] = useState<PublishedSessionSummary[]>([]);
   const [historyCursor, setHistoryCursor] = useState<string | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -98,6 +113,15 @@ export default function App() {
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [selectedPid, setSelectedPid] = useState<string | null>(null);
   const [activeDraftPid, setActiveDraftPid] = useState<string | null>(null);
+  const [recoverableWorkspace, setRecoverableWorkspace] = useState<ActiveWorkspace | null>(null);
+  const [activeWorkspace, setActiveWorkspace] = useState<ActiveWorkspace | null>(null);
+  const [recoveryBusy, setRecoveryBusy] = useState(false);
+  const [recoveryError, setRecoveryError] = useState<string | null>(null);
+  const [preflightWorkspace, setPreflightWorkspace] = useState<ActiveWorkspace | null>(null);
+  const [pendingRun, setPendingRun] = useState<PendingRun | null>(null);
+  const cacheWritesEnabled = useRef(false);
+  const activeStreamStop = useRef<(() => void) | null>(null);
+  const activeStreamSequence = useRef(0);
 
   const loadHistory = useCallback(async () => {
     setHistoryLoading(true);
@@ -116,19 +140,139 @@ export default function App() {
       setHistoryLoading(false);
     }
   }, []);
+
+  const hydratePublishedSession = useCallback(async (pid: string) => {
+    const [selected, workspace] = await Promise.all([
+      getMySession(pid),
+      getMySessionWorkspace(pid),
+    ]);
+    setHistory((items) =>
+      items.map((item) => (item.pid === selected.pid ? selected : item)),
+    );
+    setSelectedPid(selected.pid);
+    setActiveDraftPid(null);
+    keys.clear();
+    setSessionMode(workspace.upload.mode);
+    setUpload({
+      media: workspace.upload.mode === "video" ? "video" : "keyframes",
+      count: workspace.upload.filenames.length,
+    });
+    setLog(workspace.pairs);
+    setResult(workspace.result);
+    setLiveSid(sidFromResult(workspace.result));
+    setDurablePid(null);
+    setQaTurns(workspace.qa.map((turn) => ({
+      q: turn.question,
+      answer: turn.answer,
+      grounded: turn.grounded,
+    })));
+    setVerdicts({});
+    setRunning(false);
+    setView("chat");
+  }, [keys]);
+
+  const startActiveWorkspaceStream = useCallback((workspace: ActiveWorkspace, after: number) => {
+    activeStreamStop.current?.();
+    activeStreamSequence.current = after;
+    activeStreamStop.current = subscribeActiveWorkspace(workspace.workspace_id, after, {
+      onEvent: (event) => {
+        activeStreamSequence.current = event.sequence;
+        setActiveWorkspace((current) => ({
+          ...(current?.workspace_id === workspace.workspace_id ? current : workspace),
+          event_sequence: event.sequence,
+          ...(event.name === "publish" && event.data.published !== true ? { state: "publish_pending" } : {}),
+        }));
+        if (event.name === "pair") {
+          const pair = event.data as unknown as PairEvent;
+          if (typeof pair.index === "number" && typeof pair.action === "string") {
+            setLog((previous) => previous.some((item) => item.index === pair.index)
+              ? previous.map((item) => item.index === pair.index ? pair : item)
+              : [...previous, pair]);
+            setRunning(true);
+          }
+        } else if (event.name === "result") {
+          const next = event.data as unknown as ResultEvent;
+          if (typeof next.n_autopass === "number") {
+            setResult(next);
+            setLiveSid(sidFromResult(next));
+          }
+        } else if (event.name === "error") {
+          setRunning(false);
+          setBanner(typeof event.data.message === "string" ? event.data.message : "The recovered workspace stopped unexpectedly.");
+        } else if (event.name === "publish") {
+          setRunning(false);
+          if (event.data.published === true) {
+            const pid = typeof event.data.pid === "string" ? event.data.pid : null;
+            if (!pid) {
+              setRecoveryError("The session was published but no history ID was returned.");
+              return;
+            }
+            void hydratePublishedSession(pid).then(() => {
+              if (ownerSub) return clearCache(ownerSub);
+            }).then(() => {
+              activeStreamStop.current?.();
+              activeStreamStop.current = null;
+              setActiveWorkspace(null);
+              setRecoverableWorkspace(null);
+            }).catch((error) => {
+              setRecoveryError(error instanceof Error ? error.message : "Could not load the published session.");
+            });
+          } else {
+            const pendingWorkspace: ActiveWorkspace = {
+              ...workspace,
+              state: "publish_pending",
+              event_sequence: event.sequence,
+            };
+            setActiveWorkspace(pendingWorkspace);
+            setRecoverableWorkspace(pendingWorkspace);
+            setRecoveryError(typeof event.data.error === "string" ? event.data.error : "The session is ready, but publishing needs a retry.");
+          }
+        }
+      },
+      onConnectionError: () => {
+        // The subscription reconnects from its persisted sequence automatically.
+      },
+    });
+  }, [hydratePublishedSession, ownerSub]);
+
+  useEffect(() => () => activeStreamStop.current?.(), []);
   // Account Setup
   useEffect(() => {
     let active = true;
     getCookieSession()
-      .then((session) => {
+      .then(async (session) => {
+        // Finish shared-browser cleanup before this account can write another
+        // cache entry. A failed cleanup leaves caching disabled for safety.
+        let cacheReady = true;
+        try {
+          await purgeForeignCaches(session.user_sub);
+        } catch (error) {
+          cacheReady = false;
+          console.warn("could not purge another account's workspace cache", error);
+        }
         if (!active) return;
+        cacheWritesEnabled.current = cacheReady;
         setAccount({
           name: session.name,
           username: session.username,
         });
+        setOwnerSub(session.user_sub);
         void loadHistory();
+        void getActiveWorkspace().then(async (workspace) => {
+          if (workspace?.published_pid) {
+            // A receipt proves that this draft is already durable. It is not a
+            // user-selected history session, so do not change sidebar selection
+            // or hydrate it into the current view on page entry.
+            await clearCache(session.user_sub);
+            return;
+          }
+          setRecoverableWorkspace(workspace);
+        }).catch((error: unknown) =>
+          setRecoveryError(error instanceof Error ? error.message : "Could not inspect the active workspace."),
+        );
       })
       .catch((err) => {
+        cacheWritesEnabled.current = false;
         console.error("failed to load cookie session:", err);
         router.replace("/login");
       });
@@ -144,6 +288,15 @@ export default function App() {
   useEffect(
     () => () => keyUrls.forEach((u) => URL.revokeObjectURL(u)),
     [keyUrls],
+  );
+
+  const stagedKeyUrls = useMemo(
+    () => stagedKeys.files.map((f) => URL.createObjectURL(f)),
+    [stagedKeys.files],
+  );
+  useEffect(
+    () => () => stagedKeyUrls.forEach((u) => URL.revokeObjectURL(u)),
+    [stagedKeyUrls],
   );
 
   const effKeyUrls = useMemo(() => {
@@ -164,22 +317,75 @@ export default function App() {
     setQaTurns([]);
     setView("chat");
     setLiveSid(null);
+    setDurablePid(null);
   };
+
+  const restoreActiveInputs = async (workspace: ActiveWorkspace) => {
+    const inputs = workspace.assets.filter((asset) => asset.kind === "input-key" || asset.kind === "input-video");
+    const fetchInput = async (name: string) => {
+      const url = workspace.artifact_urls[name];
+      if (!url) throw new Error("The active workspace is missing a protected input URL.");
+      const response = await authenticatedFetch(url, { cache: "no-store" });
+      if (!response.ok) throw new Error(`Could not restore an uploaded asset (${response.status}).`);
+      return response.blob();
+    };
+    const video = inputs.find((asset) => asset.kind === "input-video");
+    if (video) {
+      const blob = await fetchInput(video.name);
+      keys.clear();
+      const restoredVideo = new File([blob], workspace.snapshot.upload?.filenames?.[0] ?? "video.mp4", { type: blob.type || "video/mp4" });
+      stagedKeys.clear();
+      setStagedVideoFile(restoredVideo);
+      setStagedMode("video");
+      setSessionMode("video");
+      return { keys: [], video: restoredVideo };
+    }
+    const frames = inputs.filter((asset) => asset.kind === "input-key").sort((a, b) => a.name.localeCompare(b.name));
+    const files = await Promise.all(frames.map(async (asset, index) => {
+      const blob = await fetchInput(asset.name);
+      return new File([blob], workspace.snapshot.upload?.filenames?.[index] ?? asset.name, { type: blob.type || "image/png" });
+    }));
+    keys.replace(files);
+    stagedKeys.replace(files);
+    setStagedVideoFile(null);
+    setStagedMode("frames");
+    setSessionMode("frames");
+    return { keys: files, video: null };
+  };
+
+  useEffect(() => {
+    if (!cacheWritesEnabled.current || !ownerSub || (!activeWorkspace && !recoverableWorkspace) || activeWorkspace?.state === "published" || recoverableWorkspace?.state === "published" || (!running && !upload && log.length === 0 && !result)) return;
+    const state: Omit<CachedState, "expiresAt"> = {
+      revision: activeWorkspace?.revision ?? recoverableWorkspace?.revision ?? null,
+      workspaceId: activeWorkspace?.workspace_id ?? recoverableWorkspace?.workspace_id ?? null,
+      eventSequence: activeWorkspace?.event_sequence ?? activeStreamSequence.current,
+      mode: sessionMode,
+      upload,
+      log,
+      result,
+      verdicts,
+      activeDraftPid,
+    };
+    void saveState(ownerSub, state).catch((error) =>
+      console.warn("could not cache active workspace state", error),
+    );
+  }, [activeDraftPid, activeWorkspace, log, ownerSub, recoverableWorkspace, result, running, sessionMode, upload, verdicts]);
 
   const selectHistorySession = async (session: PublishedSessionSummary) => {
     setSelectedPid(session.pid);
     if (session.status === "draft") {
       clearAll();
-      setVideoFile(null);
       setActiveDraftPid(session.pid);
     } else {
       setActiveDraftPid(null);
     }
     try {
+      if (session.status === "complete") {
+        await hydratePublishedSession(session.pid);
+        return;
+      }
       const selected = await getMySession(session.pid);
-      setHistory((items) =>
-        items.map((item) => (item.pid === selected.pid ? selected : item)),
-      );
+      setHistory((items) => items.map((item) => (item.pid === selected.pid ? selected : item)));
       // This API type contains only the safe sidebar summary contract; log it
       // after a successful selection in every build so production support can
       // confirm the owner-scoped record returned by FastAPI.
@@ -200,7 +406,6 @@ export default function App() {
     setSelectedPid(created.pid);
     setActiveDraftPid(created.pid);
     clearAll();
-    setVideoFile(null);
   };
 
   const renameHistorySession = async (pid: string, title: string) => {
@@ -234,49 +439,85 @@ export default function App() {
     }
   };
 
+  const clearComposerInputs = () => {
+    stagedKeys.clear();
+    setStagedVideoFile(null);
+  };
+
   const changeMode = (next: InputMode) => {
-    if (next === mode) return;
+    if (next === stagedMode) return;
     if (next === "video")
-      keys.clear(); // leaving frames → drop staged keys
-    else setVideoFile(null); // leaving video → drop staged clip
-    setMode(next);
+      stagedKeys.clear(); // leaving frames → drop staged keys
+    else setStagedVideoFile(null); // leaving video → drop staged clip
+    setStagedMode(next);
   };
 
   const importFrames = (picked: File[]) => {
     if (!picked.length) return;
     changeMode("frames");
-    keys.add(picked);
+    stagedKeys.add(picked);
   };
 
   const importVideo = (file: File) => {
     changeMode("video");
-    setVideoFile(file);
+    setStagedVideoFile(file);
   };
 
-  const run = async () => {
+  const beginFrameRun = async (files: File[]) => {
+    if (!activeDraftPid) setSelectedPid(null);
+    clearAll();
+    keys.replace(files);
+    setSessionMode("frames");
     setBanner(null);
-    setLog([]);
-    setResult(null);
-    setVerdicts({});
-    setQaTurns([]);
-    setLiveSid(null);
     setUpload({
       media: "keyframes",
-      count: keys.files.length,
+      count: files.length,
     });
     setRunning(true);
+    let discoveredWorkspace = false;
+    const discoverWorkspace = () => {
+      if (discoveredWorkspace) return;
+      discoveredWorkspace = true;
+      void getActiveWorkspace().then((workspace) => {
+        if (!workspace) return;
+        activeStreamSequence.current = workspace.event_sequence;
+        setActiveWorkspace(workspace);
+        if (cacheWritesEnabled.current && ownerSub) void saveAssets(ownerSub, files, null, workspace.workspace_id);
+      }).catch(() => undefined);
+    };
     try {
+      if (cacheWritesEnabled.current && ownerSub) await saveAssets(ownerSub, files, null);
       await runSession(
-        keys.files,
+        files,
         engines,
         interpolator,
         cadence,
         smoothness,
         {
-          onPair: (p) => setLog((prev) => [...prev, p]),
+          onPair: (p) => {
+            setLog((prev) => [...prev, p]);
+            discoverWorkspace();
+          },
           onResult: (r) => {
             setResult(r);
             setLiveSid(sidFromResult(r));
+          },
+          onPublish: (published) => {
+            if (published.published && published.pid) {
+              setDurablePid(published.pid);
+              void loadHistory();
+              if (ownerSub) void clearCache(ownerSub);
+              setActiveWorkspace(null);
+              return;
+            }
+            setRecoveryError(
+              published.error ?? "The session is ready, but publishing needs a retry.",
+            );
+            void getActiveWorkspace()
+              .then((workspace) => {
+                if (workspace) setRecoverableWorkspace(workspace);
+              })
+              .catch(() => undefined);
           },
           onError: (m) => setBanner(m),
         },
@@ -301,32 +542,61 @@ export default function App() {
     }
   };
 
-  const runVideo = async () => {
-    if (!videoFile) return;
+  const beginVideoRun = async (file: File) => {
+    if (!activeDraftPid) setSelectedPid(null);
+    clearAll();
+    setSessionMode("video");
     setBanner(null);
-    setLog([]);
-    setResult(null);
-    setVerdicts({});
-    setQaTurns([]);
-    setLiveSid(null);
     setUpload({
       media: "video",
       count: 1,
     });
     setRunning(true);
+    let discoveredWorkspace = false;
+    const discoverWorkspace = () => {
+      if (discoveredWorkspace) return;
+      discoveredWorkspace = true;
+      void getActiveWorkspace().then((workspace) => {
+        if (!workspace) return;
+        activeStreamSequence.current = workspace.event_sequence;
+        setActiveWorkspace(workspace);
+        if (cacheWritesEnabled.current && ownerSub) void saveAssets(ownerSub, [], file, workspace.workspace_id);
+      }).catch(() => undefined);
+    };
     try {
+      if (cacheWritesEnabled.current && ownerSub) await saveAssets(ownerSub, [], file);
       await runVideoSession(
-        videoFile,
+        file,
         stride,
         cadence,
         smoothness,
         engines,
         interpolator,
         {
-          onPair: (p) => setLog((prev) => [...prev, p]),
+          onPair: (p) => {
+            setLog((prev) => [...prev, p]);
+            discoverWorkspace();
+          },
           onResult: (r) => {
             setResult(r);
             setLiveSid(sidFromResult(r));
+          },
+          onPublish: (published) => {
+            if (published.published && published.pid) {
+              setDurablePid(published.pid);
+              void loadHistory();
+              if (ownerSub) void clearCache(ownerSub);
+              setActiveWorkspace(null);
+              return;
+            }
+            setRecoveryError(
+              published.error ?? "The session is ready, but publishing needs a retry.",
+            );
+            void getActiveWorkspace()
+              .then((workspace) => {
+                if (workspace) setRecoverableWorkspace(workspace);
+              })
+              .catch(() => undefined);
           },
           onError: (m) => setBanner(m),
         },
@@ -348,6 +618,40 @@ export default function App() {
       );
     }
     setRunning(false);
+  };
+
+  const beginPendingRun = async (next: PendingRun) => {
+    if (next.kind === "frames") await beginFrameRun(next.files);
+    else await beginVideoRun(next.file);
+  };
+
+  const requestRun = async (next: PendingRun) => {
+    setBanner(null);
+    setRecoveryError(null);
+    try {
+      const workspace = await getActiveWorkspace();
+      if (workspace && !workspace.published_pid && workspace.state !== "published") {
+        setPendingRun(next);
+        setPreflightWorkspace(workspace);
+        return;
+      }
+      if (workspace?.published_pid && ownerSub) await clearCache(ownerSub);
+      await beginPendingRun(next);
+    } catch (error) {
+      setBanner(error instanceof Error
+        ? `Could not check for an active workspace: ${error.message}`
+        : "Could not check for an active workspace. Try again before starting a new run.");
+    }
+  };
+
+  const run = () => {
+    if (stagedKeys.files.length < 2) return;
+    void requestRun({ kind: "frames", files: stagedKeys.files });
+  };
+
+  const runVideo = () => {
+    if (!stagedVideoFile) return;
+    void requestRun({ kind: "video", file: stagedVideoFile });
   };
 
   const refillKey = async (index: number, file: File) => {
@@ -388,7 +692,7 @@ export default function App() {
   };
 
   const onAsk = async (q: string) => {
-    if (!liveSid) return;
+    if (!liveSid || !durablePid) return;
     const n = qaTurns.length;
     setQaTurns((prev) => [...prev, { q, answer: null }]);
     try {
@@ -415,8 +719,144 @@ export default function App() {
   };
 
   const handleSignOut = async () => {
+    cacheWritesEnabled.current = false;
+    activeStreamStop.current?.();
+    activeStreamStop.current = null;
     clearAll();
+    clearComposerInputs();
+    setOwnerSub(null);
+    try {
+      await deleteActiveWorkspaceDatabase();
+    } catch (error) {
+      console.warn("could not delete active-workspace cache during sign-out", error);
+    }
     await logoutCookieSession();
+  };
+
+  const resumeWorkspace = async (workspace = recoverableWorkspace) => {
+    if (!workspace) return;
+    setRecoveryBusy(true);
+    setRecoveryError(null);
+    try {
+      if (workspace.state === "publish_pending") {
+        const published = await retryActiveWorkspacePublish(workspace.workspace_id);
+        if (!published.published) throw new Error(published.error || "The session could not be published yet.");
+      }
+      const [cached, refreshed] = await Promise.all([
+        ownerSub ? loadCache(ownerSub) : Promise.resolve(null),
+        getActiveWorkspace(),
+      ]);
+      if (!refreshed) {
+        setRecoverableWorkspace(null);
+        setRunning(false);
+        return;
+      }
+      setRecoverableWorkspace(null);
+      if (refreshed.published_pid) {
+        await hydratePublishedSession(refreshed.published_pid);
+        if (ownerSub) await clearCache(ownerSub);
+        setActiveWorkspace(null);
+        setRunning(false);
+        return;
+      }
+      // The server remains authoritative. Full active snapshot hydration and
+      // replay are deliberately safe even when the browser cache is empty.
+      const snapshot = refreshed.snapshot;
+      const cacheMatches = cached?.state?.workspaceId === refreshed.workspace_id
+        && cached.assets?.workspaceId === refreshed.workspace_id;
+      if (cacheMatches && cached?.assets && cached.state) {
+        keys.replace(cached.assets.keys);
+        stagedKeys.replace(cached.assets.keys);
+        setStagedVideoFile(cached.assets.video);
+        setStagedMode(cached.state.mode);
+        setSessionMode(cached.state.mode);
+        setUpload(cached.state.upload);
+        setLog(cached.state.log);
+        setResult(cached.state.result);
+        setVerdicts(cached.state.verdicts);
+        setActiveDraftPid(cached.state.activeDraftPid);
+      } else {
+        if (ownerSub) await clearCache(ownerSub);
+        clearAll();
+        const restoredAssets = await restoreActiveInputs(refreshed);
+        if (ownerSub) await saveAssets(ownerSub, restoredAssets.keys, restoredAssets.video, refreshed.workspace_id);
+      }
+      if (!cacheMatches || cached?.state?.revision !== refreshed.revision) {
+        if (Array.isArray(snapshot.pairs)) setLog(snapshot.pairs as PairEvent[]);
+        if (snapshot.result) {
+          const nextResult = snapshot.result as ResultEvent;
+          setResult(nextResult);
+          setLiveSid(sidFromResult(nextResult));
+        }
+        if (snapshot.upload) {
+          setStagedMode(snapshot.upload.mode === "video" ? "video" : "frames");
+          setSessionMode(snapshot.upload.mode === "video" ? "video" : "frames");
+          setUpload({ media: snapshot.upload.mode === "video" ? "video" : "keyframes", count: snapshot.upload.filenames?.length ?? 0 });
+        }
+      }
+      const checkpoint = cacheMatches && cached?.state
+        ? cached.state.eventSequence ?? 0
+        : 0;
+      setActiveWorkspace(refreshed);
+      setRunning(refreshed.state === "generating");
+      startActiveWorkspaceStream(refreshed, checkpoint);
+    } catch (error) {
+      setRecoveryError(error instanceof Error ? error.message : "Could not resume the workspace.");
+    } finally {
+      setRecoveryBusy(false);
+    }
+  };
+
+  const discardWorkspace = async (workspace = recoverableWorkspace) => {
+    if (!workspace) return;
+    setRecoveryBusy(true);
+    try {
+      await discardActiveWorkspace(workspace.workspace_id);
+      if (ownerSub) await clearCache(ownerSub);
+      activeStreamStop.current?.();
+      activeStreamStop.current = null;
+      setActiveWorkspace(null);
+      setRecoverableWorkspace(null);
+      clearAll();
+      clearComposerInputs();
+    } catch (error) {
+      setRecoveryError(error instanceof Error ? error.message : "Could not discard the workspace.");
+    } finally {
+      setRecoveryBusy(false);
+    }
+  };
+
+  const resumePreflightWorkspace = async () => {
+    if (!preflightWorkspace) return;
+    const workspace = preflightWorkspace;
+    clearComposerInputs();
+    setPreflightWorkspace(null);
+    setPendingRun(null);
+    setRecoverableWorkspace(workspace);
+    await resumeWorkspace(workspace);
+  };
+
+  const discardPreflightAndRun = async () => {
+    if (!preflightWorkspace || !pendingRun) return;
+    const workspace = preflightWorkspace;
+    const next = pendingRun;
+    setRecoveryBusy(true);
+    setRecoveryError(null);
+    try {
+      await discardActiveWorkspace(workspace.workspace_id);
+      if (ownerSub) await clearCache(ownerSub);
+      activeStreamStop.current?.();
+      activeStreamStop.current = null;
+      setActiveWorkspace(null);
+      setRecoverableWorkspace(null);
+      setPreflightWorkspace(null);
+      setPendingRun(null);
+      await beginPendingRun(next);
+    } catch (error) {
+      setRecoveryError(error instanceof Error ? error.message : "Could not discard the active workspace.");
+    } finally {
+      setRecoveryBusy(false);
+    }
   };
 
   const msgs: ChatMsg[] = useMemo(
@@ -471,33 +911,29 @@ export default function App() {
                 />
               )}
               <ChatComposer
-                files={keys.files}
-                fileUrls={keyUrls}
-                onAdd={keys.add}
-                onRemove={keys.remove}
-                onClear={() => {
-                  clearAll();
-                  setVideoFile(null);
-                }}
-                mode={mode}
+                files={stagedKeys.files}
+                fileUrls={stagedKeyUrls}
+                onAdd={stagedKeys.add}
+                onRemove={stagedKeys.remove}
+                onClear={clearComposerInputs}
+                mode={stagedMode}
                 onModeChange={changeMode}
-                engines={engines}
-                setEngines={setEngines}
                 interpolator={interpolator}
                 setInterpolator={setInterpolator}
                 cadence={cadence}
                 setCadence={setCadence}
                 smoothness={smoothness}
                 setSmoothness={setSmoothness}
-                videoFile={videoFile}
-                onVideo={setVideoFile}
+                videoFile={stagedVideoFile}
+                onVideo={setStagedVideoFile}
                 stride={stride}
                 setStride={setStride}
                 onRun={run}
                 onRunVideo={runVideo}
                 running={running}
                 compact={running || log.length > 0}
-                askEnabled={!!result?.artifacts && !!liveSid}
+                askEnabled={!!result?.artifacts && !!liveSid && !!durablePid}
+                askSaving={!!result?.artifacts && !!liveSid && !durablePid}
                 onAsk={onAsk}
               />
             </div>
@@ -527,6 +963,15 @@ export default function App() {
               onClose={() => setBanner(null)}
             />
           )}
+          <ActiveWorkspaceDialog
+            workspace={preflightWorkspace ?? recoverableWorkspace}
+            busy={recoveryBusy}
+            error={recoveryError}
+            intent={preflightWorkspace ? "run-preflight" : "recovery"}
+            onResume={() => void (preflightWorkspace ? resumePreflightWorkspace() : resumeWorkspace())}
+            onRetry={() => void (preflightWorkspace ? discardPreflightAndRun() : resumeWorkspace())}
+            onDiscard={() => void (preflightWorkspace ? discardPreflightAndRun() : discardWorkspace())}
+          />
         </div>
       </SidebarProvider>
     </TooltipProvider>

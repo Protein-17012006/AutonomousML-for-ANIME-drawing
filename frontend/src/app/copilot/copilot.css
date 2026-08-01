@@ -2186,6 +2186,29 @@ body:has(.copilot-shell) {
   margin: 0 auto;
   padding: 0 16px;
 }
+
+/* Active-workspace recovery is an animation-desk interruption, not a generic card. */
+.copilot-recovery-dialog {
+  font-family: var(--font-body);
+  background: var(--color-sumi-2);
+  color: var(--color-washi);
+  border: 1px solid var(--color-line);
+  box-shadow: 0 18px 56px color-mix(in oklab, black 58%, transparent);
+}
+.copilot-recovery-dialog [data-slot="dialog-title"],
+.copilot-recovery-dialog [data-slot="alert-dialog-title"] {
+  font-family: var(--font-display);
+  color: var(--color-washi);
+}
+.copilot-recovery-readout {
+  padding: 8px 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: .04em;
+  color: var(--color-ash);
+  background: var(--color-sumi-3);
+  border-left: 2px solid var(--color-ao);
+}
 /* CHAT HEADER — moved to components/chat/ChatHeader.tsx (structural Tailwind) */
 /* ChatView.tsx */
 .chat-thread {

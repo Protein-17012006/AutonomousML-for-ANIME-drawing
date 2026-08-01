@@ -28,6 +28,8 @@ const nextConfig: NextConfig = EXPORT
           { source: "/session/:path*", destination: `${API_TARGET}/session/:path*` },
           { source: "/sessions", destination: `${API_TARGET}/sessions` },
           { source: "/sessions/:path*", destination: `${API_TARGET}/sessions/:path*` },
+          { source: "/active-workspace", destination: `${API_TARGET}/active-workspace` },
+          { source: "/active-workspace/:path*", destination: `${API_TARGET}/active-workspace/:path*` },
         ];
       },
     };
