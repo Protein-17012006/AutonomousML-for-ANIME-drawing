@@ -289,3 +289,31 @@ def test_superseding_an_already_published_workspace_does_not_publish_it_twice():
     svc.open_workspace("owner-1", upload=_snapshot().upload)
     assert publisher.calls == 1
     assert svc.get(ws.workspace_id, "owner-1") is None
+
+
+class _DeleteDeniedStore(InMemoryActiveWorkspaceStore):
+    """A store that cannot delete — exactly what production was.
+
+    The box's IAM identity held GetItem/PutItem/UpdateItem on `copilot_sessions`
+    but NOT DeleteItem, because before the active workspace nothing ever removed
+    a session row. `_supersede` deletes the run it replaces, so from the SECOND
+    run onward `open_workspace` raised, `streaming.py` swallowed it, and the run
+    proceeded with no workspace at all — leaving the previous, already-published
+    workspace in the pointer. Resume then offered the artist a run they had
+    already finished, and it was invisible: every layer degraded quietly.
+    """
+
+    def delete(self, workspace_id: str, owner_sub: str) -> None:
+        raise RuntimeError("AccessDeniedException: dynamodb:DeleteItem")
+
+
+def test_a_new_run_still_gets_a_workspace_when_the_old_one_cannot_be_deleted():
+    svc = ActiveWorkspaceService(_DeleteDeniedStore())
+    first = svc.open_workspace("owner-1", upload=_snapshot().upload)
+
+    second = svc.open_workspace("owner-1", upload=_snapshot().upload)
+
+    assert second.workspace_id != first.workspace_id
+    active = svc.active_for("owner-1")
+    assert active is not None and active.workspace_id == second.workspace_id
+    assert active.state == "draft"

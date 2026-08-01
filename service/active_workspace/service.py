@@ -228,11 +228,29 @@ class ActiveWorkspaceService:
         claims a finished session and contains no work — the same shape as an
         empty run reporting overall_pass: true.
         """
-        current = self._store.active_for(owner_sub)
+        try:
+            current = self._store.active_for(owner_sub)
+        except Exception:                        # noqa: BLE001 — see below
+            return
         if current is None:
             return
         # Already published: it was only still here so the client could notice.
         # Publishing again would file the same work as a second session.
         if current.published_pid is None and current.snapshot is not None:
             self.publish(current.workspace_id, owner_sub)
-        self._store.delete(current.workspace_id, owner_sub)
+        # Clearing the old run is HOUSEKEEPING, and housekeeping must never cost
+        # the artist the run they are starting. The caller swallows whatever this
+        # raises and continues with no workspace at all, so a failure here does
+        # not surface as an error — it silently removes the ability to resume,
+        # and leaves the PREVIOUS workspace in the pointer, so the client offers
+        # to resume a run that already finished. Production shipped exactly that:
+        # the IAM policy granted PutItem/UpdateItem on the sessions table but not
+        # DeleteItem, so every run after the first lost its workspace.
+        #
+        # The new workspace's set_active() overwrites the pointer regardless, so
+        # the worst case of continuing is an orphaned row, not a wrong answer.
+        try:
+            self._store.delete(current.workspace_id, owner_sub)
+        except Exception as exc:                 # noqa: BLE001
+            print(f"[active_workspace] WARN could not delete superseded "
+                  f"{current.workspace_id}: {exc}", flush=True)
