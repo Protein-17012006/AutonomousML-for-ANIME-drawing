@@ -28,10 +28,16 @@ def append_chat(state: dict, role: str, text: str) -> None:
     chat.append({"role": role, "text": str(text or "")[:_MAX_MSG_CHARS]})
     del chat[:-MAX_CHAT_TURNS]
 
-def _valid_index(args: dict, n_pairs: int) -> bool:
+def _valid_index(args: dict, n_pairs: int, cfg=None) -> bool:
     return isinstance(args.get("index"), int) and 0 <= args["index"] < n_pairs
 
-def _valid_rerun(args: dict, n_pairs: int) -> bool:
+
+# proposal key -> the SessionCfg attribute it would change
+_RERUN_FIELDS = {"cadence": "cadence_fps", "smoothness": "smoothness",
+                 "interpolator": "interpolator"}
+
+
+def _valid_rerun(args: dict, n_pairs: int, cfg=None) -> bool:
     ok = (
         (args.get("cadence") in _ALLOWED_CADENCE or args.get("cadence") is None)
         and (args.get("smoothness") in _ALLOWED_SMOOTHNESS or args.get("smoothness") is None)
@@ -39,12 +45,20 @@ def _valid_rerun(args: dict, n_pairs: int) -> bool:
              or args.get("interpolator") is None)
         and args.get("engines") is None
     )
-    changed = any(args.get(k) is not None
-                  for k in ("cadence", "smoothness", "interpolator"))
-    return ok and changed
+    supplied = {k: args.get(k) for k in _RERUN_FIELDS if args.get(k) is not None}
+    if not ok or not supplied:
+        return False
+    if cfg is None:
+        # Nothing to compare against; refusing here would invent a rejection the
+        # rail has no evidence for.
+        return True
+    # A re-run must CHANGE something. Repeating the settings the session already
+    # runs at costs the artist a full re-render and returns the same frames.
+    return any(getattr(cfg, attr, None) != supplied[key]
+               for key, attr in _RERUN_FIELDS.items() if key in supplied)
 
 
-def _valid_memory(args: dict, n_pairs: int) -> bool:
+def _valid_memory(args: dict, n_pairs: int, cfg=None) -> bool:
     """Validate an explicit Remember proposal through the same server allowlist."""
     try:
         from service.memory.models import MemoryCandidate, validate_candidate
@@ -57,7 +71,9 @@ TOOLS = {
     "explain_pair":  {"needs_confirm": False, "validate": _valid_index,  "label": "Explain pair"},
     "show_annotated":{"needs_confirm": False, "validate": _valid_index,  "label": "Show marked image"},
     "open_board":    {"needs_confirm": False, "validate": _valid_index,  "label": "Open review board"},
-    "export_bundle": {"needs_confirm": False, "validate": lambda a, n: a in ({}, None), "label": "Export bundle"},
+    "export_bundle": {"needs_confirm": False,
+                      "validate": lambda a, n, c=None: a in ({}, None),
+                      "label": "Export bundle"},
     "rerun_session": {"needs_confirm": True,  "validate": _valid_rerun,  "label": "Re-run session"},
     "remember_memory":{"needs_confirm": True,  "validate": _valid_memory, "label": "Remember this"},
 }
@@ -105,6 +121,10 @@ def _prompt(ctx: str, hist: str, q: str, memories: list[MemoryItem] | None = Non
         "corrected, propose explain_pair for that pair instead of saying the facts "
         "do not explain it — explain_pair is what retrieves the per-pair evidence, "
         "including the annotated image the run already rendered.\n"
+        "  The `settings:` fact line states the cadence, smoothness and "
+        "interpolator the session is already running. Never propose "
+        "rerun_session with those same values — it re-renders the whole cut and "
+        "returns identical frames; change at least one.\n"
         "  Every tool is a PROPOSAL the artist must accept; you never run anything "
         "yourself. NEVER write that an action has already been performed, executed, "
         "started or completed, and never claim you are doing it now — say what you "
@@ -146,7 +166,7 @@ def _decide_from_raw(state: dict, raw: str, ctx: str) -> dict:
     fups = _followups(doc)
     spec = TOOLS.get(tool)
     n_pairs = len(state["result"].pairs)
-    if spec is None or not spec["validate"](args, n_pairs):
+    if spec is None or not spec["validate"](args, n_pairs, state.get("cfg")):
         # The model named a tool the server will not run. `say` still describes it
         # ("confirm and I'll save it"), so the artist reads a promise with no button
         # anywhere. Report the rejection so the client can say so instead.

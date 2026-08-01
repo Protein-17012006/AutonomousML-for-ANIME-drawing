@@ -29,7 +29,8 @@ def _state():
     return {
         "keys": [b"fake_png_bytes"] * 3,
         "result": result,
-        "cfg": MagicMock(engines="stub", cadence_fps=24, smoothness=1),
+        "cfg": MagicMock(engines="stub", cadence_fps=24, smoothness=1,
+                         interpolator="rife"),
         "rev": {},
     }
 
@@ -198,10 +199,20 @@ def test_prompt_has_language_and_tool_restraint_rules():
 
 
 def test_history_turn_text_is_capped():
+    """Assert the cap itself, not a prompt total.
+
+    This asserted a flat `len(prompt) < 5_000`, which is the very mistake
+    test_user_message_is_capped's docstring records and corrects: it re-measures
+    the static prompt, so it breaks whenever a rule is added and it would keep
+    passing if the per-turn cap were raised while the prompt happened to shrink.
+    Assert the boundary directly — capped text present, one char more absent."""
+    from service.assistant.agent import _MAX_TURN_CHARS
+
     seen = {}
     hist = [{"role": "user", "text": "z" * 10_000}]
     decide_agent(_state(), "hi", hist, ask_fn=_capture_fn(seen))
-    assert len(seen["p"]) < 5_000
+    assert "z" * _MAX_TURN_CHARS in seen["p"]
+    assert "z" * (_MAX_TURN_CHARS + 1) not in seen["p"]
 
 
 def test_user_message_is_capped():
@@ -226,7 +237,13 @@ def test_user_message_is_capped():
     # terms (genga/douga/breakdown/timing chart) were added, 4183 after. This
     # ceiling exists to make the next increase a deliberate decision, not to pin
     # today's number — raise it only alongside content worth the per-turn cost.
-    assert len(empty["p"]) < 4_500, "static prompt has ballooned"
+    # 2026-08-01: 4183 -> 4784. Two deliberate purchases, both aimed at one bug —
+    # the agent proposing rerun_session at the smoothness the session was ALREADY
+    # running, a full re-render returning identical frames. +44 for the `settings:`
+    # fact line (cadence/smoothness/interpolator), without which neither the agent
+    # nor /ask can state the session's own configuration; +240 for the prompt rule
+    # that stops the proposal being made rather than merely refusing it.
+    assert len(empty["p"]) < 5_000, "static prompt has ballooned"
 
 
 def test_agent_route_keeps_history_server_side(monkeypatch):
@@ -481,3 +498,64 @@ def test_rerun_can_switch_the_interpolator_but_not_to_a_stub():
     assert _valid_rerun({"interpolator": "rife"}, 3)
     assert not _valid_rerun({"interpolator": "nope"}, 3)
     assert not _valid_rerun({"engines": "stub"}, 3)
+
+
+# --- the session's own settings: the agent could not read them, so it proposed
+# --- a re-run that changed nothing (live run 2026-08-01, smoothness 2 -> 2).
+
+def test_session_context_states_the_current_settings():
+    """Without this line the agent cannot tell a real change from a no-op, and
+    /ask cannot answer "what cadence am I running?" at all."""
+    ctx = build_session_context(_state())
+    assert "cadence=24fps" in ctx
+    assert "smoothness=x1" in ctx
+    assert "interpolator=rife" in ctx
+
+
+def test_rerun_repeating_the_current_smoothness_is_rejected():
+    fn = lambda p: '{"say": "Smoother.", "tool": "rerun_session", "args": {"smoothness": 1}}'
+    out = decide_agent(_state(), "make it smoother", [], ask_fn=fn)
+    assert out["action"] is None
+    assert out["rejected_tool"] == "rerun_session"
+
+
+def test_rerun_repeating_every_current_setting_is_rejected():
+    fn = lambda p: ('{"say": "Re-run.", "tool": "rerun_session", '
+                    '"args": {"cadence": 24, "smoothness": 1, "interpolator": "rife"}}')
+    out = decide_agent(_state(), "run it again", [], ask_fn=fn)
+    assert out["action"] is None
+    assert out["rejected_tool"] == "rerun_session"
+
+
+def test_rerun_changing_only_the_interpolator_is_accepted():
+    fn = lambda p: '{"say": "Try GIMM.", "tool": "rerun_session", "args": {"interpolator": "gimm"}}'
+    out = decide_agent(_state(), "the motion looks wrong", [], ask_fn=fn)
+    assert out["action"]["tool"] == "rerun_session"
+    assert out["action"]["args"] == {"interpolator": "gimm"}
+
+
+def test_rerun_is_accepted_when_one_field_differs_among_matching_ones():
+    """cadence matches, smoothness does not — the proposal still changes something."""
+    fn = lambda p: ('{"say": "x2.", "tool": "rerun_session", '
+                    '"args": {"cadence": 24, "smoothness": 2}}')
+    out = decide_agent(_state(), "smoother", [], ask_fn=fn)
+    assert out["action"]["tool"] == "rerun_session"
+
+
+def test_rerun_is_allowed_when_the_session_carries_no_config():
+    """A state without `cfg` cannot be compared against; the rail must not invent
+    a rejection it has no evidence for."""
+    state = _state()
+    del state["cfg"]
+    fn = lambda p: '{"say": "ok", "tool": "rerun_session", "args": {"smoothness": 1}}'
+    out = decide_agent(state, "again", [], ask_fn=fn)
+    assert out["action"]["tool"] == "rerun_session"
+
+
+def test_prompt_tells_the_model_not_to_repropose_the_current_settings():
+    """The rail rejecting a no-op is a backstop. An artist reading "refused"
+    is a worse turn than the model never proposing it, and now that the facts
+    carry `settings:` the model has what it needs to avoid it."""
+    seen = {}
+    decide_agent(_state(), "make it smoother", [], ask_fn=_capture_fn(seen))
+    assert "already running" in seen["p"]
