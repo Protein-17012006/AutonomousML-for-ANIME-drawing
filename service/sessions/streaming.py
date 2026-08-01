@@ -134,6 +134,7 @@ def stream_session(key_arrays: list[np.ndarray], engines: str, *,
                 outcome = payload
                 body = ResultEvent.from_result(
                     outcome.result, outcome.artifact_urls,
+                    sid=outcome.sid,
                     explanations=outcome.explanations, pair_mids=outcome.pair_mids,
                     key_urls=outcome.key_urls, sampling=outcome.sampling,
                     csq=outcome.csq, qa_degraded=outcome.qa_degraded,
@@ -172,6 +173,7 @@ def stream_session(key_arrays: list[np.ndarray], engines: str, *,
                             "pairs": [event.data for event in active_workspace.get(owner_sub).events if event.name == "pair"],
                             "result": ResultEvent.from_result(
                                 outcome.result, outcome.artifact_urls,
+                                sid=outcome.sid,
                                 explanations=outcome.explanations, pair_mids=outcome.pair_mids,
                                 key_urls=outcome.key_urls, sampling=outcome.sampling,
                                 csq=outcome.csq, qa_degraded=outcome.qa_degraded,
