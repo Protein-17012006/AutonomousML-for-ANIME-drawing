@@ -37,6 +37,7 @@ import {
 } from "@/lib/authenticatedApi";
 import {
   createMySession,
+  deleteMySession,
   getMySession,
   getMySessionWorkspace,
   listMySessions,
@@ -513,6 +514,18 @@ export default function App() {
     if (!picked.length) return;
     changeMode("frames");
     stagedKeys.add(picked);
+  };
+
+  const deleteHistorySession = async (pid: string) => {
+    await deleteMySession(pid);
+    const deletedDisplayedSession = selectedPid === pid || durablePid === pid;
+    setHistory((items) => items.filter((item) => item.pid !== pid));
+    if (deletedDisplayedSession) {
+      setSelectedPid(null);
+      setActiveDraftPid(null);
+      clearAll();
+    }
+    await loadHistory();
   };
 
   const importVideo = (file: File) => {
@@ -1015,6 +1028,7 @@ export default function App() {
           onSelectSession={(session) => void selectHistorySession(session)}
           onCreateSession={createHistorySession}
           onRenameSession={renameHistorySession}
+          onDeleteSession={deleteHistorySession}
           onRetryHistory={() => void loadHistory()}
           onLoadMore={() => void loadMoreHistory()}
           view={view}

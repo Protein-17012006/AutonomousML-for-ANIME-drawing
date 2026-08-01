@@ -236,6 +236,51 @@ def test_create_detail_and_rename_are_owner_scoped(history_runtime):
     assert renamed.json()["title"] == "Final timing"
 
 
+def test_delete_completed_session_removes_its_full_artifact_prefix(history_runtime):
+    table, s3 = history_runtime
+    row = _row("delete-me", "user-a", 100)
+    row.update(
+        snapshot_key="artifacts/delete-me/revisions/v1/workspace.v1.json",
+        snapshot_version=1,
+        message_snapshot_key="artifacts/delete-me/messages.v1/1-first.json",
+        message_version=1,
+    )
+    table.put_item(Item=row)
+    for key in (
+        "artifacts/delete-me/revisions/v1/montage.png",
+        "artifacts/delete-me/revisions/v1/workspace.v1.json",
+        "artifacts/delete-me/messages.v1/1-first.json",
+        "artifacts/delete-me/revisions/v2/reconstructed.mp4",
+    ):
+        s3.put_object(Bucket=BUCKET, Key=key, Body=b"artifact")
+    s3.put_object(Bucket=BUCKET, Key="artifacts/keep/report.md", Body=b"keep")
+
+    owner = _login("user-a")
+    response = owner.delete("/sessions/delete-me", headers={"Origin": ORIGIN})
+
+    assert response.status_code == 204
+    assert table.get_item(Key={"pid": "delete-me"}).get("Item") is None
+    assert s3.list_objects_v2(Bucket=BUCKET, Prefix="artifacts/delete-me/").get("KeyCount") == 0
+    assert s3.get_object(Bucket=BUCKET, Key="artifacts/keep/report.md")["Body"].read() == b"keep"
+    assert owner.get("/sessions/delete-me").status_code == 404
+    assert owner.get("/sessions/delete-me/artifacts/montage.png").status_code == 404
+
+
+def test_delete_session_is_owner_scoped_and_rejects_drafts(history_runtime):
+    table, _ = history_runtime
+    table.put_item(Item=_row("complete", "user-a", 100))
+    table.put_item(Item={
+        "pid": "draft", "owner_sub": "user-a", "owner_sort": "CREATED#00000000000000000101#draft",
+        "ts": 101, "updated_at": 101, "title": "Draft", "status": "draft", "artifact_keys": "[]",
+    })
+
+    owner = _login("user-a")
+    stranger = _login("user-b")
+    assert stranger.delete("/sessions/complete", headers={"Origin": ORIGIN}).status_code == 404
+    assert owner.delete("/sessions/draft", headers={"Origin": ORIGIN}).status_code == 409
+    assert table.get_item(Key={"pid": "draft"})["Item"]["status"] == "draft"
+
+
 def test_workspace_is_validated_owned_and_rewrites_artifacts(history_runtime):
     table, s3 = history_runtime
     row = _row("snapshot", "user-a", 100)

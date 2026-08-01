@@ -26,6 +26,17 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { BrandIcon } from "@/components/common/BrandIcon";
 import { Input } from "@/components/ui/input";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import type { PublishedSessionSummary } from "@/lib/sessionApi";
 import {
   Check,
@@ -38,6 +49,7 @@ import {
   Pencil,
   Plus,
   RotateCcw,
+  Trash2,
   X,
 } from "lucide-react";
 
@@ -58,6 +70,7 @@ interface AppSidebarProps {
   onSelectSession: (session: PublishedSessionSummary) => void;
   onCreateSession: (title: string) => Promise<void>;
   onRenameSession: (pid: string, title: string) => Promise<void>;
+  onDeleteSession: (pid: string) => Promise<void>;
   onRetryHistory: () => void;
   onLoadMore: () => void;
   view: "chat" | "board";
@@ -91,6 +104,7 @@ export function AppSidebar({
   onSelectSession,
   onCreateSession,
   onRenameSession,
+  onDeleteSession,
   onRetryHistory,
   onLoadMore,
   view,
@@ -104,6 +118,8 @@ export function AppSidebar({
   const [editingPid, setEditingPid] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const [saving, setSaving] = useState(false);
+  const [deletingPid, setDeletingPid] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
   const submitCreate = async (event: FormEvent) => {
@@ -142,6 +158,19 @@ export function AppSidebar({
       setFormError(error instanceof Error ? error.message : "Could not rename session.");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const submitDelete = async (pid: string) => {
+    setDeleting(true);
+    setFormError(null);
+    try {
+      await onDeleteSession(pid);
+      setDeletingPid(null);
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : "Could not delete session.");
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -331,6 +360,54 @@ export function AppSidebar({
                     >
                       <Pencil />
                     </Button>
+                    {session.status === "complete" && (
+                      <AlertDialog
+                        open={deletingPid === session.pid}
+                        onOpenChange={(open) => {
+                          if (!deleting) setDeletingPid(open ? session.pid : null);
+                        }}
+                      >
+                        <AlertDialogTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-xs"
+                            disabled={saving || deleting}
+                            aria-label={`Delete ${session.title}`}
+                            title="Delete session"
+                            onClick={() => {
+                              setEditingPid(null);
+                              setCreating(false);
+                              setFormError(null);
+                            }}
+                          >
+                            <Trash2 />
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent className="items-center text-center">
+                          <AlertDialogHeader className="items-center text-center">
+                            <AlertDialogTitle>Delete this session?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              <span className="font-medium text-washi">{session.title}</span> and all of its generated media, review results, and Q&amp;A history will be permanently deleted.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter className="justify-center">
+                            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+                            <AlertDialogAction
+                              variant="destructive"
+                              disabled={deleting}
+                              onClick={(event) => {
+                                event.preventDefault();
+                                void submitDelete(session.pid);
+                              }}
+                            >
+                              {deleting ? <LoaderCircle className="animate-spin" /> : <Trash2 />}
+                              Delete session
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    )}
                   </>
                 )}
               </SidebarMenuItem>

@@ -185,3 +185,12 @@ export async function renameMySession(
     body: JSON.stringify({ title }),
   }));
 }
+
+export async function deleteMySession(pid: string): Promise<void> {
+  const response = await authenticatedFetch(`/sessions/${encodeURIComponent(pid)}`, {
+    method: "DELETE",
+  });
+  if (!response.ok) {
+    throw new Error(`Could not delete session (${response.status}).`);
+  }
+}

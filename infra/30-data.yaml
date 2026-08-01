@@ -103,13 +103,18 @@ Resources:
                 Action:
                   - s3:PutObject
                   - s3:GetObject
+                  - s3:DeleteObject
                 Resource: !Sub ${ArtifactsBucket.Arn}/artifacts/*
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt ArtifactsBucket.Arn
               - Effect: Allow
                 Action:
                   - dynamodb:GetItem
                   - dynamodb:BatchGetItem
                   - dynamodb:PutItem
                   - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
                 Resource: !GetAtt SessionsTable.Arn
               - Effect: Allow
                 Action: dynamodb:Query

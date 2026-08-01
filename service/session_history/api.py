@@ -4,11 +4,15 @@ from __future__ import annotations
 import copy
 import pathlib
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from service.core.auth import CurrentUser, require_current_user
-from service.session_history.adapters import InvalidCursor
+from service.session_history.adapters import (
+    ArtifactDeletionError,
+    InvalidCursor,
+    SessionDeleteConflict,
+)
 from service.session_history.dependencies import (
     get_history_artifacts,
     get_session_catalog,
@@ -73,6 +77,48 @@ def rename_session(
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
     return session.summary
+
+
+@router.delete("/{pid}", status_code=204)
+def delete_session(
+    pid: str,
+    request: Request,
+    user: CurrentUser = Depends(require_current_user),
+    catalog=Depends(get_session_catalog),
+    artifacts=Depends(get_history_artifacts),
+):
+    try:
+        session = catalog.begin_delete_complete_owned(pid, user.sub)
+    except SessionDeleteConflict as exc:
+        raise HTTPException(
+            status_code=409, detail="Only completed sessions can be deleted"
+        ) from exc
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    try:
+        artifacts.delete_prefix(f"artifacts/{pid}/")
+    except ArtifactDeletionError as exc:
+        try:
+            catalog.restore_delete_complete_owned(pid, user.sub)
+        except Exception:  # pragma: no cover - the original storage error is primary
+            pass
+        raise HTTPException(
+            status_code=502, detail="Could not delete session artifacts; try again"
+        ) from exc
+
+    try:
+        catalog.finish_delete_complete_owned(pid, user.sub)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Could not remove session metadata") from exc
+
+    # A published active-workspace receipt contains no media, but deleting it
+    # avoids a later page visit attempting to hydrate the now-deleted PID.
+    active_workspaces = getattr(request.app.state, "active_workspaces", None)
+    if active_workspaces is not None:
+        manifest = active_workspaces.get(user.sub)
+        if manifest and manifest.state == "published" and manifest.published_pid == pid:
+            active_workspaces.discard(user.sub, manifest.workspace_id)
 
 
 def _workspace_artifact_url(pid: str, session, value) -> str | None:

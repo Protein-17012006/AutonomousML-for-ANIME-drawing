@@ -37,6 +37,14 @@ class InvalidCursor(ValueError):
     pass
 
 
+class SessionDeleteConflict(RuntimeError):
+    """The owned record exists but is not a completed history session."""
+
+
+class ArtifactDeletionError(RuntimeError):
+    """A durable session prefix could not be fully removed from S3."""
+
+
 def _integer(value) -> int:
     if isinstance(value, Decimal):
         return int(value)
@@ -252,6 +260,59 @@ class DynamoSessionCatalog:
             raise
         return _summary_from_row(response.get("Attributes") or {})
 
+    def begin_delete_complete_owned(
+        self, pid: str, owner_sub: str
+    ) -> PublishedSession | None:
+        """Hide a completed session while its S3 prefix is being removed.
+
+        The temporary status also prevents an in-flight Q&A or review revision
+        from moving Dynamo's pointers while deletion is under way.
+        """
+        from botocore.exceptions import ClientError
+
+        try:
+            response = self.table.update_item(
+                Key={"pid": pid},
+                UpdateExpression="SET #status = :deleting",
+                ConditionExpression="owner_sub = :owner AND #status = :complete",
+                ExpressionAttributeNames={"#status": "status"},
+                ExpressionAttributeValues={
+                    ":owner": owner_sub,
+                    ":complete": "complete",
+                    ":deleting": "deleting",
+                },
+                ReturnValues="ALL_OLD",
+            )
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") != "ConditionalCheckFailedException":
+                raise
+            row = self._row(pid)
+            if not row or str(row.get("owner_sub") or "") != owner_sub:
+                return None
+            raise SessionDeleteConflict("only completed sessions can be deleted") from exc
+        return _summary_from_row(response.get("Attributes") or {})
+
+    def restore_delete_complete_owned(self, pid: str, owner_sub: str) -> None:
+        self.table.update_item(
+            Key={"pid": pid},
+            UpdateExpression="SET #status = :complete",
+            ConditionExpression="owner_sub = :owner AND #status = :deleting",
+            ExpressionAttributeNames={"#status": "status"},
+            ExpressionAttributeValues={
+                ":owner": owner_sub,
+                ":deleting": "deleting",
+                ":complete": "complete",
+            },
+        )
+
+    def finish_delete_complete_owned(self, pid: str, owner_sub: str) -> None:
+        self.table.delete_item(
+            Key={"pid": pid},
+            ConditionExpression="owner_sub = :owner AND #status = :deleting",
+            ExpressionAttributeNames={"#status": "status"},
+            ExpressionAttributeValues={":owner": owner_sub, ":deleting": "deleting"},
+        )
+
     def _batch_rows(self, pids: list[str]) -> dict[str, dict]:
         if not pids:
             return {}
@@ -363,6 +424,28 @@ class S3ArtifactStore:
             if isinstance(exc, (json.JSONDecodeError, UnicodeDecodeError, ValidationError)):
                 return None
             raise
+
+    def delete_prefix(self, prefix: str) -> None:
+        """Delete every current object under one server-controlled session prefix."""
+        try:
+            paginator = self.client.get_paginator("list_objects_v2")
+            for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
+                objects = [
+                    {"Key": item["Key"]}
+                    for item in page.get("Contents", [])
+                    if isinstance(item.get("Key"), str)
+                ]
+                for offset in range(0, len(objects), 1000):
+                    response = self.client.delete_objects(
+                        Bucket=self.bucket,
+                        Delete={"Objects": objects[offset:offset + 1000], "Quiet": True},
+                    )
+                    if response.get("Errors"):
+                        raise ArtifactDeletionError("could not delete all session artifacts")
+        except ArtifactDeletionError:
+            raise
+        except Exception as exc:
+            raise ArtifactDeletionError("could not delete session artifacts") from exc
 
 
 class TranscriptStoreError(RuntimeError):
