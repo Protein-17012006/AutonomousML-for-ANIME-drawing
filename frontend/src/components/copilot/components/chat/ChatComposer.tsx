@@ -2,7 +2,7 @@
 // drop keys/video (= send a session), tweak args behind ⚙, ask follow-ups in text.
 import { useState } from "react";
 import { KeyframeDropzone } from "../input/KeyframeDropzone";
-import { Settings } from "lucide-react";
+import { LoaderCircle, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -24,8 +24,6 @@ export function ChatComposer(p: {
   onAdd: (files: File[]) => void;
   onRemove: (f: File) => void;
   onClear: () => void;
-  engines: string;
-  setEngines: (s: string) => void;
   interpolator: string;
   setInterpolator: (s: string) => void;
   cadence: string;
@@ -43,6 +41,7 @@ export function ChatComposer(p: {
   running: boolean;
   compact: boolean; // a session exists → fold the dropzone
   askEnabled: boolean; // result retained server-side → grounded Q&A available
+  askSaving?: boolean;
   onAsk: (q: string) => void;
 }) {
   const [q, setQ] = useState("");
@@ -74,26 +73,12 @@ export function ChatComposer(p: {
           id="composer-settings-panel"
           className="flex w-full flex-wrap items-center gap-2 rounded-lg border border-line bg-sumi-2 p-3"
         >
-          {/* ENGINE SELECTION */}
-          <Field orientation="horizontal" className="inline-flex w-auto items-center gap-1.5 font-mono text-[11px] tracking-[0.08em] text-ash uppercase">
-            <FieldLabel className="font-mono text-[11px] tracking-[0.08em] text-ash uppercase">engine</FieldLabel>
-            <Select value={p.engines} onValueChange={p.setEngines}>
-              <SelectTrigger size="sm" className="w-auto font-mono text-[13px] text-washi">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="box">Co-pilot (GPU)</SelectItem>
-                <SelectItem value="stub">Local stub (no GPU)</SelectItem>
-              </SelectContent>
-            </Select>
-          </Field>
           {/* INTERPOLATION MODEL SELECTION */}
           <Field orientation="horizontal" className="inline-flex w-auto items-center gap-1.5 font-mono text-[11px] tracking-[0.08em] text-ash uppercase">
             <FieldLabel className="font-mono text-[11px] tracking-[0.08em] text-ash uppercase">model</FieldLabel>
             <Select
               value={p.interpolator}
               onValueChange={p.setInterpolator}
-              disabled={p.engines !== "box"}
             >
               <SelectTrigger size="sm" className="w-auto font-mono text-[13px] text-washi">
                 <SelectValue />
@@ -171,7 +156,9 @@ export function ChatComposer(p: {
           type="text"
           value={q}
           placeholder={
-            p.askEnabled
+            p.askSaving
+              ? "Saving session…"
+              : p.askEnabled
               ? "Ask about this session — e.g. why was pair 3 flagged?"
               : "Run a session to ask about its decisions"
           }
@@ -182,7 +169,11 @@ export function ChatComposer(p: {
           }}
         />
         {/* IF ASKED IS ALLOWED && THERE IS USER PROMPT */}
-        {p.askEnabled && q.trim() ? (
+        {p.askSaving ? (
+          <Button type="button" className={primaryButtonClass} disabled>
+            <LoaderCircle data-icon="inline-start" className="animate-spin" />Saving session…
+          </Button>
+        ) : p.askEnabled && q.trim() ? (
           // BUTTON: ASK
           <Button type="button" className={primaryButtonClass} onClick={sendQ}>
             Ask

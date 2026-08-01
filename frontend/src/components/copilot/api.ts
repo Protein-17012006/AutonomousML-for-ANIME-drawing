@@ -30,6 +30,11 @@ function isResultEvent(value: unknown): value is ResultEvent {
 function isErrorEvent(value: unknown): value is { message: string } {
   return isRecord(value) && typeof value.message === "string";
 }
+function isPublishEvent(value: unknown): value is { published: boolean; pid?: string; error?: string } {
+  return isRecord(value) && typeof value.published === "boolean" &&
+    (value.pid === undefined || typeof value.pid === "string") &&
+    (value.error === undefined || typeof value.error === "string");
+}
 function isAskResponse(
   value: unknown,
 ): value is { answer: string; grounded: boolean } {
@@ -62,6 +67,7 @@ export interface SessionHandlers {
   onPair: (p: PairEvent) => void;
   onResult: (r: ResultEvent) => void;
   onError: (msg: string) => void;
+  onPublish?: (event: { published: boolean; pid?: string; error?: string }) => void;
 }
 
 /** Give React a paint opportunity after a streamed pair update. A proxy can
@@ -112,6 +118,9 @@ async function pumpSSE(
       } else if (e.name === "error") {
         if (isErrorEvent(e.data)) h.onError(e.data.message);
         else h.onError("The co-pilot returned an invalid error event.");
+      } else if (e.name === "publish") {
+        if (isPublishEvent(e.data)) h.onPublish?.(e.data);
+        else h.onError("The co-pilot returned an invalid publish event.");
       }
     }
   }

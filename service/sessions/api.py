@@ -62,6 +62,7 @@ def post_session(
         runtime.load_keys(keys), selected_engine, interpolator=interpolator,
         cadence_fps=cadence, smoothness=smoothness, show=show or None,
         repository=repository, owner_sub=owner_sub, history_pid=durable_pid,
+        active_workspace=getattr(request.app.state, "active_workspaces", None),
         workspace_input={
             "mode": "frames",
             "label": f"{len(keys)} keyframes",
@@ -92,6 +93,8 @@ def post_session_video(
     durable_pid = _owned_draft_pid(request, history_pid, owner_sub)
     key_arrays, gt_frames, eff_stride, source_frames, source_fps = runtime.load_video_keys(
         video, stride)
+    video.file.seek(0)
+    source_video = video.file.read()
     cadence_fps = round(source_fps / eff_stride) or 1
     sampling = {
         "source_frames": source_frames,
@@ -106,9 +109,11 @@ def post_session_video(
         smoothness=smoothness, sampling=sampling, show=show or None,
         gt_frames=gt_frames,
         repository=repository, owner_sub=owner_sub, history_pid=durable_pid,
+        active_workspace=getattr(request.app.state, "active_workspaces", None),
         workspace_input={
             "mode": "video",
             "label": _safe_filename(video.filename),
             "filenames": [_safe_filename(video.filename)],
         },
+        source_video=source_video,
     )

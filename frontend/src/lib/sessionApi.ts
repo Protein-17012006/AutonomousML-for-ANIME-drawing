@@ -43,6 +43,13 @@ export interface SessionWorkspaceSnapshot {
   };
   pairs: PairEvent[];
   result: ResultEvent;
+  qa: Array<{
+    turn_id: string;
+    question: string;
+    answer: string;
+    grounded: boolean;
+    answered_at: string;
+  }>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -88,6 +95,27 @@ function isSession(value: unknown): value is PublishedSessionSummary {
   );
 }
 
+function isWorkspaceSnapshot(value: unknown): value is SessionWorkspaceSnapshot {
+  return (
+    isRecord(value) &&
+    value.schema_version === 1 &&
+    isRecord(value.upload) &&
+    (value.upload.mode === "frames" || value.upload.mode === "video") &&
+    typeof value.upload.label === "string" &&
+    Array.isArray(value.upload.filenames) &&
+    value.upload.filenames.every((item) => typeof item === "string") &&
+    Array.isArray(value.pairs) &&
+    isRecord(value.result) &&
+    Array.isArray(value.qa) &&
+    value.qa.every((turn) => isRecord(turn) &&
+      typeof turn.turn_id === "string" &&
+      typeof turn.question === "string" &&
+      typeof turn.answer === "string" &&
+      typeof turn.grounded === "boolean" &&
+      typeof turn.answered_at === "string")
+  );
+}
+
 async function sessionJson(response: Response): Promise<PublishedSessionSummary> {
   if (!response.ok) {
     throw new Error(`Session request failed (${response.status}).`);
@@ -127,6 +155,16 @@ export async function getMySession(pid: string): Promise<PublishedSessionSummary
   return sessionJson(await authenticatedFetch(`/sessions/${encodeURIComponent(pid)}`, {
     cache: "no-store",
   }));
+}
+
+export async function getMySessionWorkspace(pid: string): Promise<SessionWorkspaceSnapshot> {
+  const response = await authenticatedFetch(`/sessions/${encodeURIComponent(pid)}/workspace`, {
+    cache: "no-store",
+  });
+  if (!response.ok) throw new Error(`Session workspace request failed (${response.status}).`);
+  const value: unknown = await response.json();
+  if (!isWorkspaceSnapshot(value)) throw new Error("Invalid session workspace.");
+  return value;
 }
 
 export async function createMySession(title: string): Promise<PublishedSessionSummary> {

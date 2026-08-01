@@ -71,13 +71,32 @@ def test_ask_route_answers_from_state(monkeypatch):
     pytest.importorskip("fastapi")                      # box cogvideo-venv only
     from fastapi.testclient import TestClient
     import service.app as app_mod
+    from service.core.auth import CurrentUser, require_current_user
+    from service.session_history.dependencies import get_history_transcripts
     from service.sessions.dependencies import default_session_repository
+
+    class TranscriptStore:
+        def append_turn(self, pid, owner_sub, *, question, answer, grounded):
+            assert (pid, owner_sub, question) == ("published-91", "test-user", "how many flagged?")
+            return type("Turn", (), {"model_dump": lambda self: {"turn_id": "1"}})()
+
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)   # force degrade path
+    app_mod.app.dependency_overrides[require_current_user] = lambda: CurrentUser(
+        sub="test-user", username="test-user", claims={}
+    )
+    app_mod.app.dependency_overrides[get_history_transcripts] = lambda: TranscriptStore()
     client = TestClient(app_mod.app)
-    default_session_repository.states[91] = _state()
+    default_session_repository.states[91] = {**_state(), "published_pid": "published-91"}
     default_session_repository.paths[91] = "unused"
-    r = client.post("/session/91/ask", json={"question": "how many flagged?"})
-    assert r.status_code == 200
-    j = r.json()
-    assert "answer" in j and j["grounded"] is False      # no key in test env
-    assert client.post("/session/999/ask", json={"question": "?"}).status_code == 404
+    try:
+        r = client.post("/session/91/ask", json={"question": "how many flagged?"})
+        assert r.status_code == 200
+        j = r.json()
+        assert "answer" in j and j["grounded"] is False      # no key in test env
+        assert j["turn"] == {"turn_id": "1"}
+        assert client.post("/session/999/ask", json={"question": "?"}).status_code == 404
+    finally:
+        app_mod.app.dependency_overrides.pop(require_current_user, None)
+        app_mod.app.dependency_overrides.pop(get_history_transcripts, None)
+        default_session_repository.states.pop(91, None)
+        default_session_repository.paths.pop(91, None)
