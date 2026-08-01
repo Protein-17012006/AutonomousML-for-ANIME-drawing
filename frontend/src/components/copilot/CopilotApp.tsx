@@ -13,12 +13,15 @@ import {
   type UserTurn,
 } from "./lib/chatModel";
 import { useFileSet } from "./lib/useFileSet";
+import { useActiveWorkspace } from "./lib/useActiveWorkspace";
+import { deleteCacheDatabase } from "./lib/workspaceCache";
 import { downloadBundle } from "./lib/exportSession";
 import { ChatHeader } from "./components/chat/ChatHeader";
 import { ChatView } from "./components/chat/ChatView";
 import { ChatComposer } from "./components/chat/ChatComposer";
 import { ChatWelcome } from "./components/chat/ChatWelcome";
 import { ReviewWorkbench } from "./components/review/ReviewWorkbench";
+import { ResumeWorkspaceDialog } from "./components/review/ResumeWorkspaceDialog";
 import { Toast } from "./components/review/Toast";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -116,6 +119,76 @@ export default function App() {
       setHistoryLoading(false);
     }
   }, []);
+  // The unfinished-run surface. It decides WHICH state to restore and where it
+  // comes from; these callbacks decide what restoring means, so the hook never
+  // reaches into the run's state itself.
+  const workspace = useActiveWorkspace({
+    onRestoreCached: (cached, assets) => {
+      keys.replace(assets.keys);
+      setVideoFile(assets.video);
+      setMode(cached.mode);
+      setUpload(cached.upload);
+      setLog(cached.log);
+      setResult(cached.result);
+      setLiveSid(sidFromResult(cached.result));
+      setVerdicts(cached.verdicts);
+      setActiveDraftPid(cached.activeDraftPid);
+      setView(cached.result ? "board" : "chat");
+    },
+    onRestoreSnapshot: (restored, files) => {
+      const snapshot = restored.snapshot;
+      keys.replace(files.keys);
+      setVideoFile(files.video);
+      setVerdicts({});
+      if (!snapshot) return;
+      setMode(snapshot.upload.mode === "video" ? "video" : "frames");
+      setUpload({
+        media: snapshot.upload.mode === "video" ? "video" : "keyframes",
+        count:
+          snapshot.upload.mode === "video"
+            ? 1
+            : snapshot.upload.filenames.length,
+      });
+      setLog(snapshot.pairs);
+      setResult(snapshot.result);
+      setLiveSid(sidFromResult(snapshot.result));
+      setView(snapshot.result ? "board" : "chat");
+    },
+    onEvent: (event) => {
+      if (event.name === "pair") {
+        const pair = event.data as unknown as PairEvent;
+        if (typeof pair.index !== "number") return;
+        // Replace by index rather than append: a replayed pair must not
+        // double up a row the artist is already looking at.
+        setLog((prev) =>
+          prev.some((item) => item.index === pair.index)
+            ? prev.map((item) => (item.index === pair.index ? pair : item))
+            : [...prev, pair],
+        );
+        setRunning(true);
+      } else if (event.name === "result") {
+        const finished = event.data as unknown as ResultEvent;
+        setResult(finished);
+        setLiveSid(sidFromResult(finished));
+        setRunning(false);
+      } else if (event.name === "error") {
+        setRunning(false);
+        setBanner(
+          typeof event.data.message === "string"
+            ? event.data.message
+            : "The recovered workspace stopped unexpectedly.",
+        );
+      }
+    },
+    onPublished: (pid) => {
+      setSelectedPid(pid);
+      setActiveDraftPid(null);
+      void loadHistory();
+    },
+  });
+
+  const { attach: workspaceAttach, adoptRunningWorkspace, saveState } = workspace;
+
   // Account Setup
   useEffect(() => {
     let active = true;
@@ -127,6 +200,7 @@ export default function App() {
           username: session.username,
         });
         void loadHistory();
+        void workspaceAttach(session.user_sub);
       })
       .catch((err) => {
         console.error("failed to load cookie session:", err);
@@ -135,7 +209,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [loadHistory, router]);
+  }, [loadHistory, router, workspaceAttach]);
 
   const keyUrls = useMemo(
     () => keys.files.map((f) => URL.createObjectURL(f)),
@@ -265,6 +339,7 @@ export default function App() {
       count: keys.files.length,
     });
     setRunning(true);
+    let claimed = false;
     try {
       await runSession(
         keys.files,
@@ -273,7 +348,15 @@ export default function App() {
         cadence,
         smoothness,
         {
-          onPair: (p) => setLog((prev) => [...prev, p]),
+          onPair: (p) => {
+            setLog((prev) => [...prev, p]);
+            // The first pair means the server has opened a workspace for this
+            // run. Claim it now so a reload from here can find its way back.
+            if (!claimed) {
+              claimed = true;
+              void adoptRunningWorkspace(keys.files, null);
+            }
+          },
           onResult: (r) => {
             setResult(r);
             setLiveSid(sidFromResult(r));
@@ -314,6 +397,7 @@ export default function App() {
       count: 1,
     });
     setRunning(true);
+    let claimed = false;
     try {
       await runVideoSession(
         videoFile,
@@ -323,7 +407,13 @@ export default function App() {
         engines,
         interpolator,
         {
-          onPair: (p) => setLog((prev) => [...prev, p]),
+          onPair: (p) => {
+            setLog((prev) => [...prev, p]);
+            if (!claimed) {
+              claimed = true;
+              void adoptRunningWorkspace([], videoFile);
+            }
+          },
           onResult: (r) => {
             setResult(r);
             setLiveSid(sidFromResult(r));
@@ -416,8 +506,42 @@ export default function App() {
 
   const handleSignOut = async () => {
     clearAll();
+    workspace.stopFollowing();
+    // Before the cookie goes, not after: a shared studio machine must not keep
+    // one artist's staged keyframes readable by whoever signs in next. A tab
+    // still holding the database blocks this, and the artist is told.
+    try {
+      await deleteCacheDatabase();
+    } catch (err) {
+      console.warn("could not delete the active-workspace cache", err);
+    }
     await logoutCookieSession();
   };
+
+  // Autosave. Skipped while there is nothing worth restoring, and once the run
+  // has been filed to history — at that point the history record IS the copy.
+  useEffect(() => {
+    if (workspace.live?.state === "published") return;
+    if (!upload && log.length === 0 && !result) return;
+    saveState({
+      eventSequence: workspace.live?.event_sequence ?? 0,
+      mode,
+      upload,
+      log,
+      result,
+      verdicts,
+      activeDraftPid,
+    });
+  }, [
+    activeDraftPid,
+    log,
+    mode,
+    result,
+    saveState,
+    upload,
+    verdicts,
+    workspace.live,
+  ]);
 
   const msgs: ChatMsg[] = useMemo(
     () => deriveMessages({ upload, log, result, running, banner, qa: qaTurns }),
@@ -433,6 +557,14 @@ export default function App() {
 
   return (
     <TooltipProvider>
+      <ResumeWorkspaceDialog
+        workspace={workspace.pending}
+        busy={workspace.busy}
+        error={workspace.error}
+        onResume={() => void workspace.resume()}
+        onRetryPublish={() => void workspace.retryPublish()}
+        onDiscard={() => void workspace.discard()}
+      />
       <SidebarProvider className="copilot-shell">
         <AppSidebar
           account={account}

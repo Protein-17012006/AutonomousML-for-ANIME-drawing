@@ -34,5 +34,9 @@ export function useFileSet() {
   const remove = (file: File) =>
     setFiles((prev) => prev.filter((existing) => !sameFile(existing, file)));
   const clear = () => setFiles([]);
-  return { files, add, insertAt, remove, clear };
+  // wholesale swap — restoring a saved workspace, where the stored set IS the
+  // answer. `add` would merge it into whatever is already staged and quietly
+  // resurrect keys the artist had removed.
+  const replace = (next: File[]) => setFiles([...next]);
+  return { files, add, insertAt, remove, clear, replace };
 }
