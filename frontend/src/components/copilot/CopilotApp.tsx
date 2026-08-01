@@ -954,13 +954,26 @@ export default function App() {
     try {
       const index = typeof action.args.index === "number" ? action.args.index : null;
       switch (action.tool) {
+        // All three land the artist on the same board, but they promise different
+        // things, and saying "Opened pair N" for all of them made a tool that
+        // showed nothing read as success. The server now refuses explain_pair and
+        // show_annotated where no finding or marked image exists, so by the time
+        // one arrives here the artefact is real — the note should name it.
         case "explain_pair":
         case "show_annotated":
         case "open_board":
           if (index === null) throw new Error("That pair is no longer available.");
           setBoardFocus(index);
           setView("board");
-          noteTurn(turn, { actionDone: true, actionNote: `Opened pair ${index}.` });
+          noteTurn(turn, {
+            actionDone: true,
+            actionNote:
+              action.tool === "explain_pair"
+                ? `Showing why pair ${index} was flagged.`
+                : action.tool === "show_annotated"
+                  ? `Showing the marked frame for pair ${index}.`
+                  : `Opened pair ${index}.`,
+          });
           break;
         case "export_bundle":
           if (!result) throw new Error("There is nothing to export yet.");

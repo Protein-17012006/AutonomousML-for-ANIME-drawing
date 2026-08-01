@@ -243,7 +243,15 @@ def test_user_message_is_capped():
     # fact line (cadence/smoothness/interpolator), without which neither the agent
     # nor /ask can state the session's own configuration; +240 for the prompt rule
     # that stops the proposal being made rather than merely refusing it.
-    assert len(empty["p"]) < 5_000, "static prompt has ballooned"
+    # 2026-08-01 (later): 4784 -> 4872. One purchase, +88, for the rule that a
+    # needs_key pair has no vlm finding and no annotated image. An artist asked
+    # "why 1 key need?" and the agent offered "the detailed gate triage and
+    # annotated frame" for the one kind of pair that has neither — the gate
+    # refuses before interpolation, so nothing was generated to perceive or
+    # circle. The server rail now refuses both tools there; this text stops the
+    # offer being MADE, which is the difference between a refusal the artist
+    # reads and a promise that quietly does nothing.
+    assert len(empty["p"]) < 5_200, "static prompt has ballooned"
 
 
 def test_agent_route_keeps_history_server_side(monkeypatch):
