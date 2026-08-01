@@ -120,3 +120,56 @@ def test_an_anonymous_run_opens_no_workspace(monkeypatch, workspaces):
     assert response.status_code == 200
     assert workspaces.active_for("") is None
     assert workspaces.active_for(None) is None
+
+
+def test_the_runs_own_publication_is_recorded_on_the_workspace(
+        monkeypatch, token_is_sub_verifier, workspaces):
+    """The pid comes from `publish_session` — the thing that actually creates
+    it — not from a second publisher invented for the workspace. The client
+    reads `published_pid` to open the saved session, and listens for the
+    `publish` event on the stream to close it."""
+    import service.composition.session_runtime as composition_mod
+
+    monkeypatch.setenv("COPILOT_AUTH_REQUIRED", "1")
+    monkeypatch.setenv("COPILOT_FEEDBACK_BACKEND", "memory")
+    monkeypatch.setattr(
+        composition_mod, "publish_session",
+        lambda sid, sdir, outcome, *, owner_sub=None, pid=None,
+        workspace_input=None: {"published": True, "pid": "pid-9",
+                               "s3_keys": [], "error": None})
+    old_runtime = app.state.session_http_runtime
+    app.state.session_http_runtime = composition_mod.build_session_http_runtime()
+    try:
+        _run(_login("user-a"))
+        workspace = workspaces.active_for("user-a")
+        assert workspace.published_pid == "pid-9"
+        assert workspace.state == "published"
+        recorded = [(event.name, event.data) for event in
+                    workspaces.events_after(workspace.workspace_id, "user-a", after=0)]
+        assert ("publish", {"published": True, "pid": "pid-9"}) in recorded
+    finally:
+        app.state.session_http_runtime = old_runtime
+
+
+def test_a_run_whose_publication_fails_stays_retryable(
+        monkeypatch, token_is_sub_verifier, workspaces):
+    """publish_session never raises; it reports. A failed publication must leave
+    the artist a workspace to finish saving, not a silently lost run."""
+    import service.composition.session_runtime as composition_mod
+
+    monkeypatch.setenv("COPILOT_AUTH_REQUIRED", "1")
+    monkeypatch.setenv("COPILOT_FEEDBACK_BACKEND", "memory")
+    monkeypatch.setattr(
+        composition_mod, "publish_session",
+        lambda sid, sdir, outcome, *, owner_sub=None, pid=None,
+        workspace_input=None: {"published": False, "pid": None, "s3_keys": [],
+                               "error": "S3 write failed"})
+    old_runtime = app.state.session_http_runtime
+    app.state.session_http_runtime = composition_mod.build_session_http_runtime()
+    try:
+        _run(_login("user-a"))
+        workspace = workspaces.active_for("user-a")
+        assert workspace.published_pid is None
+        assert workspace.state == "publish_pending"
+    finally:
+        app.state.session_http_runtime = old_runtime

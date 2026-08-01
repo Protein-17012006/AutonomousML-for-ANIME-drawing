@@ -168,9 +168,11 @@ class _Publisher:
 
     def __init__(self, pid="pid-1", fail_times=0):
         self.pid, self.fail_times, self.calls = pid, fail_times, 0
+        self.published_ids: list[str] = []
 
     def __call__(self, workspace):
         self.calls += 1
+        self.published_ids.append(workspace.workspace_id)
         if self.calls <= self.fail_times:
             raise RuntimeError("S3 write failed")
         return self.pid
@@ -202,7 +204,7 @@ def test_publish_promotes_the_run_and_reports_the_pid():
     ws = _finished(svc)
     assert svc.publish(ws.workspace_id, "owner-1") == {"published": True,
                                                        "pid": "pid-42"}
-    assert svc.active_for("owner-1") is None
+    assert svc.active_for("owner-1").state == "published"
 
 
 def test_publish_emits_a_publish_event_the_stream_can_deliver():
@@ -251,8 +253,9 @@ def test_a_new_run_auto_publishes_the_previous_finished_workspace():
     svc = _service_with(publisher)
     old = _finished(svc)
     svc.open_workspace("owner-1", upload=_snapshot().upload)
-    assert publisher.calls == 1
-    assert svc.get(old.workspace_id, "owner-1").published_pid == "pid-old"
+    # Asserted through the publisher, not the record: the superseded workspace is
+    # removed once its work is safely in history, so there is nothing left to read.
+    assert publisher.published_ids == [old.workspace_id]
 
 
 def test_a_new_run_discards_a_previous_workspace_that_produced_nothing():
@@ -264,3 +267,25 @@ def test_a_new_run_discards_a_previous_workspace_that_produced_nothing():
     svc.open_workspace("owner-1", upload=_snapshot().upload)
     assert publisher.calls == 0
     assert svc.get(empty.workspace_id, "owner-1") is None
+
+
+def test_a_published_workspace_is_still_returned_so_the_client_can_react():
+    """On login the client branches `published_pid ? purgeCache() : showResume()`,
+    and on finish it calls openSession(published_pid). Clearing the slot on
+    publish returns null instead, and the client has nothing left to open."""
+    svc = _service_with(_Publisher(pid="pid-3"))
+    ws = _finished(svc)
+    svc.publish(ws.workspace_id, "owner-1")
+    assert svc.active_response("owner-1")["workspace"]["published_pid"] == "pid-3"
+
+
+def test_superseding_an_already_published_workspace_does_not_publish_it_twice():
+    """It lingers until the client acknowledges it or a new run replaces it. A
+    second publish would file the same work as a second session."""
+    publisher = _Publisher(pid="pid-3")
+    svc = _service_with(publisher)
+    ws = _finished(svc)
+    svc.publish(ws.workspace_id, "owner-1")
+    svc.open_workspace("owner-1", upload=_snapshot().upload)
+    assert publisher.calls == 1
+    assert svc.get(ws.workspace_id, "owner-1") is None

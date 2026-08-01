@@ -187,6 +187,10 @@ def stream_session(key_arrays: list[np.ndarray], engines: str, *,
                         f"[publisher] published {len(published['s3_keys'])} objects",
                         flush=True,
                     )
+                # Hand the workspace the publication the run just performed —
+                # its pid, or its failure. Emitted through the same queue so the
+                # generator owns every write to the log, in sequence order.
+                put_event(("published", published))
             except _ClientDisconnected:
                 pass
             except Exception as exc:
@@ -231,6 +235,15 @@ def stream_session(key_arrays: list[np.ndarray], engines: str, *,
                     _record_snapshot(workspace_service, workspace_id, owner_sub,
                                      upload, pair_events, result_event)
                     yield sse("result", result_event)
+                elif kind == "published":
+                    # Durable only: the run's own SSE contract is pair/result/
+                    # error, and this client is not listening for anything else.
+                    if workspace_service is not None and workspace_id is not None:
+                        try:
+                            workspace_service.record_publication(
+                                workspace_id, owner_sub, payload or {})
+                        except Exception:       # noqa: BLE001 — best effort
+                            pass
                 elif kind == "error":
                     record("error", {"message": str(payload)})
                     yield sse("error", ErrorEvent(message=str(payload)))

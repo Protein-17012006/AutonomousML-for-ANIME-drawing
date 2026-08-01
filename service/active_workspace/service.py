@@ -128,9 +128,39 @@ class ActiveWorkspaceService:
         self._store.save(workspace)
         outcome = {"published": True, "pid": workspace.published_pid}
         self._append(workspace, "publish", outcome)
-        # Published work belongs to session history now, not to the active slot.
-        self._store.set_active(owner_sub, None)
+        # It STAYS the active workspace. The client branches on `published_pid`
+        # — purging its cache on login, opening the saved session on finish — so
+        # clearing the slot here would hand it null and leave it nothing to open.
+        # A later run supersedes it; see _supersede.
         return outcome
+
+    def record_publication(self, workspace_id: str, owner_sub: str,
+                           outcome: dict) -> dict | None:
+        """Adopt the publication the RUN already performed.
+
+        `publish_session` runs at the end of every session and is what actually
+        writes S3 + DynamoDB and mints the pid. Inventing a second publisher for
+        the workspace would file the same work twice under two ids; this takes
+        the pid from the system that owns it and reports it in the shape the
+        client's `publish` listener expects.
+        """
+        workspace = self._store.get_owned(workspace_id, owner_sub)
+        if workspace is None:
+            return None
+        pid = outcome.get("pid") if isinstance(outcome, dict) else None
+        if not (isinstance(outcome, dict) and outcome.get("published") and pid):
+            workspace.state = "publish_pending"
+            self._store.save(workspace)
+            reported = {"published": False,
+                        "error": str((outcome or {}).get("error")
+                                     or "publication did not complete")}
+        else:
+            workspace.published_pid = str(pid)
+            workspace.state = "published"
+            self._store.save(workspace)
+            reported = {"published": True, "pid": workspace.published_pid}
+        self._append(workspace, "publish", reported)
+        return reported
 
     def discard(self, workspace_id: str, owner_sub: str) -> bool:
         if self._store.get_owned(workspace_id, owner_sub) is None:
@@ -156,8 +186,8 @@ class ActiveWorkspaceService:
         current = self._store.active_for(owner_sub)
         if current is None:
             return
-        if current.snapshot is None:
-            self._store.delete(current.workspace_id, owner_sub)
-            return
-        self.publish(current.workspace_id, owner_sub)
-        self._store.set_active(owner_sub, None)
+        # Already published: it was only still here so the client could notice.
+        # Publishing again would file the same work as a second session.
+        if current.published_pid is None and current.snapshot is not None:
+            self.publish(current.workspace_id, owner_sub)
+        self._store.delete(current.workspace_id, owner_sub)
