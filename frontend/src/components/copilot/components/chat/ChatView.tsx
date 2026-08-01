@@ -6,6 +6,7 @@ import { ErrorMessage } from "./ErrorMessage";
 import { ProgressMessage } from "./ProgressMessage";
 import { QaMessage } from "./QaMessage";
 import { AgentActionBubble } from "./AgentActionBubble";
+import { AgentTranscript } from "./AgentTranscript";
 import { ResultCard } from "./ResultCard";
 import { UploadMessage } from "./UploadMessage";
 
@@ -70,6 +71,12 @@ export function ChatView({
                   answer={m.answer}
                   grounded={m.grounded}
                 />
+                {m.transcript ? (
+                  <AgentTranscript
+                    entries={m.transcript}
+                    running={m.answer === null}
+                  />
+                ) : null}
                 <AgentActionBubble
                   action={m.action}
                   done={m.actionDone}

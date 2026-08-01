@@ -333,3 +333,133 @@ export async function rememberMemory(
   });
   if (!resp.ok) throw new Error(`Could not save that (${resp.status}).`);
 }
+
+/**
+ * The artist's keep/redraw call on one pair.
+ *
+ * This is the per-show calibration signal the QA thresholds are refit against,
+ * so it is the artist's OWN verdict that matters — not a second opinion widget
+ * bolted next to it. The board already had this control; it just never left the
+ * browser.
+ */
+export async function sendFeedback(
+  sid: string,
+  pairIndex: number,
+  vote: "up" | "down",
+): Promise<void> {
+  const resp = await authenticatedFetch(`/session/${sid}/feedback`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pair_index: pairIndex, vote }),
+  });
+  if (!resp.ok) throw new Error(`Could not record that (${resp.status}).`);
+}
+
+/* ---------------------------------------------------------------------------
+ * The orchestration layer.
+ *
+ * The single-turn agent answers and proposes one tool. This plans a goal into
+ * steps, addresses named specialists, and streams every utterance as it
+ * happens — the transcript is live, not a recording replayed afterwards.
+ *
+ * It is deliberately NOT the default path for every message: it has never been
+ * user-facing, and a planner deciding what to do with an artist's cut is a
+ * bigger promise than answering their question. The artist opts in.
+ * ------------------------------------------------------------------------- */
+
+export interface TranscriptEntry {
+  seq: number;
+  /** who spoke and who they addressed — "orchestrator" or an agent name. */
+  frm: string;
+  to: string;
+  /** ask · reply · refuse · queue · error */
+  kind: string;
+  text: string;
+  data: Record<string, unknown>;
+  ms: number;
+}
+
+export interface OrchestrationHandlers {
+  onEntry: (entry: TranscriptEntry) => void;
+  onDecision: (reply: AgentReply) => void;
+  onError: (message: string) => void;
+}
+
+function asEntry(value: unknown): TranscriptEntry | null {
+  if (typeof value !== "object" || value === null) return null;
+  const raw = value as Record<string, unknown>;
+  if (typeof raw.seq !== "number" || typeof raw.text !== "string") return null;
+  return {
+    seq: raw.seq,
+    frm: typeof raw.frm === "string" ? raw.frm : "?",
+    to: typeof raw.to === "string" ? raw.to : "?",
+    kind: typeof raw.kind === "string" ? raw.kind : "reply",
+    text: raw.text,
+    data:
+      typeof raw.data === "object" && raw.data !== null
+        ? (raw.data as Record<string, unknown>)
+        : {},
+    ms: typeof raw.ms === "number" ? raw.ms : 0,
+  };
+}
+
+/** Run one goal through the planner, streaming the conversation as it happens. */
+export async function runOrchestration(
+  sid: string,
+  message: string,
+  h: OrchestrationHandlers,
+): Promise<void> {
+  const resp = await authenticatedFetch(`/session/${sid}/orchestrate/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message }),
+  });
+  if (resp.status === 429) {
+    h.onError("Too many requests at once — give it a moment.");
+    return;
+  }
+  if (!resp.ok || !resp.body) {
+    h.onError(`The planner could not be reached (${resp.status}).`);
+    return;
+  }
+
+  const reader = resp.body.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    const { events, rest } = parseSSE(buf);
+    buf = rest;
+    for (const e of events) {
+      if (e.name === "agent") {
+        const entry = asEntry(e.data);
+        if (entry) h.onEntry(entry);
+      } else if (e.name === "decision") {
+        const raw = (e.data ?? {}) as Record<string, unknown>;
+        h.onDecision({
+          say: typeof raw.say === "string" ? raw.say : "",
+          grounded: raw.grounded === true,
+          action: asAction(raw.action),
+          followups: Array.isArray(raw.followups)
+            ? raw.followups.filter(
+                (item): item is string => typeof item === "string",
+              )
+            : [],
+          rejected_tool:
+            typeof raw.rejected_tool === "string" ? raw.rejected_tool : undefined,
+        });
+      } else if (e.name === "error") {
+        const raw = (e.data ?? {}) as Record<string, unknown>;
+        h.onError(
+          typeof raw.message === "string"
+            ? raw.message
+            : "The planner stopped unexpectedly.",
+        );
+      }
+      // `say` carries the same text the decision repeats, so it is ignored
+      // rather than rendered twice.
+    }
+  }
+}
