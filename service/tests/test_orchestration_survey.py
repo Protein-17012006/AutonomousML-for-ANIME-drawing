@@ -56,12 +56,29 @@ def test_a_passing_pair_is_reported_but_is_not_WORK():
 
 def test_flag_and_needs_key_are_NOT_forced_into_one_ranking():
     """There is no calibrated basis to say which kind of work is worse, and the
-    agent must say so rather than imply an order it cannot support."""
+    agent must say so rather than imply an order it cannot support. Bucket type
+    must not act as a priority tier: with a needs_key pair EARLIER in the cut
+    than a flag pair, the needs_key pair leads work_order — sorting by bucket
+    type first (flag before needs_key) would silently put the later pair
+    first, which is exactly the ranking this agent has no basis for."""
     out = _run(_state([_pair(0, action="needs_key", keys_requested=2),
                        _pair(1, qa_status="flag")]))
+    assert [w["index"] for w in out.payload["work_order"]] == [0, 1]
+    assert out.payload["first_index"] == 0
     assert "needs_key" in out.payload["withheld"]
     assert "flag" in out.payload["withheld"]
-    assert {w["bucket"] for w in out.payload["work_order"]} == {"flag", "needs_key"}
+
+
+def test_work_order_is_positional_across_all_actionable_buckets_not_grouped_by_bucket():
+    """Interleave flag / needs_key / abstain out of bucket-declaration order
+    (_ACTIONABLE = flag, needs_key, abstain) and confirm work_order tracks cut
+    position only, never bucket type."""
+    out = _run(_state([_pair(0, qa_status="flag"),
+                       _pair(1, action="needs_key", keys_requested=1),
+                       _pair(2, qa_status="abstain"),
+                       _pair(3, qa_status="pass")]))
+    assert [w["index"] for w in out.payload["work_order"]] == [0, 1, 2]
+    assert out.payload["first_index"] == 0
 
 
 def test_it_says_WHY_it_orders_by_position_and_not_by_severity():

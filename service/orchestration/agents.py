@@ -185,9 +185,15 @@ def qa_csq_agent(ctx: AgentContext, step) -> StepResult:
 # --- Cut Survey -------------------------------------------------------------
 #
 # This agent INVENTS NO SCORE. It orders over verdicts that are already
-# calibrated — the conformal CSQ status and the tau gate's action — and it
-# refuses two things it has no basis for: ranking `flag` against `needs_key`,
-# and any severity order within a bucket.
+# calibrated — the conformal CSQ status and the tau gate's action — but the
+# ONLY order it can support is position in the cut: the sequence the artist
+# will draw them in. Bucket (flag / needs_key / abstain) is a REPORTING label,
+# never a priority tier — nothing here calibrates severity, so ranking a
+# flagged pair above (or below) a refused one would be invented, not derived.
+# Fix round 1 (2026-08-02): the first cut sorted by bucket type before
+# position, which silently ranked flag above needs_key while the `says` text
+# denied doing so. work_order is now positional across ALL actionable
+# buckets, full stop.
 
 _BUCKETS = ("flag", "needs_key", "abstain", "pass")
 _ACTIONABLE = ("flag", "needs_key", "abstain")
@@ -198,8 +204,10 @@ _WHY = {
     "abstain": "CSQ could not decide; this one needs your eye.",
 }
 
-_WITHHELD = ("severity ordering WITHIN a bucket, and any ranking of flag against "
-             "needs_key: no calibrated basis exists for either.")
+_WITHHELD = ("any severity ordering — within a bucket or across bucket types. "
+             "No calibrated basis says one flagged pair is worse than another, "
+             "or that flag outranks needs_key (or the reverse); work_order is "
+             "positional only.")
 
 
 def _bucket_for(pair) -> str:
@@ -231,40 +239,41 @@ def cut_survey_agent(ctx: AgentContext, step) -> StepResult:
             "sensible and mean nothing. Re-run the cut once the detector is back up.",
             payload={"qa_degraded": True}, started=started)
 
-    try:
-        # A pair whose index will not coerce to int cannot be placed in a
-        # cut-position order; drop it from the order rather than let sort/int()
-        # raise — this agent reports, it never propagates.
-        placed = []
-        for pair in pairs:
+    # A pair whose index will not coerce to int cannot be placed in a
+    # cut-position order; drop it from the order rather than let sort/int()
+    # raise — this agent reports, it never propagates. This is the only
+    # boundary this function crosses (attribute values it does not control),
+    # so it is the only place that gets a guard.
+    placed = []
+    for pair in pairs:
+        try:
+            idx = int(pair.index)
+        except (TypeError, ValueError):
+            continue
+        placed.append((idx, pair, _bucket_for(pair)))
+    placed.sort(key=lambda t: t[0])
+
+    buckets: dict = {name: [] for name in _BUCKETS}
+    keys_outstanding = 0
+    for idx, pair, bucket in placed:
+        if not bucket:
+            continue
+        buckets[bucket].append(idx)
+        if bucket == "needs_key":
             try:
-                idx = int(pair.index)
+                keys_outstanding += int(getattr(pair, "keys_requested", 0) or 0)
             except (TypeError, ValueError):
-                continue
-            placed.append((idx, pair))
-        placed.sort(key=lambda t: t[0])
+                pass
 
-        buckets: dict = {name: [] for name in _BUCKETS}
-        keys_outstanding = 0
-        for idx, pair in placed:
-            bucket = _bucket_for(pair)
-            if not bucket:
-                continue
-            buckets[bucket].append(idx)
-            if bucket == "needs_key":
-                try:
-                    keys_outstanding += int(getattr(pair, "keys_requested", 0) or 0)
-                except (TypeError, ValueError):
-                    pass
+    # Positional across ALL actionable buckets: bucket is a reporting label,
+    # not a priority tier. Choosing a single first_index IS a ranking, and the
+    # only ranking this agent can defend is "the order you will draw them in."
+    work_order = [{"index": idx, "bucket": bucket, "why": _WHY[bucket]}
+                  for idx, _pair, bucket in placed if bucket in _ACTIONABLE]
 
-        work_order = [{"index": i, "bucket": name, "why": _WHY[name]}
-                      for name in _ACTIONABLE for i in buckets[name]]
-
-        payload = {"work_order": work_order, "buckets": buckets,
-                   "keys_outstanding": keys_outstanding, "n_pairs": len(pairs),
-                   "withheld": _WITHHELD}
-    except Exception as exc:            # noqa: BLE001 — an agent reports, never raises
-        return _result(step, "error", f"Cut survey failed: {exc}", started=started)
+    payload = {"work_order": work_order, "buckets": buckets,
+               "keys_outstanding": keys_outstanding, "n_pairs": len(pairs),
+               "withheld": _WITHHELD}
 
     if not work_order:
         return _result(step, "ok",
@@ -278,11 +287,11 @@ def cut_survey_agent(ctx: AgentContext, step) -> StepResult:
     counts = ", ".join(f"{len(buckets[n])} {n}" for n in _ACTIONABLE if buckets[n])
     says = (
         f"{counts}. Start at pair {payload['first_index']} — "
-        f"{_WHY[work_order[0]['bucket']]} Within a group I order by position in "
-        "the cut, because that is the order you will draw them, not because the "
-        "earlier one is worse: nothing here calibrates severity. I also do not "
-        "rank a flagged pair against a refused one — they are different kinds of "
-        "work."
+        f"{_WHY[work_order[0]['bucket']]} I order the whole work order by "
+        "position in the cut, because that is the order you will draw them, not "
+        "because the earlier one is worse: nothing here calibrates severity, and "
+        "I do not rank a flagged pair above a refused one or the reverse — the "
+        "bucket is a label, not a priority."
         + (f" {keys_outstanding} key(s) are still outstanding."
            if keys_outstanding else ""))
     return _result(step, "ok", says, payload=payload, started=started)
