@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import re
 
-REFERENCE = re.compile(r"^\$([1-9]\d*)\.([a-z_][a-z0-9_]*)$")
+REFERENCE = re.compile(r"^\$([1-9]\d{0,5})\.([a-z_][a-z0-9_]*)$")
 
 _SCALAR = (bool, int, float, str)
 
@@ -47,6 +47,10 @@ def resolve_args(args, sources) -> tuple:
             return None, bound, (
                 f"{value} refers to step {step_id}, which has not run — a step may "
                 "only read an EARLIER step's answer.")
+        if not isinstance(source, dict):
+            return None, bound, (
+                f"{value} refers to step {step_id}, which is malformed (not a dict). "
+                "Cannot read its answer.")
         if source.get("kind") != "agent":
             return None, bound, (
                 f"{value} refers to step {step_id}, which is a tool. A tool "

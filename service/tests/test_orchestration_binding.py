@@ -73,3 +73,22 @@ def test_only_the_exact_shape_counts_as_a_reference():
 def test_a_non_dict_args_is_tolerated():
     resolved, bound, error = resolve_args(None, {})
     assert resolved == {} and bound == {} and error == ""
+
+
+def test_a_step_id_with_too_many_digits_does_not_raise_valueerror():
+    """Regression: very long step IDs (>6 digits) used to crash int() conversion.
+    Now the regex bounds them, so long IDs simply don't match and pass through."""
+    very_long_id = "$" + "9" * 5000 + ".field"
+    resolved, bound, error = resolve_args({"index": very_long_id}, {})
+    assert resolved is not None  # Should return successfully, not raise
+    assert resolved == {"index": very_long_id}  # Passes through as literal
+    assert error == ""
+
+
+def test_a_non_dict_sources_entry_does_not_raise_attributeerror():
+    """Regression: malformed sources entries (non-dict) used to crash on .get().
+    Now we check isinstance(source, dict) and return an error."""
+    sources = {1: "not-a-dict"}
+    resolved, _bound, error = resolve_args({"index": "$1.field"}, sources)
+    assert resolved is None  # Should return error, not raise
+    assert "malformed" in error
