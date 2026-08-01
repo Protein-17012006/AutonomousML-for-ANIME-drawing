@@ -60,7 +60,8 @@ class ActiveWorkspaceService:
             self.cleanup_owner(owner_sub)
             return self._read(owner_sub)
 
-    def create_or_get(self, owner_sub: str, *, history_pid: str | None = None) -> ActiveWorkspaceManifest:
+    def create_or_get(self, owner_sub: str, *, history_pid: str | None = None,
+                      initial_snapshot: dict | None = None) -> ActiveWorkspaceManifest:
         with self._lock:
             existing = self.get(owner_sub)
             if existing and existing.state not in {"published", "failed"}:
@@ -72,6 +73,10 @@ class ActiveWorkspaceService:
                 owner_hash=self.owner_hash(owner_sub),
                 created_at=now, updated_at=now, expires_at=now + self.settings.ttl_seconds,
                 reservation_bytes=self.settings.workspace_bytes, history_pid=history_pid,
+                # Input metadata must be recoverable before the worker has a
+                # result. Without it, a valid server-side recovery can replay
+                # pair events but cannot recreate the upload acknowledgement.
+                snapshot=dict(initial_snapshot or {}),
             )
             directory = self._directory(owner_sub)
             shutil.rmtree(directory, ignore_errors=True)

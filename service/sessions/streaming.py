@@ -98,7 +98,10 @@ def stream_session(key_arrays: list[np.ndarray], engines: str, *,
                 repository.set_owner(sid, owner_sub)
                 if active_workspace is not None:
                     active_manifest = active_workspace.create_or_get(
-                        owner_sub, history_pid=history_pid)
+                        owner_sub,
+                        history_pid=history_pid,
+                        initial_snapshot={"upload": workspace_input or {}},
+                    )
                     active_workspace.stage_input_arrays(owner_sub, key_arrays)
                     if source_video is not None:
                         active_workspace.stage_input_video(owner_sub, source_video)
@@ -190,7 +193,11 @@ def stream_session(key_arrays: list[np.ndarray], engines: str, *,
                     published_pid = published.get("pid")
                     state = repository.state_for(sid)
                     if state is not None and isinstance(published_pid, str):
-                        repository.save_state(sid, {**state, "published_pid": published_pid})
+                        repository.save_state(sid, {
+                            **state,
+                            "published_pid": published_pid,
+                            "workspace_input": workspace_input or {},
+                        })
                     if active_manifest is not None:
                         active_workspace.set_state(owner_sub, "published", published_pid=published_pid)
                     emit("publish", {"pid": published_pid, "published": True})

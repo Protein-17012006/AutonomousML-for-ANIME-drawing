@@ -42,35 +42,56 @@ class ReviewSession:
         # Stub sessions may admit several jobs concurrently. Serialize edits of
         # the same SID so two corrections cannot both commit from one revision.
         with self.repository.session_transaction(sid):
-            return self._add_key_locked(sid, index, image)
+            return self._add_keys_locked(sid, [(index, image)])
 
-    def _add_key_locked(self, sid: int, index: int,
-                        image: "bytes | np.ndarray") -> SessionOutcome:
+    def add_keys(self, sid: int, keys: list[tuple[int, "bytes | np.ndarray"]],
+                 *, on_pair: Callable | None = None,
+                 cancelled: Callable[[], bool] | None = None) -> SessionOutcome:
+        """Apply one complete artist key batch as one live-state revision.
+
+        The caller supplies original gap indices.  We insert descending so an
+        earlier insertion cannot invalidate a later submitted index.
+        """
+        with self.repository.session_transaction(sid):
+            return self._add_keys_locked(
+                sid, keys, on_pair=on_pair, cancelled=cancelled)
+
+    def _add_keys_locked(self, sid: int, submitted: list[tuple[int, "bytes | np.ndarray"]],
+                         *, on_pair: Callable | None = None,
+                         cancelled: Callable[[], bool] | None = None) -> SessionOutcome:
         state = self.state(sid)
         keys, eng, cfg, result = (
             state["keys"], state["eng"], state["cfg"], state["result"],
         )
-        if not 0 <= index < len(keys) - 1:
-            raise InvalidGapIndex(f"gap index {index} out of range")
+        expected = {pair.index for pair in result.pairs if pair.action == "needs_key"}
+        supplied = [index for index, _ in submitted]
+        if not submitted or len(supplied) != len(set(supplied)) or set(supplied) != expected:
+            raise InvalidGapIndex("submit exactly one drawn key for every current needs-key pair")
 
-        drawn = (
-            np.asarray(image, dtype=np.uint8)
-            if isinstance(image, np.ndarray)
-            else np.array(
-                Image.open(io.BytesIO(image)).convert("RGB"), dtype=np.uint8)
-        )
-        if drawn.shape != np.asarray(keys[index]).shape:
-            expected_h, expected_w = np.asarray(keys[index]).shape[:2]
-            got_h, got_w = drawn.shape[:2]
-            raise InvalidKeyImage(
-                f"drawn key must be {expected_w}x{expected_h}; got {got_w}x{got_h}")
-        new_keys = keys[:index + 1] + [drawn] + keys[index + 1:]
+        decoded: dict[int, np.ndarray] = {}
+        for index, image in submitted:
+            if not 0 <= index < len(keys) - 1:
+                raise InvalidGapIndex(f"gap index {index} out of range")
+            drawn = (np.asarray(image, dtype=np.uint8) if isinstance(image, np.ndarray)
+                     else np.array(Image.open(io.BytesIO(image)).convert("RGB"), dtype=np.uint8))
+            if drawn.shape != np.asarray(keys[index]).shape:
+                expected_h, expected_w = np.asarray(keys[index]).shape[:2]
+                got_h, got_w = drawn.shape[:2]
+                raise InvalidKeyImage(
+                    f"drawn key for gap {index} must be {expected_w}x{expected_h}; got {got_w}x{got_h}")
+            decoded[index] = drawn
+
+        new_keys = list(keys)
+        for index in sorted(decoded, reverse=True):
+            new_keys.insert(index + 1, decoded[index])
         # The drawn key splits gap `index`; its stored middle-GT frame no longer
         # aligns with either sub-gap, so both fall back to held-key (None) while
         # every other gap keeps its real GT for the compare artifact.
         old_gt = state.get("gt_frames")
-        new_gt = (list(old_gt[:index]) + [None, None] + list(old_gt[index + 1:])
-                  if old_gt else old_gt)
+        new_gt = list(old_gt) if old_gt else old_gt
+        if new_gt is not None:
+            for index in sorted(decoded, reverse=True):
+                new_gt[index:index + 1] = [None, None]
         vlm_status_before = copy.deepcopy(eng.vlm_status)
 
         def restore_vlm_status() -> None:
@@ -84,26 +105,9 @@ class ReviewSession:
         # not semantically equivalent to a normal run.  Keep the cheap splice
         # only for engines whose QA input is provably pair-local (the stub).
         try:
-            if eng.qa_window:
-                new_result = run_session(new_keys, eng, cfg=cfg)
-            else:
-                left, right = keys[index], keys[index + 1]
-                sub_pairs = list(run_session([left, drawn, right], eng, cfg=cfg).pairs)
-                new_pairs = []
-                for pair in result.pairs:
-                    if pair.index < index:
-                        new_pairs.append(replace(pair))
-                    elif pair.index == index:
-                        new_pairs.extend(
-                            replace(sub_pair, index=index + offset)
-                            for offset, sub_pair in enumerate(sub_pairs)
-                        )
-                    else:
-                        # Copy-on-write: never re-index the PairResult retained in
-                        # the repository.  A later render failure must leave the
-                        # previously published state byte-for-byte meaningful.
-                        new_pairs.append(replace(pair, index=pair.index + 1))
-                new_result = recompute_result(new_pairs)
+            new_result = run_session(new_keys, eng, cfg=cfg, on_pair=on_pair)
+            if cancelled and cancelled():
+                raise RuntimeError("Review submission was cancelled")
         except Exception:
             restore_vlm_status()
             raise
@@ -142,6 +146,11 @@ class ReviewSession:
             shutil.rmtree(stage_path, ignore_errors=True)
             restore_vlm_status()
             raise
+
+        if cancelled and cancelled():
+            shutil.rmtree(stage_path, ignore_errors=True)
+            restore_vlm_status()
+            raise RuntimeError("Review submission was cancelled")
 
         # Install the complete staged artifact set as one directory generation.
         # Keep the old directory until state persistence succeeds so either
@@ -196,3 +205,42 @@ class ReviewSession:
             csq=metadata.csq,
             qa_degraded=metadata.qa_degraded,
         )
+
+    def apply_verdicts(self, sid: int, verdicts: dict[int, str],
+                       *, cancelled: Callable[[], bool] | None = None) -> SessionOutcome:
+        """Commit artist decisions; a rejection turns that pair into a key request."""
+        with self.repository.session_transaction(sid):
+            if cancelled and cancelled():
+                raise RuntimeError("Review submission was cancelled")
+            state = self.state(sid)
+            result = copy.deepcopy(state["result"])
+            by_index = {pair.index: pair for pair in result.pairs}
+            for index, verdict in verdicts.items():
+                pair = by_index.get(index)
+                if pair is None or pair.action == "needs_key":
+                    raise InvalidGapIndex(f"pair {index} cannot receive a verdict")
+                pair.artist_verdict = verdict
+                if verdict == "reject":
+                    pair.action = "needs_key"
+                    pair.frames = None
+            new_result = recompute_result(result.pairs)
+            # Verdicts alter the reconstructed cut too, so render and atomically
+            # install a new artifact generation using the same commit boundary.
+            session_path = self.artifact_dir(sid)
+            stage_path = pathlib.Path(tempfile.mkdtemp(prefix=f".{session_path.name}.review-", dir=session_path.parent))
+            eng, cfg = state["eng"], state["cfg"]
+            try:
+                rendered = self.render_artifacts(new_result, state["keys"], str(stage_path), cadence_fps=cfg.cadence_fps, smoothness=cfg.smoothness, output_fps=cfg.fps, mid_engine=eng.rife_engine, vlm_struct_fn=eng.vlm_struct_fn, softness_fn=eng.softness_fn, gt_frames=state.get("gt_frames"))
+                revision = state.get("rev", 0) + 1
+                metadata = build_render_metadata(sid, rendered, cfg, eng, base_sampling=state.get("sampling"), revision=revision)
+                if cancelled and cancelled():
+                    raise RuntimeError("Review submission was cancelled")
+                backup_path = session_path.with_name(f".{session_path.name}.backup-{uuid.uuid4().hex}")
+                session_path.rename(backup_path)
+                stage_path.rename(session_path)
+                self.repository.save_state(sid, {**state, "result": new_result, "explanations": copy.deepcopy(metadata.explanations), "qa_degraded": metadata.qa_degraded, "sampling": dict(metadata.sampling), "rev": revision})
+                shutil.rmtree(backup_path, ignore_errors=True)
+            except Exception:
+                shutil.rmtree(stage_path, ignore_errors=True)
+                raise
+            return SessionOutcome(new_result, sid, metadata.artifact_urls, metadata.explanations, metadata.pair_mids, metadata.key_urls, metadata.sampling, metadata.csq, metadata.qa_degraded)

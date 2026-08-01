@@ -52,4 +52,7 @@ def build_review_http_runtime() -> ReviewHttpRuntime:
             repository, render_session_artifacts),
         load_image=load_image_upload,
         admission_for=engine_admission,
+        publish_review=lambda sid, session_dir, outcome, *, owner_sub, pid, workspace_input: publish_session(
+            sid, session_dir, outcome, owner_sub=owner_sub, pid=pid,
+            workspace_input=workspace_input, update_complete=True),
     )

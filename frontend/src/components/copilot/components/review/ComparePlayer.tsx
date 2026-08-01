@@ -18,6 +18,17 @@ export function ComparePlayer({
       muted
       playsInline
       onError={onError}
+      onLoadedMetadata={(event) => {
+        const video = event.currentTarget;
+        if (
+          video.videoWidth < 1 ||
+          video.videoHeight < 1 ||
+          !Number.isFinite(video.duration) ||
+          video.duration <= 0
+        ) {
+          onError?.();
+        }
+      }}
       aria-label="original versus RIFE reconstruction, looping"
     />
   );

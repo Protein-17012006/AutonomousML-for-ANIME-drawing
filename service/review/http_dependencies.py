@@ -12,6 +12,7 @@ class ReviewHttpRuntime:
     review_for: Callable
     load_image: Callable
     admission_for: Callable
+    publish_review: Callable
 
 
 def get_review_http_runtime(request: Request) -> ReviewHttpRuntime:

@@ -27,7 +27,9 @@ export function QAPanel({
     <>
       {!p ? (
         <div className="qapanel qapanel-empty">
-          <div className="qap-head">No pair available</div>
+          <div className="qap-head">
+            
+          </div>
           <p className="qap-why">QA status is empty for this view.</p>
         </div>
       ) : (

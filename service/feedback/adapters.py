@@ -21,6 +21,17 @@ class InMemoryFeedbackStore:
             bucket[(record.pair_index, record.voter)] = record.model_copy(deep=True)
             return record.model_copy(deep=True)
 
+    def upsert_many(self, records: list[FeedbackRecord]) -> list[FeedbackRecord]:
+        with self._lock:
+            previous = {sid: dict(rows) for sid, rows in self._data.items()}
+            try:
+                for record in records:
+                    self._data.setdefault(record.sid, {})[(record.pair_index, record.voter)] = record.model_copy(deep=True)
+            except Exception:
+                self._data = previous
+                raise
+            return [record.model_copy(deep=True) for record in records]
+
     def list_session(self, sid: int) -> list[FeedbackRecord]:
         with self._lock:
             rows = self._data.get(sid, {}).values()
@@ -65,6 +76,10 @@ class DynamoFeedbackStore:
         return FeedbackRecord.model_validate(document)
 
     def upsert(self, record: FeedbackRecord) -> FeedbackRecord:
+        self.table.put_item(Item=self._row(record))
+        return record
+
+    def _row(self, record: FeedbackRecord) -> dict:
         row = record.model_dump(mode="json")
         for field in _FLOAT_FIELDS:
             if row.get(field) is not None:
@@ -73,8 +88,20 @@ class DynamoFeedbackStore:
             sessionPk=self._pk(record.sid),
             feedbackSk=self._sk(record.pair_index, record.voter),
         )
-        self.table.put_item(Item=row)
-        return record
+        return row
+
+    def upsert_many(self, records: list[FeedbackRecord]) -> list[FeedbackRecord]:
+        if len(records) > 100:
+            raise ValueError("feedback batch exceeds DynamoDB transaction limit")
+        from boto3.dynamodb.types import TypeSerializer
+        serializer = TypeSerializer()
+        self.table.meta.client.transact_write_items(
+            TransactItems=[{"Put": {"TableName": self.table.name, "Item": {
+                key: serializer.serialize(value)
+                for key, value in self._row(record).items()
+            }}} for record in records]
+        )
+        return records
 
     def list_session(self, sid: int) -> list[FeedbackRecord]:
         from boto3.dynamodb.conditions import Key

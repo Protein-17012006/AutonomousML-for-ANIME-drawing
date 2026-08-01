@@ -68,6 +68,7 @@ export interface SessionHandlers {
   onResult: (r: ResultEvent) => void;
   onError: (msg: string) => void;
   onPublish?: (event: { published: boolean; pid?: string; error?: string }) => void;
+  onProgress?: (phase: string) => void;
 }
 
 /** Give React a paint opportunity after a streamed pair update. A proxy can
@@ -121,9 +122,46 @@ async function pumpSSE(
       } else if (e.name === "publish") {
         if (isPublishEvent(e.data)) h.onPublish?.(e.data);
         else h.onError("The co-pilot returned an invalid publish event.");
+      } else if (e.name === "progress" && isRecord(e.data) && typeof e.data.phase === "string") {
+        h.onProgress?.(e.data.phase);
       }
     }
   }
+}
+
+export async function submitVerdicts(
+  sid: string,
+  verdicts: Record<number, "accept" | "reject">,
+  h: SessionHandlers,
+): Promise<void> {
+  const resp = await authenticatedFetch(`/session/${sid}/feedback/batch`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ verdicts: Object.entries(verdicts).map(([pair_index, verdict]) => ({ pair_index: Number(pair_index), verdict })) }),
+  });
+  if (!resp.ok || !resp.body) {
+    h.onError(`Submit verdicts failed: ${resp.status}`);
+    return;
+  }
+  await pumpSSE(resp.body, h);
+}
+
+export async function submitReplacementKeys(
+  sid: string,
+  keys: Record<number, File>,
+  h: SessionHandlers,
+): Promise<void> {
+  const body = new FormData();
+  for (const [index, file] of Object.entries(keys)) {
+    body.append("indices", index);
+    body.append("keys", file);
+  }
+  const resp = await authenticatedFetch(`/session/${sid}/keys`, { method: "POST", body });
+  if (!resp.ok || !resp.body) {
+    h.onError(`Submit replacement keys failed: ${resp.status}`);
+    return;
+  }
+  await pumpSSE(resp.body, h);
 }
 
 /** POST keyframes, stream the SSE decision-log, dispatch each event to handlers. */

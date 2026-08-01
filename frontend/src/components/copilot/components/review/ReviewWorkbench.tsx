@@ -27,6 +27,11 @@ export function ReviewWorkbench({
   verdicts,
   onVerdict,
   onRefill,
+  stagedRefills,
+  canEdit,
+  onSubmitVerdicts,
+  onSubmitRefills,
+  onDiscardStaged,
   fps,
   initialFocus,
 }: {
@@ -37,6 +42,11 @@ export function ReviewWorkbench({
   verdicts: Record<number, "accept" | "reject">;
   onVerdict: (idx: number, v: "accept" | "reject") => void;
   onRefill: (index: number, file: File) => void;
+  stagedRefills: Record<number, { file: File; url: string }>;
+  canEdit: boolean;
+  onSubmitVerdicts: () => void;
+  onSubmitRefills: () => void;
+  onDiscardStaged: () => void;
   fps: number;
   initialFocus?: number | null;
 }) {
@@ -54,10 +64,10 @@ export function ReviewWorkbench({
   const { filled, gaps, passed, abstained, shown } = useMemo(() => {
     const filled = log.filter((pair) => pair.action !== "needs_key");
     const gaps = log.filter((pair) => pair.action === "needs_key");
-    const passed = filled.filter((pair) => pair.qa === "pass");
+    const passed = filled.filter((pair) => pair.qa === "pass" || pair.artist_verdict === "accept");
     // Flagged in-betweens remain filled and share the abstain review queue.
     const abstained = filled.filter(
-      (pair) => pair.qa === "abstain" || pair.qa === "flag",
+      (pair) => (pair.qa === "abstain" || pair.qa === "flag") && !pair.artist_verdict,
     );
     const shown =
       filter === "needs_key"
@@ -80,12 +90,16 @@ export function ReviewWorkbench({
     focused != null && shown.some((pair) => pair.index === focused)
       ? focused
       : (shown[0]?.index ?? null);
-  const panelPair =
-    (selectedIndex != null
-      ? log.find((pair) => pair.index === selectedIndex)
-      : null) ??
-    shown[0] ??
-    null;
+  // Pair events arrive before the rendered result. Keep the QA panel aligned
+  // with both review columns: before that result boundary there is no reviewable
+  // pair, even though the progress log already contains entries.
+  const panelPair = result
+    ? ((selectedIndex != null
+        ? log.find((pair) => pair.index === selectedIndex)
+        : null) ??
+      shown[0] ??
+      null)
+    : null;
 
   useEffect(() => {
     if (initialFocus == null) return;
@@ -132,7 +146,7 @@ export function ReviewWorkbench({
         requestAnimationFrame(() =>
           scrollPair(leftRef.current, previous.index),
         );
-      } else if ((event.key === "a" || event.key === "x") && current >= 0) {
+      } else if (canEdit && (event.key === "a" || event.key === "x") && current >= 0) {
         onVerdict(
           shown[current].index,
           event.key === "a" ? "accept" : "reject",
@@ -141,7 +155,7 @@ export function ReviewWorkbench({
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [onVerdict, selectedIndex, shown]);
+  }, [canEdit, onVerdict, selectedIndex, shown]);
 
   const exportSession = () => {
     if (!result) return;
@@ -258,7 +272,7 @@ export function ReviewWorkbench({
                   the switch appears with it rather than sitting dead */}
               {compareUrl && (
                 <div
-                  className="review-subfilters"
+                  className="recon-mode-tabs review-subfilters"
                   role="tablist"
                   aria-label="Output view"
                 >
@@ -284,24 +298,26 @@ export function ReviewWorkbench({
                   </Button>
                 </div>
               )}
-              {compareUrl && outTab === "compare" ? (
-                compareFailed ? (
-                  <RunLoader message="The comparison could not be played. Try reopening the preview." />
+              <div className="recon-media">
+                {compareUrl && outTab === "compare" ? (
+                  compareFailed ? (
+                    <RunLoader message="The comparison could not be played. Try reopening the preview." />
+                  ) : (
+                    <ComparePlayer
+                      src={compareUrl}
+                      onError={() => setFailedCompareUrl(compareUrl)}
+                    />
+                  )
+                ) : reconFailed ? (
+                  <RunLoader message="The reconstructed cut could not be played. Try reopening the preview." />
                 ) : (
-                  <ComparePlayer
-                    src={compareUrl}
-                    onError={() => setFailedCompareUrl(compareUrl)}
+                  <ReconPlayer
+                    src={video}
+                    fps={fps}
+                    onError={() => setFailedReconUrl(video)}
                   />
-                )
-              ) : reconFailed ? (
-                <RunLoader message="The reconstructed cut could not be played. Try reopening the preview." />
-              ) : (
-                <ReconPlayer
-                  src={video}
-                  fps={fps}
-                  onError={() => setFailedReconUrl(video)}
-                />
-              )}
+                )}
+              </div>
             </div>
           )}
         </main>
@@ -330,14 +346,30 @@ export function ReviewWorkbench({
                     index={index}
                     focused={selectedIndex === pair.index}
                     verdict={verdicts[pair.index]}
+                    verdictEnabled={(pair.qa === "abstain" || pair.qa === "flag") && !pair.artist_verdict && canEdit}
+                    refillEnabled={canEdit}
                     keyUrls={keyUrls}
                     pairMids={mids}
                     onFocus={() => selectPair(pair.index, "left")}
-                    onVerdict={onVerdict}
-                    onRefill={onRefill}
+                    onVerdict={(index, verdict) => { if (canEdit) onVerdict(index, verdict); }}
+                    onRefill={(index, file) => { if (canEdit) onRefill(index, file); }}
                   />
                 ))}
               </ol>
+            )}
+            {!running && (
+              <div className="review-submit">
+                {!canEdit ? <p>This saved session is read-only.</p> : filter === "needs_key" ? (
+                  <>
+                    <Button type="button" onClick={onSubmitRefills} disabled={gaps.length === 0 || gaps.some((pair) => !stagedRefills[pair.index])}>
+                      Submit replacement keys
+                    </Button>
+                    {Object.keys(stagedRefills).length > 0 && <Button type="button" variant="ghost" onClick={onDiscardStaged}>Discard staged keys</Button>}
+                  </>
+                ) : filledFilter === "abstain" ? (
+                  <Button type="button" onClick={onSubmitVerdicts} disabled={Object.keys(verdicts).length === 0}>Submit verdicts</Button>
+                ) : null}
+              </div>
             )}
           </section>
           <section className="pane col-right" ref={rightRef}>
@@ -358,7 +390,9 @@ export function ReviewWorkbench({
                     i={index}
                     focused={selectedIndex === pair.index}
                     onFocus={() => selectPair(pair.index, "right")}
-                    onRefill={onRefill}
+                    onRefill={(index, file) => { if (canEdit) onRefill(index, file); }}
+                    pendingKeyUrl={stagedRefills[pair.index]?.url}
+                    refillEnabled={canEdit}
                   />
                 ))}
               </div>

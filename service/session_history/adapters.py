@@ -69,8 +69,18 @@ def _created_at(timestamp: int) -> str:
 
 
 def _safe_snapshot_key(pid: str, value) -> str | None:
-    expected = f"artifacts/{pid}/workspace.v1.json"
-    return expected if value == expected else None
+    prefix = f"artifacts/{pid}/"
+    if not isinstance(value, str) or not value.startswith(prefix):
+        return None
+    relative = value[len(prefix):]
+    # Existing sessions used the canonical path. New mutable review revisions
+    # are immutable object generations below revisions/<opaque-id>/.
+    if relative == "workspace.v1.json":
+        return value
+    parts = pathlib.PurePosixPath(relative).parts
+    if len(parts) == 3 and parts[0] == "revisions" and parts[2] == "workspace.v1.json" and parts[1]:
+        return value
+    return None
 
 
 def _safe_message_snapshot_key(pid: str, value) -> str | None:
@@ -90,12 +100,19 @@ def _safe_artifact_keys(pid: str, value) -> dict[str, str]:
         if not isinstance(candidate, str) or not candidate.startswith(prefix):
             continue
         relative = candidate[len(prefix):]
-        if not relative or "/" in relative or "\\" in relative:
+        if not relative or "\\" in relative:
             continue
         path = pathlib.PurePosixPath(relative)
-        if path.name != relative or path.suffix.lower() not in _ALLOWED_SUFFIXES:
+        # Accept legacy flat artifacts and current immutable revision objects.
+        if len(path.parts) == 1:
+            name = path.name
+        elif len(path.parts) == 3 and path.parts[0] == "revisions" and path.parts[1]:
+            name = path.name
+        else:
             continue
-        safe[relative] = candidate
+        if path.suffix.lower() not in _ALLOWED_SUFFIXES:
+            continue
+        safe[name] = candidate
     return safe
 
 

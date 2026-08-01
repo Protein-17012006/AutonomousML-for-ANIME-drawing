@@ -110,6 +110,7 @@ def publish_session(
     clients=None,
     pid=None,
     workspace_input=None,
+    update_complete: bool = False,
 ):
     """Upload the session's artifacts + write one DynamoDB item. Returns
     {"published", "pid", "s3_keys", "error"}; NEVER raises."""
@@ -131,10 +132,15 @@ def publish_session(
         requested_pid = pid
         pid = requested_pid or uuid.uuid4().hex
         base = pathlib.Path(session_dir)
+        # Every durable write gets its own object generation.  Only after the
+        # complete set exists do we move Dynamo's pointers to it, so a failed
+        # S3/Dynamo publish leaves history readers on the previous revision.
+        revision = uuid.uuid4().hex
+        artifact_prefix = f"artifacts/{pid}/revisions/{revision}"
         artifact_keys: list[str] = []
         for f in sorted(base.iterdir()):
             if f.is_file() and f.suffix.lower() in _ARTIFACT_SUFFIXES:
-                key = f"artifacts/{pid}/{f.name}"   # CloudFront passes the full URI as the S3 key
+                key = f"{artifact_prefix}/{f.name}"
                 clients["s3"].upload_file(str(f), bucket, key)
                 s3_keys.append(key)
                 artifact_keys.append(key)
@@ -143,7 +149,7 @@ def publish_session(
             {pathlib.PurePosixPath(key).name for key in artifact_keys},
             workspace_input,
         )
-        snapshot_key = f"artifacts/{pid}/workspace.v1.json"
+        snapshot_key = f"{artifact_prefix}/workspace.v1.json"
         clients["s3"].put_object(
             Bucket=bucket,
             Key=snapshot_key,
@@ -181,7 +187,8 @@ def publish_session(
             values = {
                 f":{key}": value for key, value in update_fields.items()
             }
-            values.update({":owner": {"S": owner_sub}, ":draft": {"S": "draft"}})
+            expected_status = "complete" if update_complete else "draft"
+            values.update({":owner": {"S": owner_sub}, ":expected_status": {"S": expected_status}})
             clients["ddb"].update_item(
                 TableName=table,
                 Key={"pid": {"S": pid}},
@@ -189,7 +196,7 @@ def publish_session(
                     f"#{key} = :{key}" if key == "status" else f"{key} = :{key}"
                     for key in update_fields
                 ),
-                ConditionExpression="owner_sub = :owner AND #status = :draft",
+                ConditionExpression="owner_sub = :owner AND #status = :expected_status",
                 ExpressionAttributeNames={"#status": "status"},
                 ExpressionAttributeValues=values,
             )

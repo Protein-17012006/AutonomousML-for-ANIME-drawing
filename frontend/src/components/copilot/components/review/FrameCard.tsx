@@ -15,6 +15,7 @@ function FrameTrip({
   mid,
   ex,
   onRefill,
+  refillEnabled = true,
 }: {
   p: PairEvent;
   a?: string;
@@ -22,6 +23,7 @@ function FrameTrip({
   mid?: string;
   ex?: Explanation;
   onRefill: (index: number, file: File) => void;
+  refillEnabled?: boolean;
 }) {
   return (
     <>
@@ -64,6 +66,7 @@ function FrameTrip({
             <div className="fcell-draw">
               {/* //! REDESIGN: IMPORT KEYFRAMEUPLOAD COMPONENT INTO THIS ONE, MAKE THIS ONE IMPORTABLE (your change) */}
               <KeyframeUploadButton
+                disabled={!refillEnabled}
                 className="w-full justify-center pt-0"
                 buttonClassName="h-auto w-full border-0 bg-transparent px-0 py-0 uppercase hover:bg-transparent hover:text-akaire-ink"
                 label="Draw a key here"
@@ -94,6 +97,8 @@ export function FrameCard({
   focused,
   onFocus,
   onRefill,
+  refillEnabled,
+  pendingKeyUrl,
 }: {
   p: PairEvent;
   a?: string;
@@ -104,6 +109,8 @@ export function FrameCard({
   focused: boolean;
   onFocus: () => void;
   onRefill: (index: number, file: File) => void;
+  refillEnabled?: boolean;
+  pendingKeyUrl?: string;
 }) {
   return (
     <figure
@@ -122,7 +129,7 @@ export function FrameCard({
         }
       }}
     >
-      <FrameTrip p={p} a={a} b={b} mid={mid} ex={ex} onRefill={onRefill} />
+      <FrameTrip p={p} a={a} b={b} mid={mid ?? pendingKeyUrl} ex={ex} onRefill={onRefill} refillEnabled={refillEnabled} />
     </figure>
   );
 }

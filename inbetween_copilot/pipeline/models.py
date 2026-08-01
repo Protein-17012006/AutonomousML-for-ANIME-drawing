@@ -27,6 +27,9 @@ class PairResult:
     correction: Any = None
     triage: Any = None
     regime: str | None = None
+    # Artist decision is deliberately separate from the calibrated QA result.
+    # A later key submission re-runs QA and clears this live-only review state.
+    artist_verdict: str | None = None
 
     def __post_init__(self) -> None:
         self.action = PairAction(self.action)

@@ -11,7 +11,7 @@ export function StatusGlyph({ pair }: { pair: PairEvent }) {
   const Icon =
     pair.action === "needs_key"
       ? Pencil
-      : pair.qa === "pass"
+      : pair.artist_verdict === "accept" || pair.qa === "pass"
         ? Check
         : pair.qa === "abstain"
           ? CircleHelp

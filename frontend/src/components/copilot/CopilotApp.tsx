@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { PairEvent, ResultEvent, InputMode } from "./types";
-import { runSession, runVideoSession, askQuestion } from "./api";
+import { runSession, runVideoSession, askQuestion, submitReplacementKeys, submitVerdicts } from "./api";
 import {
   type ChatMsg,
   deriveMessages,
@@ -21,6 +21,9 @@ import { ChatWelcome } from "./components/chat/ChatWelcome";
 import { ReviewWorkbench } from "./components/review/ReviewWorkbench";
 import { ActiveWorkspaceDialog } from "./components/common/ActiveWorkspaceDialog";
 import { Toast } from "./components/review/Toast";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { LoaderCircle } from "lucide-react";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import {
@@ -78,6 +81,9 @@ export default function App() {
   const [verdicts, setVerdicts] = useState<Record<number, "accept" | "reject">>(
     {},
   );
+  const [stagedRefills, setStagedRefills] = useState<Record<number, { file: File; url: string }>>({});
+  const stagedRefillsRef = useRef<Record<number, { file: File; url: string }>>({});
+  const [reviewSubmit, setReviewSubmit] = useState<{ kind: "verdicts" | "keys"; phase: string; error?: string } | null>(null);
   const setVerdict = (idx: number, v: "accept" | "reject") =>
     setVerdicts((prev) => {
       const n = { ...prev };
@@ -86,6 +92,16 @@ export default function App() {
       else n[idx] = v;
       return n;
     });
+
+  const discardStagedRefills = useCallback(() => {
+    for (const item of Object.values(stagedRefillsRef.current)) URL.revokeObjectURL(item.url);
+    stagedRefillsRef.current = {};
+    setStagedRefills({});
+  }, []);
+
+  useEffect(() => () => {
+    for (const item of Object.values(stagedRefillsRef.current)) URL.revokeObjectURL(item.url);
+  }, []);
 
   const [stagedVideoFile, setStagedVideoFile] = useState<File | null>(null);
   const [stride, setStride] = useState("2");
@@ -146,9 +162,12 @@ export default function App() {
       getMySession(pid),
       getMySessionWorkspace(pid),
     ]);
-    setHistory((items) =>
-      items.map((item) => (item.pid === selected.pid ? selected : item)),
-    );
+    setHistory((items) => {
+      const existing = items.findIndex((item) => item.pid === selected.pid);
+      if (existing < 0) return [selected, ...items];
+      return items.map((item) => (item.pid === selected.pid ? selected : item));
+    });
+
     setSelectedPid(selected.pid);
     setActiveDraftPid(null);
     keys.clear();
@@ -159,8 +178,11 @@ export default function App() {
     });
     setLog(workspace.pairs);
     setResult(workspace.result);
-    setLiveSid(sidFromResult(workspace.result));
-    setDurablePid(null);
+    // Durable history is read-only. Older workspace snapshots can contain a
+    // runtime SID, but that ID must not turn the composer into a permanently
+    // disabled "Saving session…" control after recovery.
+    setLiveSid(null);
+    setDurablePid(selected.pid);
     setQaTurns(workspace.qa.map((turn) => ({
       q: turn.question,
       answer: turn.answer,
@@ -170,6 +192,18 @@ export default function App() {
     setRunning(false);
     setView("chat");
   }, [keys]);
+
+  const finishRecoveredPublication = useCallback(async (pid: string) => {
+    // Stop accepting cache writes before awaiting durable reads. The publish
+    // receipt is authoritative even if a subsequent history read fails.
+    activeStreamStop.current?.();
+    activeStreamStop.current = null;
+    setActiveWorkspace(null);
+    setRecoverableWorkspace(null);
+    if (ownerSub) await clearCache(ownerSub);
+    await loadHistory();
+    await hydratePublishedSession(pid);
+  }, [hydratePublishedSession, loadHistory, ownerSub]);
 
   const startActiveWorkspaceStream = useCallback((workspace: ActiveWorkspace, after: number) => {
     activeStreamStop.current?.();
@@ -207,14 +241,7 @@ export default function App() {
               setRecoveryError("The session was published but no history ID was returned.");
               return;
             }
-            void hydratePublishedSession(pid).then(() => {
-              if (ownerSub) return clearCache(ownerSub);
-            }).then(() => {
-              activeStreamStop.current?.();
-              activeStreamStop.current = null;
-              setActiveWorkspace(null);
-              setRecoverableWorkspace(null);
-            }).catch((error) => {
+            void finishRecoveredPublication(pid).catch((error) => {
               setRecoveryError(error instanceof Error ? error.message : "Could not load the published session.");
             });
           } else {
@@ -233,7 +260,7 @@ export default function App() {
         // The subscription reconnects from its persisted sequence automatically.
       },
     });
-  }, [hydratePublishedSession, ownerSub]);
+  }, [finishRecoveredPublication]);
 
   useEffect(() => () => activeStreamStop.current?.(), []);
   // Account Setup
@@ -654,8 +681,14 @@ export default function App() {
     void requestRun({ kind: "video", file: stagedVideoFile });
   };
 
-  const refillKey = async (index: number, file: File) => {
+  const refillKey = (index: number, file: File) => {
     if (!liveSid) return;
+    const previous = stagedRefillsRef.current[index];
+    if (previous) URL.revokeObjectURL(previous.url);
+    const next = { file, url: URL.createObjectURL(file) };
+    stagedRefillsRef.current = { ...stagedRefillsRef.current, [index]: next };
+    setStagedRefills(stagedRefillsRef.current);
+    /* Legacy per-key network mutation intentionally retired.
     const fd = new FormData();
     fd.append("index", String(index));
     fd.append("key", file);
@@ -688,6 +721,44 @@ export default function App() {
     } catch (err) {
       console.error("add-key failed:", err);
       setBanner("Couldn't add your key — is the service running? Try again.");
+    }
+    */
+  };
+
+  const submitReviewVerdicts = () => {
+    if (!liveSid || !durablePid || Object.keys(verdicts).length === 0) return;
+    setReviewSubmit({ kind: "verdicts", phase: "Finalizing artist decisions" });
+    void submitVerdicts(liveSid, verdicts, {
+      onPair: () => undefined,
+      onResult: () => { void finalizeDurableReview(); },
+      onProgress: (phase) => setReviewSubmit({ kind: "verdicts", phase }),
+      onError: (error) => setReviewSubmit({ kind: "verdicts", phase: "Could not submit", error }),
+    });
+  };
+
+  const submitReviewKeys = () => {
+    if (!liveSid || !durablePid) return;
+    const needs = log.filter((pair) => pair.action === "needs_key");
+    if (needs.length === 0 || needs.some((pair) => !stagedRefills[pair.index])) return;
+    const submitted = stagedRefills;
+    setReviewSubmit({ kind: "keys", phase: "Preparing replacement keys" });
+    void submitReplacementKeys(liveSid, Object.fromEntries(Object.entries(submitted).map(([index, item]) => [Number(index), item.file])), {
+      onPair: () => undefined,
+      onResult: () => { void finalizeDurableReview(submitted); },
+      onProgress: (phase) => setReviewSubmit({ kind: "keys", phase }),
+      onError: (error) => setReviewSubmit({ kind: "keys", phase: "Could not submit", error }),
+    });
+  };
+
+  const finalizeDurableReview = async (submitted?: Record<number, { file: File; url: string }>) => {
+    try {
+      if (submitted) discardStagedRefills();
+      setVerdicts({});
+      await loadHistory();
+      if (durablePid) await hydratePublishedSession(durablePid);
+      setReviewSubmit(null);
+    } catch (error) {
+      setReviewSubmit({ kind: submitted ? "keys" : "verdicts", phase: "Saved, but could not reload", error: error instanceof Error ? error.message : "Reload the session from history." });
     }
   };
 
@@ -762,6 +833,12 @@ export default function App() {
       // The server remains authoritative. Full active snapshot hydration and
       // replay are deliberately safe even when the browser cache is empty.
       const snapshot = refreshed.snapshot;
+      const snapshotUpload = snapshot.upload?.mode
+        ? {
+            media: snapshot.upload.mode === "video" ? "video" as const : "keyframes" as const,
+            count: snapshot.upload.filenames?.length ?? 0,
+          }
+        : null;
       const cacheMatches = cached?.state?.workspaceId === refreshed.workspace_id
         && cached.assets?.workspaceId === refreshed.workspace_id;
       if (cacheMatches && cached?.assets && cached.state) {
@@ -770,7 +847,10 @@ export default function App() {
         setStagedVideoFile(cached.assets.video);
         setStagedMode(cached.state.mode);
         setSessionMode(cached.state.mode);
-        setUpload(cached.state.upload);
+        // Local cache remains first choice. A cache written before its upload
+        // turn was committed is incomplete, however, so use the manifest's
+        // start-of-run descriptor immediately instead of waiting for `result`.
+        setUpload(cached.state.upload ?? snapshotUpload);
         setLog(cached.state.log);
         setResult(cached.state.result);
         setVerdicts(cached.state.verdicts);
@@ -947,6 +1027,11 @@ export default function App() {
                 verdicts={verdicts}
                 onVerdict={setVerdict}
                 onRefill={refillKey}
+                stagedRefills={stagedRefills}
+                canEdit={!!liveSid && !!durablePid && !selectedPid}
+                onSubmitVerdicts={submitReviewVerdicts}
+                onSubmitRefills={submitReviewKeys}
+                onDiscardStaged={discardStagedRefills}
                 fps={
                   result?.sampling?.output_fps ||
                   Number(cadence) * Number(smoothness) ||
@@ -972,6 +1057,19 @@ export default function App() {
             onRetry={() => void (preflightWorkspace ? discardPreflightAndRun() : resumeWorkspace())}
             onDiscard={() => void (preflightWorkspace ? discardPreflightAndRun() : discardWorkspace())}
           />
+          <Dialog open={reviewSubmit != null} onOpenChange={(open) => {
+            if (!open && reviewSubmit?.error) setReviewSubmit(null);
+          }}>
+            <DialogContent showCloseButton={false} onEscapeKeyDown={(event) => event.preventDefault()} onPointerDownOutside={(event) => event.preventDefault()}>
+              <DialogHeader>
+                <DialogTitle>{reviewSubmit?.kind === "keys" ? "Applying replacement keys" : "Submitting verdicts"}</DialogTitle>
+                <DialogDescription>{reviewSubmit?.error ?? reviewSubmit?.phase}</DialogDescription>
+              </DialogHeader>
+              {!reviewSubmit?.error ? <LoaderCircle className="animate-spin text-muted-foreground" aria-label="Working" /> : (
+                <Button type="button" onClick={() => setReviewSubmit(null)}>Return to review</Button>
+              )}
+            </DialogContent>
+          </Dialog>
         </div>
       </SidebarProvider>
     </TooltipProvider>

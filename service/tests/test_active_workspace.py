@@ -38,3 +38,22 @@ def test_published_workspace_compacts_to_a_receipt(tmp_path):
     assert persisted is not None
     assert final.sequence > created.event_sequence
     assert [event.name for event in persisted.events] == ["publish"]
+
+
+def test_new_workspace_keeps_upload_metadata_while_generating(tmp_path):
+    store = _store(tmp_path)
+
+    workspace = store.create_or_get(
+        "artist-sub",
+        initial_snapshot={
+            "upload": {
+                "mode": "frames",
+                "label": "14 keyframes",
+                "filenames": ["key-00.png", "key-01.png"],
+            }
+        },
+    )
+
+    assert workspace.state == "generating"
+    assert workspace.snapshot["upload"]["label"] == "14 keyframes"
+    assert store.get("artist-sub").snapshot == workspace.snapshot

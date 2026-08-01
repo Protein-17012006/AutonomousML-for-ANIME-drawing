@@ -8,11 +8,13 @@ export function KeyframeUploadButton({
   className,
   buttonClassName,
   label = "Add my key",
+  disabled = false,
 }: {
   onFileSelect: (file: File) => void;
   className?: string;
   buttonClassName?: string;
   label?: string;
+  disabled?: boolean;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -24,6 +26,7 @@ export function KeyframeUploadButton({
       <input
         ref={inputRef}
         type="file"
+        disabled={disabled}
         accept="image/png"
         className="sr-only"
         onChange={(event) => {
@@ -36,6 +39,7 @@ export function KeyframeUploadButton({
       <Button
         variant="outline"
         type="button"
+        disabled={disabled}
         className={cn(
           "border-akaire bg-akaire/10 font-mono text-xs tracking-[0.02em] text-akaire-ink hover:bg-akaire hover:text-white active:translate-y-px",
           buttonClassName,

@@ -1,60 +1,27 @@
-"""Feedback feature API: one clip-quality vote per (pair, voter), machine verdict
-snapshotted server-side (per-show CSQ calibration data — see the vault design
-note 'Animation QA - Flag Feedback (CSQ Calibration) - Design')."""
+"""Read access to persisted calibration feedback.
+
+Writes are intentionally batch-only and live in ``service.review.api`` because
+they must commit alongside the live review-state revision.
+"""
 from __future__ import annotations
 
-from typing import Literal
-
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from service.feedback.models import FeedbackRecord, build_feedback
 from service.feedback.dependencies import feedback_store_for
-from service.sessions.repository import SessionRepository
-from service.sessions.http_dependencies import get_session_repository
+from service.feedback.models import FeedbackRecord
 
 router = APIRouter(tags=["feedback"])
-
-
-class VoteReq(BaseModel):
-    pair_index: int
-    vote: Literal["up", "down"]
 
 
 class FeedbackListResp(BaseModel):
     feedback: list[FeedbackRecord]
 
 
-def _voter(request: Request) -> str:
-    user = getattr(request.state, "user", None)
-    return user.sub if user is not None else "anon"
-
-
-@router.post("/session/{sid}/feedback", response_model=FeedbackRecord)
-def post_feedback(sid: int, req: VoteReq, request: Request,
-                  sessions: SessionRepository = Depends(get_session_repository)):
-    state = sessions.state_for(sid)
-    if state is None:
-        raise HTTPException(status_code=404, detail="Unknown or expired session")
-    try:
-        record = build_feedback(state, sid, req.pair_index, req.vote, _voter(request))
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    # config/store-construction errors (e.g. missing COPILOT_FEEDBACK_TABLE) should
-    # propagate loudly, not be swallowed as a 503 "outage" — only the actual store
-    # operation below is an outage.
-    store = feedback_store_for(request.app)
-    try:
-        return store.upsert(record)
-    except Exception as exc:   # store outage: degrade loudly, never 500/never lose silently
-        raise HTTPException(status_code=503, detail="feedback store unavailable") from exc
-
-
 @router.get("/session/{sid}/feedback", response_model=FeedbackListResp)
 def list_feedback(sid: int, request: Request):
-    store = feedback_store_for(request.app)
     try:
-        rows = store.list_session(sid)
+        rows = feedback_store_for(request.app).list_session(sid)
     except Exception as exc:
         raise HTTPException(status_code=503, detail="feedback store unavailable") from exc
     return {"feedback": rows}

@@ -2,7 +2,7 @@ import type { CsqBand, PairEvent } from "../types";
 
 // GET PAIR ACTION STATUS
 export function statusClass(p: PairEvent): string {
-  return p.action === "needs_key" ? "needs_key" : (p.qa ?? "");
+  return p.action === "needs_key" ? "needs_key" : (p.artist_verdict === "accept" ? "pass" : (p.qa ?? ""));
 }
 
 // FORCE RECEIVING NUMBER BETWEEN 0 & 1

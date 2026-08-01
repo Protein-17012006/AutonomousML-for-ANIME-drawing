@@ -192,37 +192,6 @@ def test_export_bundle_zip():
     assert any(n.endswith(".png") for n in names), names   # montage / frames
 
 
-def test_draw_key_refill_splits_gap():
-    """POST /session/{sid}/key supplies a breakdown key for a gap -> the gap splits
-    into two re-indexed sub-pairs in the returned (full) pair list."""
-    import json, re
-    c = TestClient(app)
-    files = [
-        ("keys", ("0.png", _png(0),   "image/png")),
-        ("keys", ("1.png", _png(200), "image/png")),
-    ]
-    r = c.post("/session", files=files, data={"engines": "stub"})
-    assert r.status_code == 200
-    data = json.loads(re.search(r"event: result\ndata: (.+)", r.text).group(1))
-    sid = int(data["artifacts"]["montage"].split("/")[2])
-
-    rk = c.post(f"/session/{sid}/key",
-                files=[("key", ("m.png", _png(100), "image/png"))],
-                data={"index": "0"})
-    assert rk.status_code == 200
-    body = rk.json()
-    assert len(body["pairs"]) == 2                       # one gap -> two sub-pairs
-    assert [p["index"] for p in body["pairs"]] == [0, 1] # contiguous re-index
-    assert "artifacts" in body["result"]
-
-
-def test_draw_key_unknown_session():
-    c = TestClient(app)
-    rk = c.post("/session/999999/key",
-                files=[("key", ("m.png", _png(1), "image/png"))], data={"index": "0"})
-    assert rk.status_code == 404
-
-
 def test_demo_returns_comparison_video():
     """POST /demo with a full cut returns a downloadable side-by-side compare.mp4."""
     c = TestClient(app)

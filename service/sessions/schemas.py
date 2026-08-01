@@ -66,6 +66,7 @@ class PairEvent(BaseModel):
     # wide-gap diagnosis for gate-refused pairs (ADR-0015):
     # {cls, keys_suggested, confidence, evidence, brief}. None for filled pairs.
     triage: Optional[dict] = None
+    artist_verdict: Optional[Literal["accept", "reject"]] = None
 
     @classmethod
     def from_pair(cls, pair, mid_url: Optional[str] = None) -> "PairEvent":
@@ -100,6 +101,7 @@ class PairEvent(BaseModel):
             mid_url=mid_url,
             correction=correction,
             triage=getattr(pair, "triage", None),
+            artist_verdict=getattr(pair, "artist_verdict", None),
         )
 
 

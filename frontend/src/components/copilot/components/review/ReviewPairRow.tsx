@@ -17,6 +17,8 @@ interface ReviewPairRowProps {
   onFocus: () => void;
   onVerdict: (index: number, verdict: "accept" | "reject") => void;
   onRefill: (index: number, file: File) => void;
+  verdictEnabled?: boolean;
+  refillEnabled?: boolean;
 }
 
 export function ReviewPairRow({
@@ -29,6 +31,8 @@ export function ReviewPairRow({
   onFocus,
   onVerdict,
   onRefill,
+  verdictEnabled = true,
+  refillEnabled = true,
 }: ReviewPairRowProps) {
   const a = keyUrls[pair.index];
   const b = keyUrls[pair.index + 1];
@@ -81,7 +85,7 @@ export function ReviewPairRow({
 
       {frames && <FlipPlayer frames={frames} />}
 
-      {pair.action !== "needs_key" ? (
+      {pair.action !== "needs_key" && verdictEnabled ? (
         <div className="verdict">
           <Button
             variant="ghost"
@@ -118,11 +122,12 @@ export function ReviewPairRow({
             Redraw
           </Button>
         </div>
-      ) : (
+      ) : pair.action === "needs_key" ? (
         <KeyframeUploadButton
+          disabled={!refillEnabled}
           onFileSelect={(file) => onRefill(pair.index, file)}
         />
-      )}
+      ) : null}
     </li>
   );
 }

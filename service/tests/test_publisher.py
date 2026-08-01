@@ -66,10 +66,13 @@ def test_publishes_artifacts_and_record(tmp_path, monkeypatch):
     assert out["published"] is True and out["error"] is None
     keys = [k for _, _, k in s3.calls]
     pid = out["pid"]
-    assert keys == [f"artifacts/{pid}/montage.png",
-                    f"artifacts/{pid}/reconstructed.mp4",
-                    f"artifacts/{pid}/report.md"]
-    assert ddb.items and s3.objects[0]["Key"] == f"artifacts/{pid}/workspace.v1.json"
+    prefix = f"artifacts/{pid}/revisions/"
+    assert len(keys) == 3 and all(key.startswith(prefix) for key in keys)
+    assert {key.rsplit("/", 1)[-1] for key in keys} == {
+        "montage.png", "reconstructed.mp4", "report.md"
+    }
+    assert ddb.items and s3.objects[0]["Key"].startswith(prefix)
+    assert s3.objects[0]["Key"].endswith("/workspace.v1.json")
     (table, item), = ddb.items
     assert table == "t" and item["pid"] == {"S": pid}
     assert item["sid"] == {"N": "7"} and item["n_pairs"] == {"N": "2"}
@@ -96,7 +99,22 @@ def test_owned_publish_writes_owner_index_attributes(tmp_path, monkeypatch):
     update = ddb.updates[0]
     assert update["Key"] == {"pid": {"S": "owned-pid"}}
     assert update["ExpressionAttributeValues"][":owner"] == {"S": "cognito-sub"}
-    assert "#status = :draft" in update["ConditionExpression"]
+    assert "#status = :expected_status" in update["ConditionExpression"]
+    assert update["ExpressionAttributeValues"][":expected_status"] == {"S": "draft"}
+
+
+def test_review_publish_advances_only_completed_session(tmp_path, monkeypatch):
+    monkeypatch.setenv("AWS_PUBLISH", "1")
+    monkeypatch.setenv("AWS_ARTIFACT_BUCKET", "b")
+    monkeypatch.setenv("AWS_SESSIONS_TABLE", "t")
+    ddb = FakeDdb()
+    out = publisher.publish_session(
+        7, _session_dir(tmp_path), _result(), owner_sub="cognito-sub",
+        pid="owned-pid", update_complete=True,
+        clients={"s3": FakeS3(), "ddb": ddb},
+    )
+    assert out["published"] is True
+    assert ddb.updates[0]["ExpressionAttributeValues"][":expected_status"] == {"S": "complete"}
 
 
 def test_s3_failure_never_raises(tmp_path, monkeypatch):

@@ -21,6 +21,7 @@ export interface PairEvent {
     keys_used: number;
     rounds: { action: string; reason: string }[];
   } | null;
+  artist_verdict?: "accept" | "reject" | null;
 }
 
 export interface CsqBand {

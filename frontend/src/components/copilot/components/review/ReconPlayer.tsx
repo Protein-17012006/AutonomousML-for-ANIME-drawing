@@ -90,7 +90,20 @@ export function ReconPlayer({
         ref={vref}
         src={src}
         playsInline
-        onLoadedMetadata={() => setDur(vref.current?.duration || 0)}
+        onLoadedMetadata={() => {
+          const video = vref.current;
+          if (
+            !video ||
+            video.videoWidth < 1 ||
+            video.videoHeight < 1 ||
+            !Number.isFinite(video.duration) ||
+            video.duration <= 0
+          ) {
+            onError?.();
+            return;
+          }
+          setDur(video.duration);
+        }}
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
         onEnded={() => setPlaying(false)}
