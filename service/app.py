@@ -23,6 +23,7 @@ from service.feedback import api as feedback_routes
 from service.image_edit import api as image_edit_routes
 from service.media import api as demo_routes
 from service.memory import api as memory_routes
+from service.orchestration import api as orchestration_routes
 from service.review import api as review_routes
 from service.session_history import api as session_history_routes
 from service.session_history.dependencies import configure_session_history
@@ -135,6 +136,7 @@ app.include_router(feedback_routes.router)
 app.include_router(session_routes.router)
 app.include_router(demo_routes.router)
 app.include_router(assistant_routes.router)
+app.include_router(orchestration_routes.router)
 app.include_router(review_routes.router)
 app.include_router(memory_routes.router)
 app.include_router(image_edit_routes.router)

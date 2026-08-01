@@ -11,6 +11,12 @@ from inbetween_copilot.qa.gate import FrameQA
 def _frame(v):
     return np.full((4, 4, 3), v, np.uint8)
 
+
+# build_report requires the sampling metadata so every render — including a review
+# rerender — carries the same smoothness headline. Tests that do not assert on the
+# badge still have to supply it; these are the values the badge test uses.
+_SAMPLING = dict(cadence_fps=12, smoothness=2, output_fps=24, duration=2.0)
+
 # NOTE: FrameQA is a frozen dataclass with fields (status, reason) — two required args.
 # The prompt showed FrameQA(status="pass") but that omits `reason`.
 # Real constructor: FrameQA(status="pass", reason="")
@@ -47,7 +53,7 @@ def test_artifacts_write_files(tmp_path):
     keys = [np.zeros((8, 8, 3), np.uint8) for _ in range(2)]
     m   = build_montage(r, keys, str(tmp_path))
     v   = build_video(r, str(tmp_path))
-    rep = build_report(r, str(tmp_path))
+    rep = build_report(r, str(tmp_path), **_SAMPLING)
     assert os.path.getsize(m) > 0
     assert os.path.getsize(v) > 0
     assert os.path.getsize(rep) > 0
@@ -55,7 +61,7 @@ def test_artifacts_write_files(tmp_path):
 
 def test_report_contains_summary(tmp_path):
     r = _res()
-    rep = build_report(r, str(tmp_path))
+    rep = build_report(r, str(tmp_path), **_SAMPLING)
     text = open(rep, encoding="utf-8").read()
     assert "auto-pass" in text
 

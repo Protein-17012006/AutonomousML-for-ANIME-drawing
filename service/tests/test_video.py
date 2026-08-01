@@ -261,17 +261,22 @@ def test_video_session_reports_cadence_badge():
     assert s["duration"] > 0
 
 
-def test_qa_invariant_across_smoothness(monkeypatch):
+def test_qa_invariant_across_smoothness():
     """Pins the feature's core safety claim (final-review M1): smoothness is
     DISPLAY-ONLY (fps/duration/frame-count expansion) — QA runs on the interpolated
     x2 triplet via `run_session(key_arrays, eng, ...)`, which never sees `cfg`/smoothness
     at all. So for a FIXED set of keys, the QA outcome (autopass count, flagged/abstained
-    sets, and the per-pair action/qa verdicts) must be IDENTICAL whether smoothness is
-    1, 2, or 4 (x4 unblocked via the env flag) — only output_fps/duration may differ."""
+    sets, and the per-pair action/qa verdicts) must be IDENTICAL across every supported
+    smoothness — only output_fps/duration may differ.
+
+    The supported set is now {1, 2}: ×4 was descoped and the COPILOT_SMOOTHNESS_X4 flag
+    that used to unblock a third arm here no longer exists, so that arm was returning
+    422 and failing the test. Dropping it narrows the sweep but does not weaken the
+    claim — the invariant is that QA never sees `cfg`, which one comparison already
+    exercises."""
     import json
     import re
 
-    monkeypatch.setenv("COPILOT_SMOOTHNESS_X4", "1")   # unblock the x4 run too
     c = TestClient(app)
     video_bytes = _mp4_bytes_near_static(6)   # near-static so pairs actually FILL
 
@@ -294,9 +299,8 @@ def test_qa_invariant_across_smoothness(monkeypatch):
 
     result1, qa1 = _run(1)
     result2, qa2 = _run(2)
-    result4, qa4 = _run(4)
 
-    for label, result, qa in (("smoothness=2", result2, qa2), ("smoothness=4", result4, qa4)):
+    for label, result, qa in (("smoothness=2", result2, qa2),):
         assert result["n_autopass"] == result1["n_autopass"], label
         assert len(result["flagged"]) == len(result1["flagged"]), label
         assert len(result["abstained"]) == len(result1["abstained"]), label
