@@ -13,6 +13,7 @@ from fastapi.responses import StreamingResponse
 from service.core.config import sse_keepalive_seconds
 from service.core.errors import RuntimeBusy, UnknownEngine
 from service.core.http import model_or_422
+from service.session_history.models import WorkspaceSnapshot, WorkspaceUpload
 from service.sessions.repository import SessionRepository
 from service.sessions.schemas import ErrorEvent, PairEvent, ResultEvent, SessionCfg, sse
 from service.sessions.service import RunSession
@@ -48,6 +49,27 @@ def _drain_events(q: "queue.Queue", keepalive: "float | None" = None):
         yield item
 
 
+def _record_snapshot(workspace_service, workspace_id, owner_sub, upload,
+                     pair_events, result_event) -> None:
+    """Store what a resume rehydrates from, and bump `revision`.
+
+    Built from the events just streamed rather than from the run's internals, so
+    what a reload replays is exactly what the live client saw.
+    """
+    if workspace_service is None or workspace_id is None:
+        return
+    try:
+        workspace_service.record_snapshot(workspace_id, owner_sub, WorkspaceSnapshot(
+            schema_version=1,
+            upload=upload or WorkspaceUpload(mode="frames", label="run",
+                                             filenames=[]),
+            pairs=list(pair_events),
+            result=result_event,
+        ))
+    except Exception:                           # noqa: BLE001 — best effort
+        pass
+
+
 def stream_session(key_arrays: list[np.ndarray], engines: str, *,
                    ports: SessionStreamPorts,
                    repository: SessionRepository,
@@ -57,6 +79,7 @@ def stream_session(key_arrays: list[np.ndarray], engines: str, *,
                    owner_sub: str | None = None,
                    history_pid: str | None = None,
                    workspace_input: dict | None = None,
+                   workspace_service=None,
                    gt_frames: list | None = None) -> StreamingResponse:
     """Start one run and adapt its pair/result callbacks to an SSE response."""
     cfg = model_or_422(
@@ -69,11 +92,39 @@ def stream_session(key_arrays: list[np.ndarray], engines: str, *,
     except UnknownEngine as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    upload = None
+    if workspace_input:
+        try:
+            upload = WorkspaceUpload(**workspace_input)
+        except (TypeError, ValueError):
+            upload = None
+
     def generate():
         events = queue.Queue(maxsize=EVENT_QUEUE_CAP)
         disconnected = threading.Event()
         use_case = ports.workflow_for(repository)
         thread = None
+
+        # The durable half of this stream. Everything the SSE carries is also
+        # written to a sequence-numbered log, which is the only reason a reload
+        # can resume: the queue above dies with the connection. An anonymous run
+        # gets no workspace — one with no owner could be handed to whoever asked
+        # next. Recording NEVER breaks a run; the frames are the product.
+        workspace_id = None
+        if workspace_service is not None and owner_sub:
+            try:
+                workspace_id = workspace_service.open_workspace(
+                    owner_sub, upload=upload).workspace_id
+            except Exception:                   # noqa: BLE001 — best effort
+                workspace_id = None
+
+        def record(name, data):
+            if workspace_id is None:
+                return
+            try:
+                workspace_service.append_event(workspace_id, owner_sub, name, data)
+            except Exception:                   # noqa: BLE001 — best effort
+                pass
 
         # Admission happens before both CUDA initialization and worker creation.
         # The synchronous response iterator runs in Starlette's thread pool, so a
@@ -152,16 +203,20 @@ def stream_session(key_arrays: list[np.ndarray], engines: str, *,
             target=worker, name=f"copilot-session-{sid}", daemon=True)
         thread.start()
 
+        pair_events: list[PairEvent] = []
         try:
             for kind, payload in _drain_events(events):
                 if kind == "ping":
                     yield ": ping\n\n"
                 elif kind == "pair":
                     pair, mid_url = payload
-                    yield sse("pair", PairEvent.from_pair(pair, mid_url=mid_url))
+                    pair_event = PairEvent.from_pair(pair, mid_url=mid_url)
+                    pair_events.append(pair_event)
+                    record("pair", pair_event.model_dump(mode="json"))
+                    yield sse("pair", pair_event)
                 elif kind == "result":
                     outcome = payload
-                    yield sse("result", ResultEvent.from_result(
+                    result_event = ResultEvent.from_result(
                         outcome.result,
                         outcome.artifact_urls,
                         sid=outcome.sid,
@@ -171,8 +226,13 @@ def stream_session(key_arrays: list[np.ndarray], engines: str, *,
                         sampling=outcome.sampling,
                         csq=outcome.csq,
                         qa_degraded=outcome.qa_degraded,
-                    ))
+                    )
+                    record("result", result_event.model_dump(mode="json"))
+                    _record_snapshot(workspace_service, workspace_id, owner_sub,
+                                     upload, pair_events, result_event)
+                    yield sse("result", result_event)
                 elif kind == "error":
+                    record("error", {"message": str(payload)})
                     yield sse("error", ErrorEvent(message=str(payload)))
                     break
         finally:

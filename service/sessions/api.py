@@ -7,6 +7,7 @@ import pathlib
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 
+from service.active_workspace.dependencies import get_active_workspace_service
 from service.core.auth import request_user_sub
 from service.core.config import default_engine
 from service.sessions.http_dependencies import (
@@ -62,6 +63,7 @@ def post_session(
         runtime.load_keys(keys), selected_engine, interpolator=interpolator,
         cadence_fps=cadence, smoothness=smoothness, show=show or None,
         repository=repository, owner_sub=owner_sub, history_pid=durable_pid,
+        workspace_service=get_active_workspace_service(request),
         workspace_input={
             "mode": "frames",
             "label": f"{len(keys)} keyframes",
@@ -106,6 +108,7 @@ def post_session_video(
         smoothness=smoothness, sampling=sampling, show=show or None,
         gt_frames=gt_frames,
         repository=repository, owner_sub=owner_sub, history_pid=durable_pid,
+        workspace_service=get_active_workspace_service(request),
         workspace_input={
             "mode": "video",
             "label": _safe_filename(video.filename),
