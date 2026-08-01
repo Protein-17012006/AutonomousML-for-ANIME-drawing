@@ -401,26 +401,12 @@ export async function rememberMemory(
   if (!resp.ok) throw new Error(`Could not save that (${resp.status}).`);
 }
 
-/**
- * The artist's keep/redraw call on one pair.
- *
- * This is the per-show calibration signal the QA thresholds are refit against,
- * so it is the artist's OWN verdict that matters — not a second opinion widget
- * bolted next to it. The board already had this control; it just never left the
- * browser.
- */
-export async function sendFeedback(
-  sid: string,
-  pairIndex: number,
-  vote: "up" | "down",
-): Promise<void> {
-  const resp = await authenticatedFetch(`/session/${sid}/feedback`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ pair_index: pairIndex, vote }),
-  });
-  if (!resp.ok) throw new Error(`Could not record that (${resp.status}).`);
-}
+// The artist's keep/redraw call on one pair used to POST here, one request per
+// toggle. That route (POST /session/{sid}/feedback) was replaced by the batch
+// submit — see submitVerdicts() — so the single-item sender is gone rather than
+// repointed: the review workbench stages verdicts locally and commits them as
+// one batch, and a per-toggle send would file calibration for a choice the
+// artist has not submitted yet.
 
 /* ---------------------------------------------------------------------------
  * The orchestration layer.

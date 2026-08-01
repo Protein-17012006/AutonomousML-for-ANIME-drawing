@@ -14,7 +14,6 @@ import {
   rememberMemory,
   submitReplacementKeys,
   submitVerdicts,
-  sendFeedback,
   runOrchestration,
   type AgentAction,
   type TranscriptEntry,
@@ -113,6 +112,13 @@ export default function App() {
   const stagedRefillsRef = useRef<Record<number, { file: File; url: string }>>({});
   const [reviewSubmit, setReviewSubmit] = useState<{ kind: "verdicts" | "keys"; phase: string; error?: string } | null>(null);
   const setVerdict = (idx: number, v: "accept" | "reject") => {
+    // Staged only. The artist's keep/redraw IS the per-show calibration signal
+    // the QA thresholds are refit against, but it reaches the feedback store
+    // through "Submit verdicts" → POST /session/{sid}/feedback/batch, after the
+    // durable review revision is published. Firing per toggle (which is what
+    // this did on its own branch) posted to /session/{sid}/feedback — a route
+    // that no longer exists — and would have filed a calibration record for a
+    // choice the artist can still undo before submitting.
     setVerdicts((prev) => {
       const n = { ...prev };
       if (n[idx] === v)
@@ -120,15 +126,6 @@ export default function App() {
       else n[idx] = v;
       return n;
     });
-    // The artist's own keep/redraw call IS the per-show calibration signal the
-    // QA thresholds are refit against. This control existed and never left the
-    // browser. Toggling OFF sends nothing: there is no retraction endpoint, and
-    // inventing one here would be guessing at what a withdrawn vote means.
-    if (liveSid && verdicts[idx] !== v) {
-      void sendFeedback(liveSid, idx, v === "accept" ? "up" : "down").catch(
-        (err) => console.warn("could not record that verdict", err),
-      );
-    }
   };
 
   const discardStagedRefills = useCallback(() => {
