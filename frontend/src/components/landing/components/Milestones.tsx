@@ -6,27 +6,35 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
-// Milestones — 4 stat cards in a responsive grid. Figures are illustrative placeholders.
+// Four cards describing what the co-pilot DOES.
+//
+// These were four statistics — "40% faster", "99.2% on-model", "1M+ frames
+// vouched", "12k+ artists" — carrying a comment that called them illustrative
+// placeholders while the page presented them as measurement. Nothing in the
+// project supports any of them, parts are contradicted by it, and there is no
+// external user base for the last one to describe. They are replaced with
+// claims that are true and checkable by using the product, because an invented
+// number is the easiest thing on a page to be taken apart on.
 const MILESTONES = [
   {
     icon: Gauge,
-    stat: "40% faster",
-    body: "Artists ship sequences in a fraction of the time — the tedious middles are handled for them.",
+    stat: "In-betweens, drawn for you",
+    body: "Hand it consecutive keys and it generates the drawings between them, at the cadence and depth you set.",
   },
   {
     icon: ShieldCheck,
-    stat: "99.2% on-model",
-    body: "Calibrated QA catches off-model drift, flicker and morph before they ever reach the timeline.",
+    stat: "Pass, abstain, or flag",
+    body: "Every generated pair gets a calibrated verdict — never a silent guess presented as a finished drawing.",
   },
   {
     icon: Sparkles,
-    stat: "1M+ frames vouched",
-    body: "Every generated frame passes a three-state pass / abstain / flag review — never a silent guess.",
+    stat: "It says when it cannot",
+    body: "When the gap is too wide to fill honestly, it asks you for a key instead of inventing motion it cannot see.",
   },
   {
     icon: Users,
-    stat: "12k+ artists",
-    body: "Studios and solo animators alike trust the co-pilot as a first-class step in their pipeline.",
+    stat: "Your call, every time",
+    body: "Nothing is applied without you accepting it, and every frame stays yours to reject and re-run.",
   },
 ] as const;
 
