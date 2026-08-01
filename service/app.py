@@ -12,6 +12,8 @@ from __future__ import annotations
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from service.active_workspace import api as active_workspace_routes
+from service.active_workspace.dependencies import configure_active_workspace
 from service.assistant import api as assistant_routes
 from service import auth_api
 from service.composition.image_edit_runtime import build_image_edit_http_runtime
@@ -40,6 +42,7 @@ app.state.session_http_runtime = build_session_http_runtime()
 app.state.review_http_runtime = build_review_http_runtime()
 app.state.image_edit_http_runtime = build_image_edit_http_runtime()
 configure_session_history(app)
+configure_active_workspace(app)
 
 
 @app.middleware("http")
@@ -132,6 +135,7 @@ async def _no_cache_html(request, call_next):
 # name="feedback"), and the static mount must come last so API routes take precedence.
 app.include_router(auth_api.router)
 app.include_router(session_history_routes.router)
+app.include_router(active_workspace_routes.router)
 app.include_router(feedback_routes.router)
 app.include_router(session_routes.router)
 app.include_router(demo_routes.router)
