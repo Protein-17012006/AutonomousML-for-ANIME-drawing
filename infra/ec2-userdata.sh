@@ -112,7 +112,13 @@ http {
         # Next export. The plural sessions route serves durable owned-session
         # history and workspace snapshots; the auth route bootstraps the
         # application cookie.
-        location ~ ^/(auth|sessions|session|demo)(?:/|$) {
+        #
+        # Every prefix the service registers must be listed here. A route missing
+        # from this alternation does not 401 or 502 — it falls through to the
+        # static export and nginx answers 404, which reads exactly like a route
+        # the backend never had. /me and /tools were absent until 2026-08-01 and
+        # cost the agent's memory surface the whole time it was deployed.
+        location ~ ^/(auth|sessions|session|demo|active-workspace|me|tools)(?:/|$) {
             limit_req zone=sess burst=3 nodelay;
             limit_req zone=inter burst=10 nodelay;
             proxy_pass http://${BOX_HOST}:8000;
