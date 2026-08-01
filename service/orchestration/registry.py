@@ -28,6 +28,9 @@ _AGENT_SPECS = {
     "triage": ("Triage", "diagnoses why a pair was refused and how many keys to draw, and where"),
     "perception": ("Perception", "reports what defect the vision model saw in a pair and in which region"),
     "qa_csq": ("QA/CSQ", "owns the calibrated pass/abstain/flag verdict for a pair"),
+    "cut_survey": ("Cut Survey",
+                   "orders the WHOLE cut into work buckets from the calibrated "
+                   "verdicts; ask it FIRST when the artist has not named a pair"),
 }
 
 # The planner must be told each tool's ARGUMENT SHAPE, not just its name. Without

@@ -182,6 +182,113 @@ def qa_csq_agent(ctx: AgentContext, step) -> StepResult:
                    payload=payload, started=started)
 
 
+# --- Cut Survey -------------------------------------------------------------
+#
+# This agent INVENTS NO SCORE. It orders over verdicts that are already
+# calibrated — the conformal CSQ status and the tau gate's action — and it
+# refuses two things it has no basis for: ranking `flag` against `needs_key`,
+# and any severity order within a bucket.
+
+_BUCKETS = ("flag", "needs_key", "abstain", "pass")
+_ACTIONABLE = ("flag", "needs_key", "abstain")
+
+_WHY = {
+    "flag": "CSQ flagged the generated frames here.",
+    "needs_key": "The gate refused this pair; it is waiting on a key from you.",
+    "abstain": "CSQ could not decide; this one needs your eye.",
+}
+
+_WITHHELD = ("severity ordering WITHIN a bucket, and any ranking of flag against "
+             "needs_key: no calibrated basis exists for either.")
+
+
+def _bucket_for(pair) -> str:
+    """A pair's bucket, from calibrated state only. '' when it has neither."""
+    if str(getattr(pair, "action", "") or "") == "needs_key":
+        return "needs_key"
+    qa = getattr(pair, "qa", None)
+    status = str(getattr(qa, "status", "") or "") if qa is not None else ""
+    return status if status in ("flag", "abstain", "pass") else ""
+
+
+def cut_survey_agent(ctx: AgentContext, step) -> StepResult:
+    started = time.monotonic()
+    result = ctx.state.get("result")
+    pairs = list(getattr(result, "pairs", None) or [])
+    if not pairs:
+        return _result(step, "refused",
+                       "This session has no pairs, so there is no work to order.",
+                       started=started)
+
+    # The refusal that makes this an agent and not a sort function. Verified live
+    # 2026-08-01: with :8001 down every pair abstains `vlm_unavailable`.
+    if ctx.state.get("qa_degraded"):
+        return _result(
+            step, "refused",
+            "I will not order this cut. The QA channel was unavailable for this "
+            "run, so the pairs abstained for a reason that has nothing to do with "
+            "your drawings — a work order built on those verdicts would read as "
+            "sensible and mean nothing. Re-run the cut once the detector is back up.",
+            payload={"qa_degraded": True}, started=started)
+
+    try:
+        # A pair whose index will not coerce to int cannot be placed in a
+        # cut-position order; drop it from the order rather than let sort/int()
+        # raise — this agent reports, it never propagates.
+        placed = []
+        for pair in pairs:
+            try:
+                idx = int(pair.index)
+            except (TypeError, ValueError):
+                continue
+            placed.append((idx, pair))
+        placed.sort(key=lambda t: t[0])
+
+        buckets: dict = {name: [] for name in _BUCKETS}
+        keys_outstanding = 0
+        for idx, pair in placed:
+            bucket = _bucket_for(pair)
+            if not bucket:
+                continue
+            buckets[bucket].append(idx)
+            if bucket == "needs_key":
+                try:
+                    keys_outstanding += int(getattr(pair, "keys_requested", 0) or 0)
+                except (TypeError, ValueError):
+                    pass
+
+        work_order = [{"index": i, "bucket": name, "why": _WHY[name]}
+                      for name in _ACTIONABLE for i in buckets[name]]
+
+        payload = {"work_order": work_order, "buckets": buckets,
+                   "keys_outstanding": keys_outstanding, "n_pairs": len(pairs),
+                   "withheld": _WITHHELD}
+    except Exception as exc:            # noqa: BLE001 — an agent reports, never raises
+        return _result(step, "error", f"Cut survey failed: {exc}", started=started)
+
+    if not work_order:
+        return _result(step, "ok",
+                       f"All {len(pairs)} pairs passed. There is nothing in this "
+                       "cut that needs your attention.",
+                       payload=payload, started=started)
+
+    # Only offered when there IS work — an absent field refuses a reference to it
+    # with a stated reason, which is the honest answer to "where do I start?"
+    payload["first_index"] = work_order[0]["index"]
+    counts = ", ".join(f"{len(buckets[n])} {n}" for n in _ACTIONABLE if buckets[n])
+    says = (
+        f"{counts}. Start at pair {payload['first_index']} — "
+        f"{_WHY[work_order[0]['bucket']]} Within a group I order by position in "
+        "the cut, because that is the order you will draw them, not because the "
+        "earlier one is worse: nothing here calibrates severity. I also do not "
+        "rank a flagged pair against a refused one — they are different kinds of "
+        "work."
+        + (f" {keys_outstanding} key(s) are still outstanding."
+           if keys_outstanding else ""))
+    return _result(step, "ok", says, payload=payload, started=started)
+
+
 registry.register_agent("triage", triage_agent)
 registry.register_agent("perception", perception_agent)
 registry.register_agent("qa_csq", qa_csq_agent)
+registry.register_agent("cut_survey", cut_survey_agent)
