@@ -187,7 +187,11 @@ export async function runVideoSession(
   await pumpSSE(resp.body, h);
 }
 
-/** Grounded session Q&A — answers only from retained session facts. */
+/** Grounded session Q&A — answers only from retained session facts.
+ *
+ * Superseded by askAgent for the chat surface, but kept and still used: the
+ * agent is rate-limited and this is not, so a burst of questions degrades to a
+ * plain answer instead of an error. */
 export async function askQuestion(
   sid: string,
   question: string,
@@ -201,4 +205,131 @@ export async function askQuestion(
   const data: unknown = await resp.json();
   if (!isAskResponse(data)) throw new Error("Invalid /ask response");
   return data;
+}
+
+/* ---------------------------------------------------------------------------
+ * The agent.
+ *
+ * /ask answers questions. The agent answers questions AND may propose ONE tool
+ * call — which is all it can do: the server decides nothing is executed until
+ * the artist accepts it, and refuses proposals it will not honour rather than
+ * letting the reply promise something that cannot happen.
+ * ------------------------------------------------------------------------- */
+
+export type AgentToolName =
+  | "explain_pair"
+  | "show_annotated"
+  | "open_board"
+  | "export_bundle"
+  | "rerun_session"
+  | "remember_memory";
+
+export interface AgentAction {
+  tool: AgentToolName;
+  args: Record<string, unknown>;
+  /** The server will not run this until the artist explicitly confirms, and it
+   *  re-checks on the way in. The UI must never quietly skip it. */
+  needs_confirm: boolean;
+  label: string;
+}
+
+export interface AgentReply {
+  say: string;
+  grounded: boolean;
+  action: AgentAction | null;
+  followups: string[];
+  /** Present when the model named a tool the server refused. Its prose may
+   *  still describe the action, so the artist is told it will not happen
+   *  rather than shown a promise with no button. */
+  rejected_tool?: string;
+}
+
+const TOOL_NAMES: AgentToolName[] = [
+  "explain_pair",
+  "show_annotated",
+  "open_board",
+  "export_bundle",
+  "rerun_session",
+  "remember_memory",
+];
+
+function asAction(value: unknown): AgentAction | null {
+  if (typeof value !== "object" || value === null) return null;
+  const raw = value as Record<string, unknown>;
+  if (!TOOL_NAMES.includes(raw.tool as AgentToolName)) return null;
+  return {
+    tool: raw.tool as AgentToolName,
+    args:
+      typeof raw.args === "object" && raw.args !== null
+        ? (raw.args as Record<string, unknown>)
+        : {},
+    // Absent or malformed means confirm. Defaulting the other way would let a
+    // bad payload run a re-render the artist never asked for.
+    needs_confirm: raw.needs_confirm !== false,
+    label: typeof raw.label === "string" ? raw.label : "Run",
+  };
+}
+
+/** One agent turn. The server keeps the chat history, so only the message goes. */
+export async function askAgent(
+  sid: string,
+  message: string,
+): Promise<AgentReply> {
+  const resp = await authenticatedFetch(`/session/${sid}/agent`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message }),
+  });
+  if (resp.status === 429) {
+    throw new Error("Too many questions at once — give it a moment.");
+  }
+  if (!resp.ok) throw new Error(`/agent failed: ${resp.status}`);
+  const data: unknown = await resp.json();
+  if (typeof data !== "object" || data === null) {
+    throw new Error("Invalid /agent response");
+  }
+  const raw = data as Record<string, unknown>;
+  return {
+    say: typeof raw.say === "string" ? raw.say : "",
+    grounded: raw.grounded === true,
+    action: asAction(raw.action),
+    followups: Array.isArray(raw.followups)
+      ? raw.followups.filter((item): item is string => typeof item === "string")
+      : [],
+    rejected_tool:
+      typeof raw.rejected_tool === "string" ? raw.rejected_tool : undefined,
+  };
+}
+
+/** Re-run the retained keys with changed settings; same SSE contract as /session. */
+export async function rerunSession(
+  sid: string,
+  args: { cadence?: number; smoothness?: number; interpolator?: string },
+  h: SessionHandlers,
+): Promise<void> {
+  const fd = new FormData();
+  if (args.cadence != null) fd.append("cadence", String(args.cadence));
+  if (args.smoothness != null) fd.append("smoothness", String(args.smoothness));
+  if (args.interpolator) fd.append("interpolator", args.interpolator);
+  const resp = await authenticatedFetch(`/session/${sid}/rerun`, {
+    method: "POST",
+    body: fd,
+  });
+  if (!resp.ok || !resp.body) {
+    h.onError(`Re-run failed: ${resp.status}`);
+    return;
+  }
+  await pumpSSE(resp.body, h);
+}
+
+/** Save one confirmed preference. The server re-validates key and value. */
+export async function rememberMemory(
+  args: Record<string, unknown>,
+): Promise<void> {
+  const resp = await authenticatedFetch("/me/memories", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(args),
+  });
+  if (!resp.ok) throw new Error(`Could not save that (${resp.status}).`);
 }

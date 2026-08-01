@@ -5,7 +5,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { PairEvent, ResultEvent, InputMode } from "./types";
-import { runSession, runVideoSession, askQuestion } from "./api";
+import {
+  runSession,
+  runVideoSession,
+  askAgent,
+  askQuestion,
+  rerunSession,
+  rememberMemory,
+  type AgentAction,
+} from "./api";
 import {
   type ChatMsg,
   deriveMessages,
@@ -90,6 +98,7 @@ export default function App() {
   const [boardFocus, setBoardFocus] = useState<number | null>(null);
   const [upload, setUpload] = useState<UserTurn | null>(null);
   const [qaTurns, setQaTurns] = useState<QaTurn[]>([]);
+  const [actionBusy, setActionBusy] = useState(false);
 
   // Auth
   const [account, setAccount] = useState<SidebarAccount | null>(null);
@@ -477,18 +486,48 @@ export default function App() {
     }
   };
 
+  // The chat used to call /ask, which answers and nothing more. It now calls the
+  // agent, which answers AND may propose one tool. Nothing it proposes runs
+  // here: acceptAction below is the only path, and the server refuses anything
+  // confirm-gated that arrives without one.
   const onAsk = async (q: string) => {
     if (!liveSid) return;
     const n = qaTurns.length;
     setQaTurns((prev) => [...prev, { q, answer: null }]);
     try {
-      const r = await askQuestion(liveSid, q);
+      const r = await askAgent(liveSid, q);
       setQaTurns((prev) =>
         prev.map((t, i) =>
-          i === n ? { ...t, answer: r.answer, grounded: r.grounded } : t,
+          i === n
+            ? {
+                ...t,
+                answer: r.say,
+                grounded: r.grounded,
+                action: r.action,
+                rejectedTool: r.rejected_tool,
+                followups: r.followups,
+              }
+            : t,
         ),
       );
-    } catch {
+    } catch (err) {
+      // The agent is rate-limited; /ask is not. Falling back answers the
+      // question the artist actually asked instead of showing them a limit.
+      if (err instanceof Error && err.message.includes("Too many")) {
+        try {
+          const plain = await askQuestion(liveSid, q);
+          setQaTurns((prev) =>
+            prev.map((t, i) =>
+              i === n
+                ? { ...t, answer: plain.answer, grounded: plain.grounded }
+                : t,
+            ),
+          );
+          return;
+        } catch {
+          // fall through to the generic message below
+        }
+      }
       setQaTurns((prev) =>
         prev.map((t, i) =>
           i === n
@@ -501,6 +540,91 @@ export default function App() {
             : t,
         ),
       );
+    }
+  };
+
+  const noteTurn = (turn: number, patch: Partial<(typeof qaTurns)[number]>) =>
+    setQaTurns((prev) => prev.map((t, i) => (i === turn ? { ...t, ...patch } : t)));
+
+  const dismissAction = (turn: number) =>
+    noteTurn(turn, { action: null, actionNote: null });
+
+  /**
+   * Carry out one accepted proposal.
+   *
+   * Board navigation and the bundle export happen here in the client; a re-run
+   * and a remembered preference go back to the server, which validates them
+   * again — this UI is not the thing that decides they are allowed.
+   */
+  const acceptAction = async (turn: number) => {
+    const action: AgentAction | null | undefined = qaTurns[turn]?.action;
+    if (!action || actionBusy) return;
+    setActionBusy(true);
+    try {
+      const index = typeof action.args.index === "number" ? action.args.index : null;
+      switch (action.tool) {
+        case "explain_pair":
+        case "show_annotated":
+        case "open_board":
+          if (index === null) throw new Error("That pair is no longer available.");
+          setBoardFocus(index);
+          setView("board");
+          noteTurn(turn, { actionDone: true, actionNote: `Opened pair ${index}.` });
+          break;
+        case "export_bundle":
+          if (!result) throw new Error("There is nothing to export yet.");
+          await downloadBundle(result);
+          noteTurn(turn, { actionDone: true, actionNote: "Bundle downloaded." });
+          break;
+        case "rerun_session": {
+          if (!liveSid) throw new Error("This session is no longer live.");
+          noteTurn(turn, { actionDone: true, actionNote: "Re-running…" });
+          setRunning(true);
+          setLog([]);
+          setResult(null);
+          setVerdicts({});
+          await rerunSession(
+            liveSid,
+            {
+              cadence:
+                typeof action.args.cadence === "number" ? action.args.cadence : undefined,
+              smoothness:
+                typeof action.args.smoothness === "number"
+                  ? action.args.smoothness
+                  : undefined,
+              interpolator:
+                typeof action.args.interpolator === "string"
+                  ? action.args.interpolator
+                  : undefined,
+            },
+            {
+              onPair: (p) => setLog((prev) => [...prev, p]),
+              onResult: (r) => {
+                setResult(r);
+                setLiveSid(sidFromResult(r));
+              },
+              onError: (m) => setBanner(m),
+            },
+          );
+          setRunning(false);
+          noteTurn(turn, { actionNote: "Re-run finished." });
+          break;
+        }
+        case "remember_memory":
+          await rememberMemory(action.args);
+          noteTurn(turn, { actionDone: true, actionNote: "Saved for next time." });
+          break;
+      }
+    } catch (err) {
+      // Kept on the turn rather than raised as a banner: the artist pressed a
+      // button on this message, so the answer belongs next to it.
+      setRunning(false);
+      noteTurn(turn, {
+        actionNote:
+          err instanceof Error ? err.message : "That could not be carried out.",
+      });
+    } finally {
+      setActionBusy(false);
     }
   };
 
@@ -595,6 +719,9 @@ export default function App() {
                   keyUrls={effKeyUrls}
                   onOpenBoard={() => openBoard(null)}
                   onExport={downloadBundle}
+                  onAcceptAction={(turn) => void acceptAction(turn)}
+                  onDismissAction={dismissAction}
+                  actionBusy={actionBusy}
                 />
               ) : (
                 <ChatWelcome
