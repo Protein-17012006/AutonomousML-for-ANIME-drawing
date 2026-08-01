@@ -173,3 +173,20 @@ def test_a_run_whose_publication_fails_stays_retryable(
         assert workspace.state == "publish_pending"
     finally:
         app.state.session_http_runtime = old_runtime
+
+
+def test_a_signed_in_run_persists_its_inputs_for_a_second_device(
+        monkeypatch, token_is_sub_verifier, workspaces):
+    """`assets` + `artifact_urls` exist for resuming where IndexedDB holds
+    nothing. Without them the client throws "The active workspace is missing a
+    protected input URL." on any machine but the one that started the run."""
+    monkeypatch.setenv("COPILOT_AUTH_REQUIRED", "1")
+    monkeypatch.setenv("COPILOT_FEEDBACK_BACKEND", "memory")
+    _run(_login("user-a"))
+
+    workspace = workspaces.active_for("user-a")
+    assert [asset.kind for asset in workspace.assets] == ["input-key", "input-key"]
+    assert sorted(asset.name for asset in workspace.assets) == ["0.png", "1.png"]
+    # Every asset the client will iterate must have a URL, or it throws.
+    assert all(asset.name in workspace.artifact_urls
+               for asset in workspace.assets)

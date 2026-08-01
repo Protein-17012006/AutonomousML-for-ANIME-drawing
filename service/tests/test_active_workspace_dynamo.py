@@ -149,3 +149,25 @@ def test_a_terminal_publish_event_is_never_trimmed_away(table):
     names = [event.name for event in
              svc.get(workspace.workspace_id, "owner-1").events]
     assert "publish" in names
+
+
+# --- uploaded inputs must outlive the process too --------------------------------
+
+def test_an_uploaded_input_round_trips_through_s3():
+    """The in-memory asset store dies with the process exactly like the workspace
+    store did; a resume on another device would then find the URL but no bytes."""
+    from service.active_workspace.adapters import S3WorkspaceAssetStore
+
+    with mock_aws():
+        s3 = boto3.client("s3", region_name="ap-southeast-1")
+        s3.create_bucket(Bucket="copilot-artifacts",
+                         CreateBucketConfiguration={
+                             "LocationConstraint": "ap-southeast-1"})
+        store = S3WorkspaceAssetStore(s3, bucket="copilot-artifacts")
+        store.put("ws-1", "0.png", b"\x89PNG-bytes", "image/png")
+
+        assert store.get("ws-1", "0.png") == (b"\x89PNG-bytes", "image/png")
+        assert store.get("ws-1", "missing.png") is None
+        # A second instance reads the same object: the point of the adapter.
+        assert S3WorkspaceAssetStore(s3, bucket="copilot-artifacts").get(
+            "ws-1", "0.png")[0] == b"\x89PNG-bytes"

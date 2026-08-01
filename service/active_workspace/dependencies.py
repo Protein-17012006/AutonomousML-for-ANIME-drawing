@@ -4,7 +4,10 @@ from __future__ import annotations
 from fastapi import Request
 
 from service.active_workspace.service import ActiveWorkspaceService
-from service.active_workspace.store import InMemoryActiveWorkspaceStore
+from service.active_workspace.store import (
+    InMemoryActiveWorkspaceStore,
+    InMemoryWorkspaceAssetStore,
+)
 
 
 def _default_store():
@@ -34,10 +37,36 @@ def _default_store():
         return InMemoryActiveWorkspaceStore()
 
 
-def configure_active_workspace(app, *, store=None, publisher=None,
+def _default_assets():
+    """S3 when the artifact bucket is configured, memory otherwise — the same
+    trade as `_default_store`, and it must move with it: a durable workspace
+    whose assets vanished would hand a resume a URL with nothing behind it."""
+    from service.core.config import SessionHistorySettings
+
+    try:
+        settings = SessionHistorySettings.from_env()
+    except Exception:                            # noqa: BLE001 — never block startup
+        return InMemoryWorkspaceAssetStore()
+    if not settings.enabled or not settings.artifact_bucket:
+        return InMemoryWorkspaceAssetStore()
+    try:
+        import boto3
+
+        from service.active_workspace.adapters import S3WorkspaceAssetStore
+
+        return S3WorkspaceAssetStore(
+            boto3.client("s3", region_name=settings.region),
+            bucket=settings.artifact_bucket)
+    except Exception:                            # noqa: BLE001 — degrade, don't crash
+        return InMemoryWorkspaceAssetStore()
+
+
+def configure_active_workspace(app, *, store=None, publisher=None, assets=None,
                                max_idle_seconds: float = 300.0) -> None:
     app.state.active_workspace = ActiveWorkspaceService(
-        store if store is not None else _default_store(), publisher=publisher)
+        store if store is not None else _default_store(),
+        publisher=publisher,
+        assets=assets if assets is not None else _default_assets())
     # A stream is not immortal. The client reconnects 1s after onerror, so a
     # bounded lifetime costs a reconnect rather than a lost run, and it stops a
     # dropped connection pinning a worker forever.

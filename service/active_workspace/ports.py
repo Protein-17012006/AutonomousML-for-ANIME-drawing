@@ -20,3 +20,13 @@ class ActiveWorkspaceStore(Protocol):
     def delete(self, workspace_id: str, owner_sub: str) -> None: ...
 
     def set_active(self, owner_sub: str, workspace_id: str | None) -> None: ...
+
+
+class WorkspaceAssetStore(Protocol):
+    """The artist's ORIGINAL uploads, kept so a resume on a machine whose
+    IndexedDB is empty can rebuild the File objects it needs."""
+
+    def put(self, workspace_id: str, name: str, body: bytes,
+            content_type: str) -> None: ...
+
+    def get(self, workspace_id: str, name: str) -> tuple[bytes, str] | None: ...

@@ -192,3 +192,37 @@ class DynamoActiveWorkspaceStore:
                 "kind": "active_workspace_pointer",
                 "workspace_id": workspace_id,
             })
+
+
+class S3WorkspaceAssetStore:
+    """The artist's original uploads, kept beside the session artifacts.
+
+    Its own key prefix, never `artifacts/<pid>/`: those are the published
+    outputs a session-history route will serve, and an input filename landing
+    among them could shadow one.
+    """
+
+    PREFIX = "active-workspace"
+
+    def __init__(self, s3, *, bucket: str):
+        self.s3 = s3
+        self.bucket = bucket
+
+    def _key(self, workspace_id: str, name: str) -> str:
+        return f"{self.PREFIX}/{workspace_id}/{name}"
+
+    def put(self, workspace_id: str, name: str, body: bytes,
+            content_type: str) -> None:
+        self.s3.put_object(Bucket=self.bucket,
+                           Key=self._key(workspace_id, name),
+                           Body=body,
+                           ContentType=content_type or "application/octet-stream")
+
+    def get(self, workspace_id: str, name: str) -> tuple[bytes, str] | None:
+        try:
+            response = self.s3.get_object(Bucket=self.bucket,
+                                          Key=self._key(workspace_id, name))
+        except Exception:                       # noqa: BLE001 — absent or unreadable
+            return None
+        return (response["Body"].read(),
+                response.get("ContentType") or "application/octet-stream")

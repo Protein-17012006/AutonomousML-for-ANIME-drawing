@@ -80,6 +80,7 @@ def stream_session(key_arrays: list[np.ndarray], engines: str, *,
                    history_pid: str | None = None,
                    workspace_input: dict | None = None,
                    workspace_service=None,
+                   workspace_assets=None,
                    gt_frames: list | None = None) -> StreamingResponse:
     """Start one run and adapt its pair/result callbacks to an SSE response."""
     cfg = model_or_422(
@@ -117,6 +118,12 @@ def stream_session(key_arrays: list[np.ndarray], engines: str, *,
                     owner_sub, upload=upload).workspace_id
             except Exception:                   # noqa: BLE001 — best effort
                 workspace_id = None
+            if workspace_id is not None and workspace_assets:
+                try:
+                    workspace_service.record_assets(
+                        workspace_id, owner_sub, workspace_assets)
+                except Exception:               # noqa: BLE001 — best effort
+                    pass
 
         def record(name, data):
             if workspace_id is None:

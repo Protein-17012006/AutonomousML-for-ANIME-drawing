@@ -89,6 +89,26 @@ def stream_active_workspace(
     return StreamingResponse(generate(), media_type="text/event-stream")
 
 
+@router.get("/{workspace_id}/assets/{name}")
+def get_active_workspace_asset(
+    workspace_id: str,
+    name: str,
+    user: CurrentUser = Depends(require_current_user),
+    service=Depends(get_active_workspace_service),
+):
+    """One of the artist's original uploads, for a resume where IndexedDB is
+    empty. 404 for anyone but the owner — the URL is guessable by construction,
+    so the check lives behind it, not in it."""
+    if service is None:
+        raise HTTPException(status_code=404, detail=NOT_FOUND)
+    stored = service.read_asset(workspace_id, user.sub, name)
+    if stored is None:
+        raise HTTPException(status_code=404, detail=NOT_FOUND)
+    body, content_type = stored
+    return Response(content=body,
+                    media_type=content_type or "application/octet-stream")
+
+
 @router.post("/{workspace_id}/publish")
 def publish_active_workspace(
     workspace_id: str,

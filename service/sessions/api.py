@@ -36,6 +36,27 @@ def _owned_draft_pid(request: Request, pid: str | None, owner_sub: str | None) -
     return pid
 
 
+def _captured_uploads(uploads, *, wanted: bool) -> list[tuple[str, bytes, str]]:
+    """The raw bytes of what the artist uploaded, re-wound for the ingest path.
+
+    Only collected for a signed-in run with a workspace to hold them, because it
+    is a second copy in memory and nothing anonymous will ever read it back.
+    """
+    if not wanted:
+        return []
+    captured = []
+    for item in uploads:
+        try:
+            item.file.seek(0)
+            data = item.file.read()
+            item.file.seek(0)
+        except Exception:                       # noqa: BLE001 — never block a run
+            continue
+        captured.append((_safe_filename(item.filename), data,
+                         item.content_type or "application/octet-stream"))
+    return captured
+
+
 def _safe_filename(value: str | None) -> str:
     name = pathlib.PurePath(value or "upload").name
     return name[:128] or "upload"
@@ -59,11 +80,15 @@ def post_session(
     selected_engine = engines or default_engine()
     owner_sub = request_user_sub(request)
     durable_pid = _owned_draft_pid(request, history_pid, owner_sub)
+    workspaces = get_active_workspace_service(request)
+    captured = _captured_uploads(
+        keys, wanted=bool(owner_sub and workspaces is not None))
     return runtime.stream_session(
         runtime.load_keys(keys), selected_engine, interpolator=interpolator,
         cadence_fps=cadence, smoothness=smoothness, show=show or None,
         repository=repository, owner_sub=owner_sub, history_pid=durable_pid,
-        workspace_service=get_active_workspace_service(request),
+        workspace_service=workspaces,
+        workspace_assets=captured,
         workspace_input={
             "mode": "frames",
             "label": f"{len(keys)} keyframes",
@@ -92,6 +117,9 @@ def post_session_video(
     clip's own native fps / effective stride, not guessed, so the badge reflects reality."""
     owner_sub = request_user_sub(request)
     durable_pid = _owned_draft_pid(request, history_pid, owner_sub)
+    workspaces = get_active_workspace_service(request)
+    captured = _captured_uploads(
+        [video], wanted=bool(owner_sub and workspaces is not None))
     key_arrays, gt_frames, eff_stride, source_frames, source_fps = runtime.load_video_keys(
         video, stride)
     cadence_fps = round(source_fps / eff_stride) or 1
@@ -108,7 +136,8 @@ def post_session_video(
         smoothness=smoothness, sampling=sampling, show=show or None,
         gt_frames=gt_frames,
         repository=repository, owner_sub=owner_sub, history_pid=durable_pid,
-        workspace_service=get_active_workspace_service(request),
+        workspace_service=workspaces,
+        workspace_assets=captured,
         workspace_input={
             "mode": "video",
             "label": _safe_filename(video.filename),

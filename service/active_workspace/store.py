@@ -51,3 +51,18 @@ class InMemoryActiveWorkspaceStore:
                 self._active.pop(owner_sub, None)
             else:
                 self._active[owner_sub] = workspace_id
+
+
+class InMemoryWorkspaceAssetStore:
+    """Uploaded inputs held in the process. Same caveat as the workspace store:
+    fine for a single box, gone at the next restart."""
+
+    def __init__(self) -> None:
+        self._blobs: dict[tuple[str, str], tuple[bytes, str]] = {}
+
+    def put(self, workspace_id: str, name: str, body: bytes,
+            content_type: str) -> None:
+        self._blobs[(workspace_id, name)] = (bytes(body), content_type)
+
+    def get(self, workspace_id: str, name: str) -> tuple[bytes, str] | None:
+        return self._blobs.get((workspace_id, name))

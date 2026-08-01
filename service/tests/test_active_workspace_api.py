@@ -201,3 +201,36 @@ def test_another_owner_can_neither_publish_nor_discard(workspaces):
     assert intruder.delete(f"/active-workspace/{workspace.workspace_id}",
                            headers={"Origin": ORIGIN}).status_code == 404
     assert workspaces.active_for("owner-1") is not None
+
+
+# --- uploaded inputs, served back for a resume on another device ----------------
+
+def test_an_uploaded_input_is_served_back_to_its_owner(workspaces):
+    workspace = workspaces.open_workspace("owner-1", upload=_snapshot().upload)
+    workspaces.record_assets(workspace.workspace_id, "owner-1",
+                             [("0.png", b"\x89PNG-bytes", "image/png")])
+    client = _login("owner-1")
+
+    url = workspaces.active_for("owner-1").artifact_urls["0.png"]
+    response = client.get(url, headers={"Origin": ORIGIN})
+    assert response.status_code == 200
+    assert response.content == b"\x89PNG-bytes"
+
+
+def test_another_owner_cannot_fetch_an_uploaded_input(workspaces):
+    workspace = workspaces.open_workspace("owner-1", upload=_snapshot().upload)
+    workspaces.record_assets(workspace.workspace_id, "owner-1",
+                             [("0.png", b"\x89PNG-bytes", "image/png")])
+    url = workspaces.active_for("owner-1").artifact_urls["0.png"]
+    assert _login("owner-2").get(url, headers={"Origin": ORIGIN}).status_code == 404
+
+
+def test_an_asset_name_cannot_escape_its_workspace(workspaces):
+    """The name reaches an object key, so a traversal attempt must 404 rather
+    than resolve anywhere."""
+    workspace = workspaces.open_workspace("owner-1", upload=_snapshot().upload)
+    client = _login("owner-1")
+    response = client.get(
+        f"/active-workspace/{workspace.workspace_id}/assets/..%2F..%2Fsecret",
+        headers={"Origin": ORIGIN})
+    assert response.status_code == 404

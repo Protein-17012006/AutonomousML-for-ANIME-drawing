@@ -3,16 +3,20 @@ from __future__ import annotations
 
 import uuid
 
+import pathlib
+
 from service.active_workspace.models import (
     EVENT_NAMES,
     ActiveWorkspace,
+    WorkspaceAsset,
     WorkspaceEvent,
 )
 
 
 class ActiveWorkspaceService:
-    def __init__(self, store, publisher=None) -> None:
+    def __init__(self, store, publisher=None, assets=None) -> None:
         self._store = store
+        self._assets = assets
         # Promotes a finished workspace to a `complete` catalog session and
         # returns its pid. Injected rather than imported so the domain does not
         # depend on DynamoDB or S3 to be tested.
@@ -84,6 +88,47 @@ class ActiveWorkspaceService:
         if workspace is None:
             return None
         return [event for event in workspace.events if event.sequence > after]
+
+    def record_assets(self, workspace_id: str, owner_sub: str,
+                      uploads) -> ActiveWorkspace | None:
+        """Keep the artist's ORIGINAL uploads and publish a URL for each.
+
+        This is what a resume on a SECOND device needs: there, IndexedDB holds
+        nothing, and the client throws "The active workspace is missing a
+        protected input URL." for any asset without an entry in `artifact_urls`.
+        So the two must be written together — an asset with no URL is worse than
+        no asset at all.
+        """
+        workspace = self._store.get_owned(workspace_id, owner_sub)
+        if workspace is None or self._assets is None:
+            return None
+        for name, body, content_type in uploads:
+            safe = pathlib.PurePosixPath(str(name)).name
+            if not safe or safe != str(name):
+                continue                       # never let a name shape a key
+            kind = "input-video" if safe.lower().endswith(
+                (".mp4", ".mov", ".webm", ".avi", ".mkv")) else "input-key"
+            try:
+                self._assets.put(workspace.workspace_id, safe, body, content_type)
+            except Exception:                  # noqa: BLE001 — best effort
+                continue
+            workspace.assets.append(WorkspaceAsset(kind=kind, name=safe))
+            workspace.artifact_urls[safe] = (
+                f"/active-workspace/{workspace.workspace_id}/assets/{safe}")
+        self._store.save(workspace)
+        return workspace
+
+    def read_asset(self, workspace_id: str, owner_sub: str, name: str):
+        """Bytes for one uploaded input, or None. Ownership is re-checked here
+        rather than trusted from the URL, which is guessable by construction."""
+        if self._assets is None:
+            return None
+        if self._store.get_owned(workspace_id, owner_sub) is None:
+            return None
+        safe = pathlib.PurePosixPath(str(name)).name
+        if not safe or safe != str(name):
+            return None
+        return self._assets.get(workspace_id, safe)
 
     def record_snapshot(self, workspace_id: str, owner_sub: str,
                         snapshot) -> ActiveWorkspace | None:
