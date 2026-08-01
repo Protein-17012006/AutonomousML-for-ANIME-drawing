@@ -60,6 +60,20 @@ type PendingRun =
   | { kind: "frames"; files: File[] }
   | { kind: "video"; file: File };
 
+function insertReplacementKeys(
+  current: File[],
+  submitted: Record<number, { file: File; url: string }>,
+): File[] {
+  // The backend receives original gap indices and inserts in descending order,
+  // so each index remains anchored to the pre-refill timeline. Mirror that
+  // order here to keep every review pair aligned with its two key frames.
+  const expanded = [...current];
+  for (const index of Object.keys(submitted).map(Number).sort((a, b) => b - a)) {
+    expanded.splice(index + 1, 0, submitted[index].file);
+  }
+  return expanded;
+}
+
 export default function App() {
   const router = useRouter();
   // `keys` are media belonging to the displayed session. The
@@ -157,7 +171,10 @@ export default function App() {
     }
   }, []);
 
-  const hydratePublishedSession = useCallback(async (pid: string) => {
+  const hydratePublishedSession = useCallback(async (
+    pid: string,
+    { retainLiveSession = false }: { retainLiveSession?: boolean } = {},
+  ) => {
     const [selected, workspace] = await Promise.all([
       getMySession(pid),
       getMySessionWorkspace(pid),
@@ -168,17 +185,19 @@ export default function App() {
       return items.map((item) => (item.pid === selected.pid ? selected : item));
     });
 
-    setSelectedPid(selected.pid);
-    setActiveDraftPid(null);
-    keys.clear();
-    // A completed session owns only the media displayed in `keys`/its durable
-    // result. Do not carry a previous run's prospective composer files into
-    // this read-only view: `useFileSet.add` deliberately de-duplicates a
-    // reselected File, which otherwise makes a new upload look ignored until
-    // the artist presses Clear.
-    stagedKeys.clear();
-    setStagedVideoFile(null);
-    setStagedMode(workspace.upload.mode);
+    if (!retainLiveSession) {
+      setSelectedPid(selected.pid);
+      setActiveDraftPid(null);
+      keys.clear();
+      // A completed session owns only the media displayed in `keys`/its durable
+      // result. Do not carry a previous run's prospective composer files into
+      // this read-only view: `useFileSet.add` deliberately de-duplicates a
+      // reselected File, which otherwise makes a new upload look ignored until
+      // the artist presses Clear.
+      stagedKeys.clear();
+      setStagedVideoFile(null);
+      setStagedMode(workspace.upload.mode);
+    }
     setSessionMode(workspace.upload.mode);
     setUpload({
       media: workspace.upload.mode === "video" ? "video" : "keyframes",
@@ -189,7 +208,7 @@ export default function App() {
     // Durable history is read-only. Older workspace snapshots can contain a
     // runtime SID, but that ID must not turn the composer into a permanently
     // disabled "Saving session…" control after recovery.
-    setLiveSid(null);
+    if (!retainLiveSession) setLiveSid(null);
     setDurablePid(selected.pid);
     setQaTurns(workspace.qa.map((turn) => ({
       q: turn.question,
@@ -335,11 +354,14 @@ export default function App() {
   );
 
   const effKeyUrls = useMemo(() => {
-    if (keyUrls.length) return keyUrls;
     const sk = result?.key_urls;
-    if (!sk) return keyUrls;
-    const n = Object.keys(sk).length;
-    return Array.from({ length: n }, (_, i) => sk[String(i)] ?? "");
+    const serverUrls = sk
+      ? Array.from({ length: Object.keys(sk).length }, (_, i) => sk[String(i)] ?? "")
+      : [];
+    // Video sessions and durable reloads have server-owned key pixels. After
+    // a refill revision, prefer that complete map if the browser has fewer
+    // local files than the expanded timeline.
+    return serverUrls.length > keyUrls.length ? serverUrls : keyUrls;
   }, [keyUrls, result]);
 
   const clearAll = () => {
@@ -750,7 +772,9 @@ export default function App() {
     setReviewSubmit({ kind: "verdicts", phase: "Finalizing artist decisions" });
     void submitVerdicts(liveSid, verdicts, {
       onPair: () => undefined,
-      onResult: () => { void finalizeDurableReview(); },
+      // Keep the modal blocking until the durable snapshot has been fetched
+      // and applied; the review SSE result only confirms the server commit.
+      onResult: () => finalizeDurableReview(),
       onProgress: (phase) => setReviewSubmit({ kind: "verdicts", phase }),
       onError: (error) => setReviewSubmit({ kind: "verdicts", phase: "Could not submit", error }),
     });
@@ -764,7 +788,7 @@ export default function App() {
     setReviewSubmit({ kind: "keys", phase: "Preparing replacement keys" });
     void submitReplacementKeys(liveSid, Object.fromEntries(Object.entries(submitted).map(([index, item]) => [Number(index), item.file])), {
       onPair: () => undefined,
-      onResult: () => { void finalizeDurableReview(submitted); },
+      onResult: () => finalizeDurableReview(submitted),
       onProgress: (phase) => setReviewSubmit({ kind: "keys", phase }),
       onError: (error) => setReviewSubmit({ kind: "keys", phase: "Could not submit", error }),
     });
@@ -772,10 +796,15 @@ export default function App() {
 
   const finalizeDurableReview = async (submitted?: Record<number, { file: File; url: string }>) => {
     try {
-      if (submitted) discardStagedRefills();
+      if (submitted) {
+        keys.replace(insertReplacementKeys(keys.files, submitted));
+        discardStagedRefills();
+      }
       setVerdicts({});
       await loadHistory();
-      if (durablePid) await hydratePublishedSession(durablePid);
+      if (durablePid) {
+        await hydratePublishedSession(durablePid, { retainLiveSession: true });
+      }
       setReviewSubmit(null);
     } catch (error) {
       setReviewSubmit({ kind: submitted ? "keys" : "verdicts", phase: "Saved, but could not reload", error: error instanceof Error ? error.message : "Reload the session from history." });
@@ -1048,7 +1077,7 @@ export default function App() {
                 onVerdict={setVerdict}
                 onRefill={refillKey}
                 stagedRefills={stagedRefills}
-                canEdit={!!liveSid && !!durablePid && !selectedPid}
+                canEdit={!!liveSid && !!durablePid}
                 onSubmitVerdicts={submitReviewVerdicts}
                 onSubmitRefills={submitReviewKeys}
                 onDiscardStaged={discardStagedRefills}
@@ -1081,11 +1110,14 @@ export default function App() {
             if (!open && reviewSubmit?.error) setReviewSubmit(null);
           }}>
             <DialogContent showCloseButton={false} onEscapeKeyDown={(event) => event.preventDefault()} onPointerDownOutside={(event) => event.preventDefault()}>
-              <DialogHeader>
+              <DialogHeader className="items-center text-center">
                 <DialogTitle>{reviewSubmit?.kind === "keys" ? "Applying replacement keys" : "Submitting verdicts"}</DialogTitle>
-                <DialogDescription>{reviewSubmit?.error ?? reviewSubmit?.phase}</DialogDescription>
+                <DialogDescription className="flex items-center justify-center gap-2 text-center">
+                  {!reviewSubmit?.error && <LoaderCircle className="size-4 shrink-0 animate-spin" aria-label="Working" />}
+                  <span>{reviewSubmit?.error ?? reviewSubmit?.phase}</span>
+                </DialogDescription>
               </DialogHeader>
-              {!reviewSubmit?.error ? <LoaderCircle className="animate-spin text-muted-foreground" aria-label="Working" /> : (
+              {reviewSubmit?.error && (
                 <Button type="button" onClick={() => setReviewSubmit(null)}>Return to review</Button>
               )}
             </DialogContent>

@@ -15,6 +15,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from service.core.auth import request_user_sub
+from service.core.config import sse_keepalive_seconds
 from service.core.errors import (
     InvalidKeyImage, SessionNotFound,
 )
@@ -89,8 +90,11 @@ def _review_stream(job):
 
     def worker():
         try:
-            events.put(("progress", {"phase": "evaluating"}))
-            outcome = job()
+            def progress(phase: str) -> None:
+                events.put(("progress", {"phase": phase}))
+
+            progress("Waiting for GPU")
+            outcome = job(progress)
             events.put(("outcome", outcome))
         except Exception as exc:
             # A disconnected subscriber simply will not consume this event.
@@ -107,7 +111,15 @@ def _review_stream(job):
     def generate():
         try:
             while True:
-                kind, payload = events.get()
+                try:
+                    kind, payload = events.get(timeout=sse_keepalive_seconds())
+                except queue.Empty:
+                    # Review re-evaluation and durable S3/Dynamo publication can
+                    # run longer than a proxy's idle window. Keep this subscriber
+                    # alive just as the primary session stream does; the worker
+                    # remains independent if the browser still disconnects.
+                    yield ": ping\n\n"
+                    continue
                 if kind == "progress":
                     yield f"event: progress\ndata: {json.dumps(payload)}\n\n"
                 elif kind == "outcome":
@@ -120,7 +132,14 @@ def _review_stream(job):
             # Disconnecting only detaches this subscriber. The worker owns the
             # session pin/GPU lease until its durable revision is committed.
             thread.join(timeout=0.1)
-    return StreamingResponse(generate(), media_type="text/event-stream")
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 class _SnapshotFileResponse(FileResponse):
@@ -242,11 +261,13 @@ def post_keys(sid: int, request: Request, indices: list[int] = Form(...), keys: 
     owner_sub = request_user_sub(request)
     _reserve_review_job(sid, sessions)
 
-    def job():
+    def job(progress):
         try:
             lease = runtime.admission_for(state["cfg"].engines).acquire()
             try:
+                progress("Evaluating replacement keys")
                 outcome = runtime.review_for(sessions).add_keys(sid, drawn)
+                progress("Saving review revision")
                 published = runtime.publish_review(
                     sid, runtime.review_for(sessions).artifact_dir(sid), outcome,
                     owner_sub=owner_sub, pid=pid, workspace_input=workspace_input)
@@ -296,11 +317,13 @@ def post_feedback_batch(sid: int, request: Request, payload: VerdictBatchReq,
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     _reserve_review_job(sid, sessions)
 
-    def job():
+    def job(progress):
         try:
             lease = runtime.admission_for(state["cfg"].engines).acquire()
             try:
+                progress("Applying artist verdicts")
                 outcome = runtime.review_for(sessions).apply_verdicts(sid, values)
+                progress("Saving review revision")
                 published = runtime.publish_review(
                     sid, runtime.review_for(sessions).artifact_dir(sid), outcome,
                     owner_sub=voter_sub, pid=pid, workspace_input=workspace_input)

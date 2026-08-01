@@ -64,8 +64,8 @@ export function parseSSE(buffer: string): { events: SSEEvent[]; rest: string } {
 }
 
 export interface SessionHandlers {
-  onPair: (p: PairEvent) => void;
-  onResult: (r: ResultEvent) => void;
+  onPair: (p: PairEvent) => void | Promise<void>;
+  onResult: (r: ResultEvent) => void | Promise<void>;
   onError: (msg: string) => void;
   onPublish?: (event: { published: boolean; pid?: string; error?: string }) => void;
   onProgress?: (phase: string) => void;
@@ -90,10 +90,12 @@ function paintPairProgress(): Promise<void> {
 async function pumpSSE(
   body: ReadableStream<Uint8Array>,
   h: SessionHandlers,
+  { stopAfterResult = false }: { stopAfterResult?: boolean } = {},
 ): Promise<void> {
   const reader = body.getReader();
   const dec = new TextDecoder();
   let buf = "";
+  let terminal = false;
   for (;;) {
     const { value, done } = await reader.read();
     if (done) break;
@@ -110,13 +112,22 @@ async function pumpSSE(
     for (const e of events) {
       if (e.name === "pair") {
         if (isPairEvent(e.data)) {
-          h.onPair(e.data);
+          await h.onPair(e.data);
           await paintPairProgress();
         } else h.onError("The co-pilot returned an invalid pair event.");
       } else if (e.name === "result") {
-        if (isResultEvent(e.data)) h.onResult(e.data);
+        if (isResultEvent(e.data)) {
+          terminal = true;
+          await h.onResult(e.data);
+          // Review revisions have no later publish event: their result is
+          // emitted only after the durable revision commits. Stop here so a
+          // transport close after successful hydration cannot overwrite that
+          // success with a misleading browser "network error".
+          if (stopAfterResult) return;
+        }
         else h.onError("The co-pilot returned an invalid result event.");
       } else if (e.name === "error") {
+        terminal = true;
         if (isErrorEvent(e.data)) h.onError(e.data.message);
         else h.onError("The co-pilot returned an invalid error event.");
       } else if (e.name === "publish") {
@@ -127,6 +138,7 @@ async function pumpSSE(
       }
     }
   }
+  if (!terminal) h.onError("The co-pilot stream ended before it returned a result.");
 }
 
 export async function submitVerdicts(
@@ -134,16 +146,20 @@ export async function submitVerdicts(
   verdicts: Record<number, "accept" | "reject">,
   h: SessionHandlers,
 ): Promise<void> {
-  const resp = await authenticatedFetch(`/session/${sid}/feedback/batch`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ verdicts: Object.entries(verdicts).map(([pair_index, verdict]) => ({ pair_index: Number(pair_index), verdict })) }),
-  });
-  if (!resp.ok || !resp.body) {
-    h.onError(`Submit verdicts failed: ${resp.status}`);
-    return;
+  try {
+    const resp = await authenticatedFetch(`/session/${sid}/feedback/batch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ verdicts: Object.entries(verdicts).map(([pair_index, verdict]) => ({ pair_index: Number(pair_index), verdict })) }),
+    });
+    if (!resp.ok || !resp.body) {
+      h.onError(`Submit verdicts failed: ${resp.status}`);
+      return;
+    }
+    await pumpSSE(resp.body, h, { stopAfterResult: true });
+  } catch (error) {
+    h.onError(error instanceof Error ? `Submit verdicts failed: ${error.message}` : "Submit verdicts failed.");
   }
-  await pumpSSE(resp.body, h);
 }
 
 export async function submitReplacementKeys(
@@ -151,17 +167,21 @@ export async function submitReplacementKeys(
   keys: Record<number, File>,
   h: SessionHandlers,
 ): Promise<void> {
-  const body = new FormData();
-  for (const [index, file] of Object.entries(keys)) {
-    body.append("indices", index);
-    body.append("keys", file);
+  try {
+    const body = new FormData();
+    for (const [index, file] of Object.entries(keys)) {
+      body.append("indices", index);
+      body.append("keys", file);
+    }
+    const resp = await authenticatedFetch(`/session/${sid}/keys`, { method: "POST", body });
+    if (!resp.ok || !resp.body) {
+      h.onError(`Submit replacement keys failed: ${resp.status}`);
+      return;
+    }
+    await pumpSSE(resp.body, h, { stopAfterResult: true });
+  } catch (error) {
+    h.onError(error instanceof Error ? `Submit replacement keys failed: ${error.message}` : "Submit replacement keys failed.");
   }
-  const resp = await authenticatedFetch(`/session/${sid}/keys`, { method: "POST", body });
-  if (!resp.ok || !resp.body) {
-    h.onError(`Submit replacement keys failed: ${resp.status}`);
-    return;
-  }
-  await pumpSSE(resp.body, h);
 }
 
 /** POST keyframes, stream the SSE decision-log, dispatch each event to handlers. */
