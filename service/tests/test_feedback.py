@@ -133,6 +133,16 @@ def test_dynamo_store_key_shape():
     assert ("SESSION#7", "PAIR#3#VOTER#sub-1") in table.rows
 
 
+def test_dynamo_batch_upsert_uses_idempotent_puts():
+    table = _FakeTable()
+    store = DynamoFeedbackStore(table=table)
+    store.upsert_many([_rec(sid=7, pair=3), _rec(sid=7, pair=4)])
+    assert set(table.rows) == {
+        ("SESSION#7", "PAIR#3#VOTER#anon"),
+        ("SESSION#7", "PAIR#4#VOTER#anon"),
+    }
+
+
 def test_dynamo_from_row_parses_real_all_decimal_shape():
     """Real DynamoDB returns every numeric attribute as decimal.Decimal, not the
     Python int/float boto3's docs sometimes suggest — pin that _from_row copes."""

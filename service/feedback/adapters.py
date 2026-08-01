@@ -91,16 +91,14 @@ class DynamoFeedbackStore:
         return row
 
     def upsert_many(self, records: list[FeedbackRecord]) -> list[FeedbackRecord]:
-        if len(records) > 100:
-            raise ValueError("feedback batch exceeds DynamoDB transaction limit")
-        from boto3.dynamodb.types import TypeSerializer
-        serializer = TypeSerializer()
-        self.table.meta.client.transact_write_items(
-            TransactItems=[{"Put": {"TableName": self.table.name, "Item": {
-                key: serializer.serialize(value)
-                for key, value in self._row(record).items()
-            }}} for record in records]
-        )
+        # Feedback is calibration telemetry, not the durable review commit.
+        # The review workspace has already been persisted before this method is
+        # called, so a DynamoDB transaction adds failure coupling without any
+        # user-visible consistency benefit. Individual idempotent puts also
+        # avoid TransactWriteItems validation/cancellation failures on existing
+        # feedback tables.
+        for record in records:
+            self.table.put_item(Item=self._row(record))
         return records
 
     def list_session(self, sid: int) -> list[FeedbackRecord]:

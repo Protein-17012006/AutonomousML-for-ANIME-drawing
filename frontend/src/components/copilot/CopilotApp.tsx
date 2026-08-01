@@ -171,6 +171,14 @@ export default function App() {
     setSelectedPid(selected.pid);
     setActiveDraftPid(null);
     keys.clear();
+    // A completed session owns only the media displayed in `keys`/its durable
+    // result. Do not carry a previous run's prospective composer files into
+    // this read-only view: `useFileSet.add` deliberately de-duplicates a
+    // reselected File, which otherwise makes a new upload look ignored until
+    // the artist presses Clear.
+    stagedKeys.clear();
+    setStagedVideoFile(null);
+    setStagedMode(workspace.upload.mode);
     setSessionMode(workspace.upload.mode);
     setUpload({
       media: workspace.upload.mode === "video" ? "video" : "keyframes",
@@ -191,7 +199,7 @@ export default function App() {
     setVerdicts({});
     setRunning(false);
     setView("chat");
-  }, [keys]);
+  }, [keys, stagedKeys]);
 
   const finishRecoveredPublication = useCallback(async (pid: string) => {
     // Stop accepting cache writes before awaiting durable reads. The publish
@@ -488,6 +496,18 @@ export default function App() {
   const importVideo = (file: File) => {
     changeMode("video");
     setStagedVideoFile(file);
+  };
+
+  const removeComposerFrame = (file: File) => {
+    stagedKeys.remove(file);
+  };
+
+  const setComposerVideo = (file: File | null) => {
+    if (file) {
+      importVideo(file);
+      return;
+    }
+    setStagedVideoFile(null);
   };
 
   const beginFrameRun = async (files: File[]) => {
@@ -993,8 +1013,8 @@ export default function App() {
               <ChatComposer
                 files={stagedKeys.files}
                 fileUrls={stagedKeyUrls}
-                onAdd={stagedKeys.add}
-                onRemove={stagedKeys.remove}
+                onAdd={importFrames}
+                onRemove={removeComposerFrame}
                 onClear={clearComposerInputs}
                 mode={stagedMode}
                 onModeChange={changeMode}
@@ -1005,7 +1025,7 @@ export default function App() {
                 smoothness={smoothness}
                 setSmoothness={setSmoothness}
                 videoFile={stagedVideoFile}
-                onVideo={setStagedVideoFile}
+                onVideo={setComposerVideo}
                 stride={stride}
                 setStride={setStride}
                 onRun={run}

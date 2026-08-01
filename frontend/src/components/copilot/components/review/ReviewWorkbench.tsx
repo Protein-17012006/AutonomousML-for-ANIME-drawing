@@ -77,6 +77,12 @@ export function ReviewWorkbench({
           : abstained;
     return { filled, gaps, passed, abstained, shown };
   }, [filledFilter, filter, log]);
+  const hasAllVerdicts = abstained.length > 0 && abstained.every(
+    (pair) => verdicts[pair.index] != null,
+  );
+  const missingVerdicts = abstained.filter(
+    (pair) => verdicts[pair.index] == null,
+  ).length;
 
   const video = result?.artifacts?.video;
   // absent on old sessions and on runs where every gap was refused
@@ -359,7 +365,7 @@ export function ReviewWorkbench({
             )}
             {!running && (
               <div className="review-submit">
-                {!canEdit ? <p>This saved session is read-only.</p> : filter === "needs_key" ? (
+                {!canEdit ? <p className="review-readonly">This saved session is read-only.</p> : filter === "needs_key" ? (
                   <>
                     <Button type="button" onClick={onSubmitRefills} disabled={gaps.length === 0 || gaps.some((pair) => !stagedRefills[pair.index])}>
                       Submit replacement keys
@@ -367,7 +373,14 @@ export function ReviewWorkbench({
                     {Object.keys(stagedRefills).length > 0 && <Button type="button" variant="ghost" onClick={onDiscardStaged}>Discard staged keys</Button>}
                   </>
                 ) : filledFilter === "abstain" ? (
-                  <Button type="button" onClick={onSubmitVerdicts} disabled={Object.keys(verdicts).length === 0}>Submit verdicts</Button>
+                  <div className="review-verdict-submit">
+                    <Button type="button" onClick={onSubmitVerdicts} disabled={!hasAllVerdicts}>
+                      Submit verdicts
+                    </Button>
+                    {missingVerdicts > 0 && (
+                      <span>{missingVerdicts} decision{missingVerdicts === 1 ? "" : "s"} remaining</span>
+                    )}
+                  </div>
                 ) : null}
               </div>
             )}

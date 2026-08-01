@@ -499,6 +499,35 @@ body:has(.copilot-shell) {
 .review-actions {
   margin-left: auto;
 }
+.review-submit {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 20px;
+  padding: 14px 16px 4px;
+  border-top: 1px solid var(--color-line);
+}
+.review-verdict-submit {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.review-verdict-submit span {
+  color: var(--color-ash);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.03em;
+}
+.review-readonly {
+  margin: 0;
+  padding: 9px 12px;
+  border-left: 2px solid var(--color-ao);
+  background: color-mix(in oklab, var(--color-ao) 8%, var(--color-sumi-2));
+  color: var(--color-washi);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.035em;
+}
 .recon-workspace {
   display: flex;
   flex: 1;

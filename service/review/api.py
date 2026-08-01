@@ -271,6 +271,18 @@ def post_feedback_batch(sid: int, request: Request, payload: VerdictBatchReq,
     state = sessions.state_for(sid)
     if state is None:
         raise HTTPException(status_code=404, detail="Unknown or expired session")
+    required = {
+        pair.index
+        for pair in state["result"].pairs
+        if pair.action != "needs_key"
+        and getattr(pair, "artist_verdict", None) is None
+        and getattr(getattr(pair, "qa", None), "status", None) in {"abstain", "flag"}
+    }
+    if set(values) != required:
+        raise HTTPException(
+            status_code=422,
+            detail="Choose Keep or Redraw for every pair awaiting an artist verdict",
+        )
     pid = state.get("published_pid")
     if not isinstance(pid, str) or not pid:
         raise HTTPException(status_code=409, detail="Session is still being saved")
@@ -294,9 +306,13 @@ def post_feedback_batch(sid: int, request: Request, payload: VerdictBatchReq,
                     owner_sub=voter_sub, pid=pid, workspace_input=workspace_input)
                 if not published.get("published"):
                     raise RuntimeError(published.get("error") or "Could not save review revision")
-                # Calibration records are written only after the live review revision
-                # has committed; a disconnected browser therefore creates no feedback.
-                feedback_store_for(request.app).upsert_many(records)
+                # Calibration feedback is non-authoritative telemetry. Never
+                # turn a successfully published artist decision into an SSE
+                # error merely because its optional analytics write fails.
+                try:
+                    feedback_store_for(request.app).upsert_many(records)
+                except Exception as exc:  # noqa: BLE001 - durable review already committed
+                    print(f"[feedback] WARN persistence failed after review publish: {exc}", flush=True)
                 return outcome
             finally:
                 lease.release()
