@@ -1,6 +1,12 @@
 import { Gauge, ShieldCheck, Sparkles, Users } from "lucide-react";
 
 // Four product principles, designed for text-first scanning rather than numeric stats.
+//
+// These were four statistics — "40% faster", "99.2% on-model", "1M+ frames
+// vouched", "12k+ artists" — presented as measurement. Nothing in the project
+// supports any of them, and there is no external user base for the last one to
+// describe. Keep these as claims an artist can check by using the product; an
+// invented number is the easiest thing on a page to be taken apart on.
 const MILESTONES = [
   {
     icon: Gauge,
