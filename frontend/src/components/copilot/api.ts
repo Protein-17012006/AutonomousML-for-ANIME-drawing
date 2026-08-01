@@ -187,7 +187,11 @@ export async function runVideoSession(
   await pumpSSE(resp.body, h);
 }
 
-/** Grounded session Q&A — answers only from retained session facts. */
+/** Grounded session Q&A — answers only from retained session facts.
+ *
+ * Superseded by askAgent for the chat surface, but kept and still used: the
+ * agent is rate-limited and this is not, so a burst of questions degrades to a
+ * plain answer instead of an error. */
 export async function askQuestion(
   sid: string,
   question: string,
@@ -201,4 +205,261 @@ export async function askQuestion(
   const data: unknown = await resp.json();
   if (!isAskResponse(data)) throw new Error("Invalid /ask response");
   return data;
+}
+
+/* ---------------------------------------------------------------------------
+ * The agent.
+ *
+ * /ask answers questions. The agent answers questions AND may propose ONE tool
+ * call — which is all it can do: the server decides nothing is executed until
+ * the artist accepts it, and refuses proposals it will not honour rather than
+ * letting the reply promise something that cannot happen.
+ * ------------------------------------------------------------------------- */
+
+export type AgentToolName =
+  | "explain_pair"
+  | "show_annotated"
+  | "open_board"
+  | "export_bundle"
+  | "rerun_session"
+  | "remember_memory";
+
+export interface AgentAction {
+  tool: AgentToolName;
+  args: Record<string, unknown>;
+  /** The server will not run this until the artist explicitly confirms, and it
+   *  re-checks on the way in. The UI must never quietly skip it. */
+  needs_confirm: boolean;
+  label: string;
+}
+
+export interface AgentReply {
+  say: string;
+  grounded: boolean;
+  action: AgentAction | null;
+  followups: string[];
+  /** Present when the model named a tool the server refused. Its prose may
+   *  still describe the action, so the artist is told it will not happen
+   *  rather than shown a promise with no button. */
+  rejected_tool?: string;
+}
+
+const TOOL_NAMES: AgentToolName[] = [
+  "explain_pair",
+  "show_annotated",
+  "open_board",
+  "export_bundle",
+  "rerun_session",
+  "remember_memory",
+];
+
+function asAction(value: unknown): AgentAction | null {
+  if (typeof value !== "object" || value === null) return null;
+  const raw = value as Record<string, unknown>;
+  if (!TOOL_NAMES.includes(raw.tool as AgentToolName)) return null;
+  return {
+    tool: raw.tool as AgentToolName,
+    args:
+      typeof raw.args === "object" && raw.args !== null
+        ? (raw.args as Record<string, unknown>)
+        : {},
+    // Absent or malformed means confirm. Defaulting the other way would let a
+    // bad payload run a re-render the artist never asked for.
+    needs_confirm: raw.needs_confirm !== false,
+    label: typeof raw.label === "string" ? raw.label : "Run",
+  };
+}
+
+/** One agent turn. The server keeps the chat history, so only the message goes. */
+export async function askAgent(
+  sid: string,
+  message: string,
+): Promise<AgentReply> {
+  const resp = await authenticatedFetch(`/session/${sid}/agent`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message }),
+  });
+  if (resp.status === 429) {
+    throw new Error("Too many questions at once — give it a moment.");
+  }
+  if (!resp.ok) throw new Error(`/agent failed: ${resp.status}`);
+  const data: unknown = await resp.json();
+  if (typeof data !== "object" || data === null) {
+    throw new Error("Invalid /agent response");
+  }
+  const raw = data as Record<string, unknown>;
+  return {
+    say: typeof raw.say === "string" ? raw.say : "",
+    grounded: raw.grounded === true,
+    action: asAction(raw.action),
+    followups: Array.isArray(raw.followups)
+      ? raw.followups.filter((item): item is string => typeof item === "string")
+      : [],
+    rejected_tool:
+      typeof raw.rejected_tool === "string" ? raw.rejected_tool : undefined,
+  };
+}
+
+/** Re-run the retained keys with changed settings; same SSE contract as /session. */
+export async function rerunSession(
+  sid: string,
+  args: { cadence?: number; smoothness?: number; interpolator?: string },
+  h: SessionHandlers,
+): Promise<void> {
+  const fd = new FormData();
+  if (args.cadence != null) fd.append("cadence", String(args.cadence));
+  if (args.smoothness != null) fd.append("smoothness", String(args.smoothness));
+  if (args.interpolator) fd.append("interpolator", args.interpolator);
+  const resp = await authenticatedFetch(`/session/${sid}/rerun`, {
+    method: "POST",
+    body: fd,
+  });
+  if (!resp.ok || !resp.body) {
+    h.onError(`Re-run failed: ${resp.status}`);
+    return;
+  }
+  await pumpSSE(resp.body, h);
+}
+
+/** Save one confirmed preference. The server re-validates key and value. */
+export async function rememberMemory(
+  args: Record<string, unknown>,
+): Promise<void> {
+  const resp = await authenticatedFetch("/me/memories", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(args),
+  });
+  if (!resp.ok) throw new Error(`Could not save that (${resp.status}).`);
+}
+
+/**
+ * The artist's keep/redraw call on one pair.
+ *
+ * This is the per-show calibration signal the QA thresholds are refit against,
+ * so it is the artist's OWN verdict that matters — not a second opinion widget
+ * bolted next to it. The board already had this control; it just never left the
+ * browser.
+ */
+export async function sendFeedback(
+  sid: string,
+  pairIndex: number,
+  vote: "up" | "down",
+): Promise<void> {
+  const resp = await authenticatedFetch(`/session/${sid}/feedback`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pair_index: pairIndex, vote }),
+  });
+  if (!resp.ok) throw new Error(`Could not record that (${resp.status}).`);
+}
+
+/* ---------------------------------------------------------------------------
+ * The orchestration layer.
+ *
+ * The single-turn agent answers and proposes one tool. This plans a goal into
+ * steps, addresses named specialists, and streams every utterance as it
+ * happens — the transcript is live, not a recording replayed afterwards.
+ *
+ * It is deliberately NOT the default path for every message: it has never been
+ * user-facing, and a planner deciding what to do with an artist's cut is a
+ * bigger promise than answering their question. The artist opts in.
+ * ------------------------------------------------------------------------- */
+
+export interface TranscriptEntry {
+  seq: number;
+  /** who spoke and who they addressed — "orchestrator" or an agent name. */
+  frm: string;
+  to: string;
+  /** ask · reply · refuse · queue · error */
+  kind: string;
+  text: string;
+  data: Record<string, unknown>;
+  ms: number;
+}
+
+export interface OrchestrationHandlers {
+  onEntry: (entry: TranscriptEntry) => void;
+  onDecision: (reply: AgentReply) => void;
+  onError: (message: string) => void;
+}
+
+function asEntry(value: unknown): TranscriptEntry | null {
+  if (typeof value !== "object" || value === null) return null;
+  const raw = value as Record<string, unknown>;
+  if (typeof raw.seq !== "number" || typeof raw.text !== "string") return null;
+  return {
+    seq: raw.seq,
+    frm: typeof raw.frm === "string" ? raw.frm : "?",
+    to: typeof raw.to === "string" ? raw.to : "?",
+    kind: typeof raw.kind === "string" ? raw.kind : "reply",
+    text: raw.text,
+    data:
+      typeof raw.data === "object" && raw.data !== null
+        ? (raw.data as Record<string, unknown>)
+        : {},
+    ms: typeof raw.ms === "number" ? raw.ms : 0,
+  };
+}
+
+/** Run one goal through the planner, streaming the conversation as it happens. */
+export async function runOrchestration(
+  sid: string,
+  message: string,
+  h: OrchestrationHandlers,
+): Promise<void> {
+  const resp = await authenticatedFetch(`/session/${sid}/orchestrate/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message }),
+  });
+  if (resp.status === 429) {
+    h.onError("Too many requests at once — give it a moment.");
+    return;
+  }
+  if (!resp.ok || !resp.body) {
+    h.onError(`The planner could not be reached (${resp.status}).`);
+    return;
+  }
+
+  const reader = resp.body.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    const { events, rest } = parseSSE(buf);
+    buf = rest;
+    for (const e of events) {
+      if (e.name === "agent") {
+        const entry = asEntry(e.data);
+        if (entry) h.onEntry(entry);
+      } else if (e.name === "decision") {
+        const raw = (e.data ?? {}) as Record<string, unknown>;
+        h.onDecision({
+          say: typeof raw.say === "string" ? raw.say : "",
+          grounded: raw.grounded === true,
+          action: asAction(raw.action),
+          followups: Array.isArray(raw.followups)
+            ? raw.followups.filter(
+                (item): item is string => typeof item === "string",
+              )
+            : [],
+          rejected_tool:
+            typeof raw.rejected_tool === "string" ? raw.rejected_tool : undefined,
+        });
+      } else if (e.name === "error") {
+        const raw = (e.data ?? {}) as Record<string, unknown>;
+        h.onError(
+          typeof raw.message === "string"
+            ? raw.message
+            : "The planner stopped unexpectedly.",
+        );
+      }
+      // `say` carries the same text the decision repeats, so it is ignored
+      // rather than rendered twice.
+    }
+  }
 }

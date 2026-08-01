@@ -2,7 +2,7 @@
 // drop keys/video (= send a session), tweak args behind ⚙, ask follow-ups in text.
 import { useState } from "react";
 import { KeyframeDropzone } from "../input/KeyframeDropzone";
-import { Settings } from "lucide-react";
+import { ListChecks, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -44,6 +44,8 @@ export function ChatComposer(p: {
   compact: boolean; // a session exists → fold the dropzone
   askEnabled: boolean; // result retained server-side → grounded Q&A available
   onAsk: (q: string) => void;
+  planMode: boolean;
+  onPlanModeChange: (on: boolean) => void;
 }) {
   const [q, setQ] = useState("");
   const [gearOpen, setGearOpen] = useState(false);
@@ -161,6 +163,25 @@ export function ChatComposer(p: {
         >
           <Settings />
         </Button>
+        {/* PLAN MODE — routes the next message through the planner instead of
+            the single-turn agent. Opt-in per message, and labelled with what it
+            actually changes rather than a brand name. */}
+        <Button
+          type="button"
+          variant={p.planMode ? "default" : "outline"}
+          size="icon"
+          className="shrink-0 rounded-full"
+          disabled={!p.askEnabled}
+          aria-pressed={p.planMode}
+          onClick={() => p.onPlanModeChange(!p.planMode)}
+          title={
+            p.planMode
+              ? "Plan mode on — the co-pilot will break the request into steps and show its working"
+              : "Plan mode off — one answer per question"
+          }
+        >
+          <ListChecks />
+        </Button>
         {/* USER PROMPT INPUT */}
         <label htmlFor="session-question" className="sr-only">
           Ask about this session
@@ -171,9 +192,11 @@ export function ChatComposer(p: {
           type="text"
           value={q}
           placeholder={
-            p.askEnabled
-              ? "Ask about this session — e.g. why was pair 3 flagged?"
-              : "Run a session to ask about its decisions"
+            !p.askEnabled
+              ? "Run a session to ask about its decisions"
+              : p.planMode
+                ? "Give it a goal — e.g. explain pair 3, then re-run smoother"
+                : "Ask about this session — e.g. why was pair 3 flagged?"
           }
           disabled={!p.askEnabled}
           onChange={(e) => setQ(e.target.value)}

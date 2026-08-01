@@ -5,7 +5,18 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { PairEvent, ResultEvent, InputMode } from "./types";
-import { runSession, runVideoSession, askQuestion } from "./api";
+import {
+  runSession,
+  runVideoSession,
+  askAgent,
+  askQuestion,
+  rerunSession,
+  rememberMemory,
+  sendFeedback,
+  runOrchestration,
+  type AgentAction,
+  type TranscriptEntry,
+} from "./api";
 import {
   type ChatMsg,
   deriveMessages,
@@ -13,12 +24,15 @@ import {
   type UserTurn,
 } from "./lib/chatModel";
 import { useFileSet } from "./lib/useFileSet";
+import { useActiveWorkspace } from "./lib/useActiveWorkspace";
+import { deleteCacheDatabase } from "./lib/workspaceCache";
 import { downloadBundle } from "./lib/exportSession";
 import { ChatHeader } from "./components/chat/ChatHeader";
 import { ChatView } from "./components/chat/ChatView";
 import { ChatComposer } from "./components/chat/ChatComposer";
 import { ChatWelcome } from "./components/chat/ChatWelcome";
 import { ReviewWorkbench } from "./components/review/ReviewWorkbench";
+import { ResumeWorkspaceDialog } from "./components/review/ResumeWorkspaceDialog";
 import { Toast } from "./components/review/Toast";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -66,7 +80,7 @@ export default function App() {
   const [verdicts, setVerdicts] = useState<Record<number, "accept" | "reject">>(
     {},
   );
-  const setVerdict = (idx: number, v: "accept" | "reject") =>
+  const setVerdict = (idx: number, v: "accept" | "reject") => {
     setVerdicts((prev) => {
       const n = { ...prev };
       if (n[idx] === v)
@@ -74,6 +88,16 @@ export default function App() {
       else n[idx] = v;
       return n;
     });
+    // The artist's own keep/redraw call IS the per-show calibration signal the
+    // QA thresholds are refit against. This control existed and never left the
+    // browser. Toggling OFF sends nothing: there is no retraction endpoint, and
+    // inventing one here would be guessing at what a withdrawn vote means.
+    if (liveSid && verdicts[idx] !== v) {
+      void sendFeedback(liveSid, idx, v === "accept" ? "up" : "down").catch(
+        (err) => console.warn("could not record that verdict", err),
+      );
+    }
+  };
 
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [stride, setStride] = useState("2");
@@ -87,6 +111,11 @@ export default function App() {
   const [boardFocus, setBoardFocus] = useState<number | null>(null);
   const [upload, setUpload] = useState<UserTurn | null>(null);
   const [qaTurns, setQaTurns] = useState<QaTurn[]>([]);
+  const [actionBusy, setActionBusy] = useState(false);
+  // Opt-in. The planner has never been user-facing, and deciding what to do with
+  // an artist's cut is a bigger promise than answering their question — so it is
+  // a choice they make per message, not a default applied to all of them.
+  const [planMode, setPlanMode] = useState(false);
 
   // Auth
   const [account, setAccount] = useState<SidebarAccount | null>(null);
@@ -116,6 +145,76 @@ export default function App() {
       setHistoryLoading(false);
     }
   }, []);
+  // The unfinished-run surface. It decides WHICH state to restore and where it
+  // comes from; these callbacks decide what restoring means, so the hook never
+  // reaches into the run's state itself.
+  const workspace = useActiveWorkspace({
+    onRestoreCached: (cached, assets) => {
+      keys.replace(assets.keys);
+      setVideoFile(assets.video);
+      setMode(cached.mode);
+      setUpload(cached.upload);
+      setLog(cached.log);
+      setResult(cached.result);
+      setLiveSid(sidFromResult(cached.result));
+      setVerdicts(cached.verdicts);
+      setActiveDraftPid(cached.activeDraftPid);
+      setView(cached.result ? "board" : "chat");
+    },
+    onRestoreSnapshot: (restored, files) => {
+      const snapshot = restored.snapshot;
+      keys.replace(files.keys);
+      setVideoFile(files.video);
+      setVerdicts({});
+      if (!snapshot) return;
+      setMode(snapshot.upload.mode === "video" ? "video" : "frames");
+      setUpload({
+        media: snapshot.upload.mode === "video" ? "video" : "keyframes",
+        count:
+          snapshot.upload.mode === "video"
+            ? 1
+            : snapshot.upload.filenames.length,
+      });
+      setLog(snapshot.pairs);
+      setResult(snapshot.result);
+      setLiveSid(sidFromResult(snapshot.result));
+      setView(snapshot.result ? "board" : "chat");
+    },
+    onEvent: (event) => {
+      if (event.name === "pair") {
+        const pair = event.data as unknown as PairEvent;
+        if (typeof pair.index !== "number") return;
+        // Replace by index rather than append: a replayed pair must not
+        // double up a row the artist is already looking at.
+        setLog((prev) =>
+          prev.some((item) => item.index === pair.index)
+            ? prev.map((item) => (item.index === pair.index ? pair : item))
+            : [...prev, pair],
+        );
+        setRunning(true);
+      } else if (event.name === "result") {
+        const finished = event.data as unknown as ResultEvent;
+        setResult(finished);
+        setLiveSid(sidFromResult(finished));
+        setRunning(false);
+      } else if (event.name === "error") {
+        setRunning(false);
+        setBanner(
+          typeof event.data.message === "string"
+            ? event.data.message
+            : "The recovered workspace stopped unexpectedly.",
+        );
+      }
+    },
+    onPublished: (pid) => {
+      setSelectedPid(pid);
+      setActiveDraftPid(null);
+      void loadHistory();
+    },
+  });
+
+  const { attach: workspaceAttach, adoptRunningWorkspace, saveState } = workspace;
+
   // Account Setup
   useEffect(() => {
     let active = true;
@@ -127,6 +226,7 @@ export default function App() {
           username: session.username,
         });
         void loadHistory();
+        void workspaceAttach(session.user_sub);
       })
       .catch((err) => {
         console.error("failed to load cookie session:", err);
@@ -135,7 +235,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [loadHistory, router]);
+  }, [loadHistory, router, workspaceAttach]);
 
   const keyUrls = useMemo(
     () => keys.files.map((f) => URL.createObjectURL(f)),
@@ -265,6 +365,7 @@ export default function App() {
       count: keys.files.length,
     });
     setRunning(true);
+    let claimed = false;
     try {
       await runSession(
         keys.files,
@@ -273,7 +374,15 @@ export default function App() {
         cadence,
         smoothness,
         {
-          onPair: (p) => setLog((prev) => [...prev, p]),
+          onPair: (p) => {
+            setLog((prev) => [...prev, p]);
+            // The first pair means the server has opened a workspace for this
+            // run. Claim it now so a reload from here can find its way back.
+            if (!claimed) {
+              claimed = true;
+              void adoptRunningWorkspace(keys.files, null);
+            }
+          },
           onResult: (r) => {
             setResult(r);
             setLiveSid(sidFromResult(r));
@@ -314,6 +423,7 @@ export default function App() {
       count: 1,
     });
     setRunning(true);
+    let claimed = false;
     try {
       await runVideoSession(
         videoFile,
@@ -323,7 +433,13 @@ export default function App() {
         engines,
         interpolator,
         {
-          onPair: (p) => setLog((prev) => [...prev, p]),
+          onPair: (p) => {
+            setLog((prev) => [...prev, p]);
+            if (!claimed) {
+              claimed = true;
+              void adoptRunningWorkspace([], videoFile);
+            }
+          },
           onResult: (r) => {
             setResult(r);
             setLiveSid(sidFromResult(r));
@@ -387,18 +503,73 @@ export default function App() {
     }
   };
 
+  // The chat used to call /ask, which answers and nothing more. It now calls the
+  // agent, which answers AND may propose one tool. Nothing it proposes runs
+  // here: acceptAction below is the only path, and the server refuses anything
+  // confirm-gated that arrives without one.
   const onAsk = async (q: string) => {
     if (!liveSid) return;
     const n = qaTurns.length;
     setQaTurns((prev) => [...prev, { q, answer: null }]);
+
+    if (planMode) {
+      const entries: TranscriptEntry[] = [];
+      noteTurn(n, { transcript: entries });
+      await runOrchestration(liveSid, q, {
+        onEntry: (entry) => {
+          // Pushed live so the artist watches the agents work instead of a
+          // spinner; a specialist refusing is the interesting part.
+          entries.push(entry);
+          noteTurn(n, { transcript: [...entries] });
+        },
+        onDecision: (r) =>
+          noteTurn(n, {
+            answer: r.say,
+            grounded: r.grounded,
+            action: r.action,
+            rejectedTool: r.rejected_tool,
+            followups: r.followups,
+          }),
+        onError: (message) =>
+          noteTurn(n, { answer: message, grounded: false }),
+      });
+      return;
+    }
+
     try {
-      const r = await askQuestion(liveSid, q);
+      const r = await askAgent(liveSid, q);
       setQaTurns((prev) =>
         prev.map((t, i) =>
-          i === n ? { ...t, answer: r.answer, grounded: r.grounded } : t,
+          i === n
+            ? {
+                ...t,
+                answer: r.say,
+                grounded: r.grounded,
+                action: r.action,
+                rejectedTool: r.rejected_tool,
+                followups: r.followups,
+              }
+            : t,
         ),
       );
-    } catch {
+    } catch (err) {
+      // The agent is rate-limited; /ask is not. Falling back answers the
+      // question the artist actually asked instead of showing them a limit.
+      if (err instanceof Error && err.message.includes("Too many")) {
+        try {
+          const plain = await askQuestion(liveSid, q);
+          setQaTurns((prev) =>
+            prev.map((t, i) =>
+              i === n
+                ? { ...t, answer: plain.answer, grounded: plain.grounded }
+                : t,
+            ),
+          );
+          return;
+        } catch {
+          // fall through to the generic message below
+        }
+      }
       setQaTurns((prev) =>
         prev.map((t, i) =>
           i === n
@@ -414,10 +585,129 @@ export default function App() {
     }
   };
 
+  const noteTurn = (turn: number, patch: Partial<(typeof qaTurns)[number]>) =>
+    setQaTurns((prev) => prev.map((t, i) => (i === turn ? { ...t, ...patch } : t)));
+
+  const dismissAction = (turn: number) =>
+    noteTurn(turn, { action: null, actionNote: null });
+
+  /**
+   * Carry out one accepted proposal.
+   *
+   * Board navigation and the bundle export happen here in the client; a re-run
+   * and a remembered preference go back to the server, which validates them
+   * again — this UI is not the thing that decides they are allowed.
+   */
+  const acceptAction = async (turn: number) => {
+    const action: AgentAction | null | undefined = qaTurns[turn]?.action;
+    if (!action || actionBusy) return;
+    setActionBusy(true);
+    try {
+      const index = typeof action.args.index === "number" ? action.args.index : null;
+      switch (action.tool) {
+        case "explain_pair":
+        case "show_annotated":
+        case "open_board":
+          if (index === null) throw new Error("That pair is no longer available.");
+          setBoardFocus(index);
+          setView("board");
+          noteTurn(turn, { actionDone: true, actionNote: `Opened pair ${index}.` });
+          break;
+        case "export_bundle":
+          if (!result) throw new Error("There is nothing to export yet.");
+          await downloadBundle(result);
+          noteTurn(turn, { actionDone: true, actionNote: "Bundle downloaded." });
+          break;
+        case "rerun_session": {
+          if (!liveSid) throw new Error("This session is no longer live.");
+          noteTurn(turn, { actionDone: true, actionNote: "Re-running…" });
+          setRunning(true);
+          setLog([]);
+          setResult(null);
+          setVerdicts({});
+          await rerunSession(
+            liveSid,
+            {
+              cadence:
+                typeof action.args.cadence === "number" ? action.args.cadence : undefined,
+              smoothness:
+                typeof action.args.smoothness === "number"
+                  ? action.args.smoothness
+                  : undefined,
+              interpolator:
+                typeof action.args.interpolator === "string"
+                  ? action.args.interpolator
+                  : undefined,
+            },
+            {
+              onPair: (p) => setLog((prev) => [...prev, p]),
+              onResult: (r) => {
+                setResult(r);
+                setLiveSid(sidFromResult(r));
+              },
+              onError: (m) => setBanner(m),
+            },
+          );
+          setRunning(false);
+          noteTurn(turn, { actionNote: "Re-run finished." });
+          break;
+        }
+        case "remember_memory":
+          await rememberMemory(action.args);
+          noteTurn(turn, { actionDone: true, actionNote: "Saved for next time." });
+          break;
+      }
+    } catch (err) {
+      // Kept on the turn rather than raised as a banner: the artist pressed a
+      // button on this message, so the answer belongs next to it.
+      setRunning(false);
+      noteTurn(turn, {
+        actionNote:
+          err instanceof Error ? err.message : "That could not be carried out.",
+      });
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
   const handleSignOut = async () => {
     clearAll();
+    workspace.stopFollowing();
+    // Before the cookie goes, not after: a shared studio machine must not keep
+    // one artist's staged keyframes readable by whoever signs in next. A tab
+    // still holding the database blocks this, and the artist is told.
+    try {
+      await deleteCacheDatabase();
+    } catch (err) {
+      console.warn("could not delete the active-workspace cache", err);
+    }
     await logoutCookieSession();
   };
+
+  // Autosave. Skipped while there is nothing worth restoring, and once the run
+  // has been filed to history — at that point the history record IS the copy.
+  useEffect(() => {
+    if (workspace.live?.state === "published") return;
+    if (!upload && log.length === 0 && !result) return;
+    saveState({
+      eventSequence: workspace.live?.event_sequence ?? 0,
+      mode,
+      upload,
+      log,
+      result,
+      verdicts,
+      activeDraftPid,
+    });
+  }, [
+    activeDraftPid,
+    log,
+    mode,
+    result,
+    saveState,
+    upload,
+    verdicts,
+    workspace.live,
+  ]);
 
   const msgs: ChatMsg[] = useMemo(
     () => deriveMessages({ upload, log, result, running, banner, qa: qaTurns }),
@@ -433,6 +723,14 @@ export default function App() {
 
   return (
     <TooltipProvider>
+      <ResumeWorkspaceDialog
+        workspace={workspace.pending}
+        busy={workspace.busy}
+        error={workspace.error}
+        onResume={() => void workspace.resume()}
+        onRetryPublish={() => void workspace.retryPublish()}
+        onDiscard={() => void workspace.discard()}
+      />
       <SidebarProvider className="copilot-shell">
         <AppSidebar
           account={account}
@@ -463,6 +761,9 @@ export default function App() {
                   keyUrls={effKeyUrls}
                   onOpenBoard={() => openBoard(null)}
                   onExport={downloadBundle}
+                  onAcceptAction={(turn) => void acceptAction(turn)}
+                  onDismissAction={dismissAction}
+                  actionBusy={actionBusy}
                 />
               ) : (
                 <ChatWelcome
@@ -499,6 +800,8 @@ export default function App() {
                 compact={running || log.length > 0}
                 askEnabled={!!result?.artifacts && !!liveSid}
                 onAsk={onAsk}
+                planMode={planMode}
+                onPlanModeChange={setPlanMode}
               />
             </div>
           ) : (
