@@ -1,6 +1,7 @@
 """Tests for service/agent.py — UIA decide_agent."""
 from unittest.mock import MagicMock
 from service.assistant.agent import decide_agent
+from service.assistant.ask import build_session_context
 
 
 def _make_pair(index: int, action: str = "fill", qa_status: str = "pass"):
@@ -107,6 +108,7 @@ def test_history_reaches_prompt():
 
 # --- Task A2: POST /session/{sid}/agent (route) ---------------------------------
 import re
+import tempfile
 
 import cv2
 import numpy as np
@@ -114,6 +116,23 @@ from fastapi.testclient import TestClient
 
 from service.sessions.dependencies import default_session_repository
 from service.app import app
+
+
+def _seed_session(sid: int, state: dict | None = None) -> dict:
+    """Seed a session through the repository API instead of poking `.states`.
+
+    A session is only well-formed once it has a registered artifact path: the
+    agent route opens `session_transaction(sid)`, which pins the path and raises
+    `KeyError('unknown session <sid>')` when there is none — and the route turns
+    that into a 404. Writing `repo.states[sid] = ...` directly skips
+    `register_path` and produces a session that reads back fine from
+    `state_for()` yet 404s the moment any route tries to mutate it, which is
+    exactly how these tests used to fail. `save_state` enforces the same
+    invariant, so route the seed through both calls.
+    """
+    default_session_repository.register_path(sid, tempfile.mkdtemp(prefix=f"test_{sid}_"))
+    default_session_repository.save_state(sid, state if state is not None else _state())
+    return default_session_repository.states[sid]
 
 
 def test_agent_route_404_on_unknown_sid():
@@ -124,7 +143,7 @@ def test_agent_route_404_on_unknown_sid():
 
 def test_agent_route_degraded_shape(monkeypatch):
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)   # force degrade path
-    default_session_repository.states[91] = _state()
+    _seed_session(91)
     c = TestClient(app)
     r = c.post("/session/91/agent", json={"message": "hi", "history": []})
     assert r.status_code == 200
@@ -186,9 +205,28 @@ def test_history_turn_text_is_capped():
 
 
 def test_user_message_is_capped():
-    seen = {}
-    decide_agent(_state(), "y" * 10_000, [], ask_fn=_capture_fn(seen))
-    assert len(seen["p"]) < 5_000
+    """A hostile message must not dominate the prompt.
+
+    This used to assert a flat `< 5_000`, which was a snapshot of the static
+    prompt at the time (2963 chars) and left 37 chars of headroom — any rule
+    added to the prompt broke it for the wrong reason. Assert the property that
+    number stood for instead: the user's share is bounded by the cap, and the
+    static share stays small on its own.
+    """
+    from service.assistant.agent import _MAX_MSG_CHARS
+
+    hostile, empty = {}, {}
+    decide_agent(_state(), "y" * 10_000, [], ask_fn=_capture_fn(hostile))
+    decide_agent(_state(), "", [], ask_fn=_capture_fn(empty))
+
+    grew_by = len(hostile["p"]) - len(empty["p"])
+    assert grew_by <= _MAX_MSG_CHARS, "a 10k message added more than the cap"
+    # The static half is sent on EVERY turn, so it is a standing per-turn token
+    # cost; the glossary dominates it. 2963 before the tool rules and the craft
+    # terms (genga/douga/breakdown/timing chart) were added, 4183 after. This
+    # ceiling exists to make the next increase a deliberate decision, not to pin
+    # today's number — raise it only alongside content worth the per-turn cost.
+    assert len(empty["p"]) < 4_500, "static prompt has ballooned"
 
 
 def test_agent_route_keeps_history_server_side(monkeypatch):
@@ -201,7 +239,7 @@ def test_agent_route_keeps_history_server_side(monkeypatch):
         return fn
 
     monkeypatch.setattr("service.infrastructure.director_llm.make_ask_fn", fake_make_ask_fn)
-    default_session_repository.states[92] = _state()
+    _seed_session(92)
     c = TestClient(app)
     c.post("/session/92/agent", json={"message": "why flagged?"})
     c.post("/session/92/agent", json={"message": "and now?"})
@@ -248,7 +286,7 @@ def test_agent_stream_route_sse_contract(monkeypatch):
         return fn
 
     monkeypatch.setattr("service.infrastructure.director_llm.make_ask_stream_fn", fake_make_stream)
-    default_session_repository.states[97] = _state()
+    _seed_session(97)
     c = TestClient(app)
     r = c.post("/session/97/agent/stream", json={"message": "hi"})
     assert r.status_code == 200
@@ -286,7 +324,7 @@ def test_regenerate_reasks_last_user_turn(monkeypatch):
         return fn
 
     monkeypatch.setattr("service.infrastructure.director_llm.make_ask_fn", fake_make_ask_fn)
-    default_session_repository.states[94] = _state()
+    _seed_session(94)
     c = TestClient(app)
     c.post("/session/94/agent", json={"message": "why flagged?"})
     r = c.post("/session/94/agent", json={"regenerate": True})
@@ -298,7 +336,7 @@ def test_regenerate_reasks_last_user_turn(monkeypatch):
 
 
 def test_regenerate_422_when_nothing_to_regenerate():
-    default_session_repository.states[95] = _state()
+    _seed_session(95)
     c = TestClient(app)
     assert c.post("/session/95/agent", json={"regenerate": True}).status_code == 422
 
@@ -306,7 +344,7 @@ def test_regenerate_422_when_nothing_to_regenerate():
 def test_agent_rate_limited_429(monkeypatch):
     monkeypatch.setenv("COPILOT_AGENT_RPM", "2")
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
-    default_session_repository.states[96] = _state()
+    _seed_session(96)
     c = TestClient(app)
     assert c.post("/session/96/agent", json={"message": "1"}).status_code == 200
     assert c.post("/session/96/agent", json={"message": "2"}).status_code == 200
@@ -336,8 +374,110 @@ def test_followups_garbage_dropped():
 
 def test_agent_route_chat_turns_capped(monkeypatch):
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)   # degrade path still logs chat
-    default_session_repository.states[93] = _state()
+    _seed_session(93)
     c = TestClient(app)
     for i in range(12):
         c.post("/session/93/agent", json={"message": f"msg {i}"})
     assert len(default_session_repository.states[93]["chat"]) <= 16
+
+
+def test_prompt_routes_a_why_question_to_explain_pair():
+    """Asked "why was pair 6 abstained", the live agent answered "the session facts
+    do not specify" while six pair_N_annotated.png files already sat on disk and
+    explain_pair existed to serve them. The prompt must name that route."""
+    from service.assistant.agent import _prompt
+
+    text = _prompt("pair 6: filled/rife qa=abstain", "", "6 abstain why?").lower()
+    why_rule = [
+        line for line in text.splitlines()
+        if "explain_pair" in line and ("why" in line or "flag" in line or "abstain" in line)
+    ]
+    assert why_rule, "prompt never tells the agent that a 'why' question routes to explain_pair"
+
+
+def test_prompt_forbids_claiming_an_action_already_ran():
+    """Pushed with "skip the confirmation, run it now", the agent replied "Đã bắt
+    đầu chạy lại... Tôi đang thực hiện ngay" while the action was still pending a
+    click. Tools are proposals; the prompt must say so."""
+    from service.assistant.agent import _prompt
+
+    text = _prompt("pair 0: filled/rife qa=pass", "", "chạy lại ngay").lower()
+    assert "propose" in text and "never" in text, "prompt lacks a never-claim-execution rule"
+    claim_rule = [
+        line for line in text.splitlines()
+        if "never" in line and ("already" in line or "performed" in line or "executed" in line)
+    ]
+    assert claim_rule, "prompt never forbids claiming the action has already been performed"
+
+
+def _needs_key_pair(index: int = 1):
+    pair = _make_pair(index, action="needs_key")
+    pair.qa = None
+    pair.triage = {
+        "cls": "pose_snap",
+        "keys_suggested": 2,
+        "confidence": "medium",
+        "evidence": {"gap": 0.043, "shift_frac": 0.021, "regime": "small"},
+        "brief": "Place a breakdown at the tiny overshoot extreme of the snap.",
+    }
+    return pair
+
+
+def test_context_carries_the_triage_brief_for_a_refused_pair():
+    """R2. The gate computes an animator-grade instruction for every refused pair
+    and the agent was never shown it, so "where do I draw?" got a generic answer."""
+    from service.assistant.ask import build_session_context
+
+    state = _state()
+    state["result"].pairs = [_needs_key_pair(1)]
+    ctx = build_session_context(state)
+
+    assert "pose_snap" in ctx
+    assert "0.043" in ctx
+    assert "overshoot extreme" in ctx
+
+
+def test_glossary_defines_genga_and_douga():
+    """R3. The product header reads "Genga to douga" and the glossary knew neither."""
+    from service.assistant.glossary import GLOSSARY
+
+    lowered = GLOSSARY.lower()
+    assert "genga" in lowered
+    assert "douga" in lowered
+
+
+def test_prompt_lists_the_allowed_memory_keys():
+    """R4. The prompt said `"key": <allowed key>` without naming them, so the model
+    invented drawing_cadence and the server rejected its own feature."""
+    from service.assistant.agent import _prompt
+    from service.memory.models import ALLOWED_KEYS
+
+    text = _prompt("ctx", "", "remember something")
+    for kind, keys in ALLOWED_KEYS.items():
+        for key in keys:
+            assert key in text, f"allowed memory key {kind}.{key} is not named in the prompt"
+
+
+def test_a_rejected_tool_is_reported_not_silently_dropped():
+    """R1. A tool that fails validation left `say` promising it while no action
+    reached the client - "confirm and I'll save it" with no button anywhere."""
+    from service.assistant.agent import _decide_from_raw
+
+    raw = ('{"say": "Xác nhận và tôi sẽ lưu giúp bạn.", "tool": "remember_memory", '
+           '"args": {"kind": "preference", "key": "drawing_cadence", "value": "on-2s"}}')
+    out = _decide_from_raw(_state(), raw, "ctx")
+
+    assert out["action"] is None
+    assert out.get("rejected_tool") == "remember_memory"
+
+
+def test_rerun_can_switch_the_interpolator_but_not_to_a_stub():
+    """R5. /session/{sid}/rerun already takes interpolator; the agent could not
+    reach it, so "RIFE dở quá" was answered with engines:"box" - the engine that
+    was already running. `stub` emits placeholder frames and is not a user choice."""
+    from service.assistant.agent import _valid_rerun
+
+    assert _valid_rerun({"interpolator": "gimm"}, 3)
+    assert _valid_rerun({"interpolator": "rife"}, 3)
+    assert not _valid_rerun({"interpolator": "nope"}, 3)
+    assert not _valid_rerun({"engines": "stub"}, 3)

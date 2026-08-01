@@ -157,6 +157,7 @@ def post_key(sid: int, index: int = Form(...), key: UploadFile = File(...),
             "result": ResultEvent.from_result(
                 outcome.result,
                 outcome.artifact_urls,
+                sid=outcome.sid,
                 explanations=outcome.explanations,
                 pair_mids=outcome.pair_mids,
                 key_urls=outcome.key_urls,

@@ -522,6 +522,29 @@ body:has(.copilot-shell) {
   object-fit: contain;
   background: var(--color-screen);
 }
+/* OUTPUT column: the workspace centres a single child, so the view switch and
+   the player share one column instead of sitting side by side. */
+.recon-output {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  width: min(100%, 1200px);
+  max-height: 100%;
+}
+.recon-output .compare-video {
+  display: block;
+  width: 100%;
+  min-height: 0;
+  max-height: calc(100dvh - 180px);
+  object-fit: contain;
+  background: var(--color-screen);
+}
+/* the switch costs a row, so both players give it back */
+.recon-output.is-tabbed .rplayer video,
+.recon-output.is-tabbed .compare-video {
+  max-height: calc(100dvh - 224px);
+}
 
 /* Dual - ReviewWorkbench.tsx */
 .dual {

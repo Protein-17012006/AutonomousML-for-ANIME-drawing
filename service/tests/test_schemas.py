@@ -75,10 +75,20 @@ def test_x4_rejected_when_flag_off(monkeypatch):
         SessionCfg(smoothness=4)
 
 
-def test_x4_allowed_when_flag_on(monkeypatch):
-    """smoothness=4 is allowed when COPILOT_SMOOTHNESS_X4 env flag is set."""
+def test_x4_stays_rejected_even_with_the_retired_flag_set(monkeypatch):
+    """smoothness=4 was descoped — ×2 is the ceiling — and the descope must not be
+    reversible by a stale environment variable.
+
+    This test used to assert the opposite (×4 unlocked by COPILOT_SMOOTHNESS_X4).
+    That flag no longer exists anywhere in production code, so the old assertion
+    was pinning a capability the product deliberately removed. Inverted rather than
+    deleted: a box or CI runner still carrying the retired export must not quietly
+    re-enable a mode nothing else supports."""
+    import pytest
+
     monkeypatch.setenv("COPILOT_SMOOTHNESS_X4", "1")
-    assert SessionCfg(smoothness=4).fps == 12 * 4
+    with pytest.raises(ValueError, match="smoothness must be 1 or 2"):
+        SessionCfg(smoothness=4)
 
 
 def test_sessioncfg_show_defaults_none():

@@ -58,7 +58,7 @@ def _mp4_bytes_near_static(n: int, size: int = 16) -> bytes:
 
 
 def test_decode_decimates_stride_2():
-    keys, eff, total, src_fps = _load_frames_from_video(_upload(_mp4_bytes(6)), stride=2)
+    keys, gt, eff, total, src_fps = _load_frames_from_video(_upload(_mp4_bytes(6)), stride=2)
     assert len(keys) == 3                          # frames[0::2] of 6 == 3
     assert eff == 2 and total == 6                  # no auto-fit needed
     assert keys[0].ndim == 3 and keys[0].shape[2] == 3
@@ -66,16 +66,42 @@ def test_decode_decimates_stride_2():
 
 
 def test_decode_stride_1_keeps_all():
-    keys, eff, total, src_fps = _load_frames_from_video(_upload(_mp4_bytes(5)), stride=1)
+    keys, gt, eff, total, src_fps = _load_frames_from_video(_upload(_mp4_bytes(5)), stride=1)
     assert len(keys) == 5 and eff == 1 and total == 5
 
 
 def test_returns_source_fps():
     # cadence derivation (Smoothness Control) needs the clip's native fps alongside the
     # effective stride; _mp4_bytes always encodes at fps=24 (see the helper above).
-    keys, eff, total, src_fps = _load_frames_from_video(_upload(_mp4_bytes(6)), stride=2)
+    keys, gt, eff, total, src_fps = _load_frames_from_video(_upload(_mp4_bytes(6)), stride=2)
     assert src_fps == 24.0
     assert round(src_fps / eff) == 12   # cadence at stride 2
+
+
+def test_stride_2_retains_middle_gt_per_gap():
+    # compare.mp4's ORIGINAL pane needs the real dropped frame of each gap.
+    # 6 frames at values 0,12,24,36,48,60 -> keys = frames 0/2/4, gt = frames 1/3.
+    keys, gt, eff, total, src_fps = _load_frames_from_video(_upload(_mp4_bytes(6)), stride=2)
+    assert len(gt) == len(keys) - 1 == 2
+    assert all(g is not None for g in gt)
+    assert abs(float(gt[0].mean()) - 12) < 8       # H.264 is lossy; solid colours stay close
+    assert abs(float(gt[1].mean()) - 36) < 8
+    assert gt[0].shape == keys[0].shape and gt[0].dtype == np.uint8
+
+
+def test_stride_4_takes_middle_dropped_frame():
+    # 9 frames, stride 4 -> keys = frames 0/4/8; middle of each gap = frames 2 and 6.
+    keys, gt, eff, total, src_fps = _load_frames_from_video(_upload(_mp4_bytes(9)), stride=4)
+    assert len(keys) == 3 and eff == 4
+    assert abs(float(gt[0].mean()) - 24) < 8       # frame 2 (v=24)
+    assert abs(float(gt[1].mean()) - 72) < 8       # frame 6 (v=72)
+
+
+def test_stride_1_has_no_gt():
+    # no frames were dropped -> nothing to show as "original in-between"; the
+    # compare falls back to the held-key cadence per gap.
+    keys, gt, eff, total, src_fps = _load_frames_from_video(_upload(_mp4_bytes(5)), stride=1)
+    assert gt == [None] * (len(keys) - 1)
 
 
 def test_rejects_non_video_content_type():
@@ -87,7 +113,7 @@ def test_rejects_non_video_content_type():
 def test_accepts_octet_stream_content_type():
     # curl / programmatic clients send application/octet-stream for an .mp4; the helper must
     # accept it (cv2 is the real validator), not reject at the door. Regression for the box smoke.
-    keys, _eff, _total, _src_fps = _load_frames_from_video(
+    keys, _gt, _eff, _total, _src_fps = _load_frames_from_video(
         _upload(_mp4_bytes(6), name="cut.mp4", ctype="application/octet-stream"), stride=2)
     assert len(keys) == 3
 
@@ -103,7 +129,7 @@ def test_long_video_autofits_to_cap(monkeypatch):
     # A slightly-long clip (within the stride*FACTOR ceiling) auto-coarsens the stride so it
     # fits (<= MAX_KEYS) and still runs (>= 2 keys), instead of failing.
     monkeypatch.setattr(ingest_mod, "MAX_KEYS", 3)
-    keys, eff, total, src_fps = _load_frames_from_video(_upload(_mp4_bytes(10)), stride=1)  # 10 keys @ stride 1
+    keys, gt, eff, total, src_fps = _load_frames_from_video(_upload(_mp4_bytes(10)), stride=1)  # 10 keys @ stride 1
     assert 2 <= len(keys) <= 3
     assert eff > 1 and eff <= 1 * ingest_mod.AUTOFIT_MAX_FACTOR   # auto-fit happened, within the cap
     assert total == 10
@@ -235,17 +261,22 @@ def test_video_session_reports_cadence_badge():
     assert s["duration"] > 0
 
 
-def test_qa_invariant_across_smoothness(monkeypatch):
+def test_qa_invariant_across_smoothness():
     """Pins the feature's core safety claim (final-review M1): smoothness is
     DISPLAY-ONLY (fps/duration/frame-count expansion) — QA runs on the interpolated
     x2 triplet via `run_session(key_arrays, eng, ...)`, which never sees `cfg`/smoothness
     at all. So for a FIXED set of keys, the QA outcome (autopass count, flagged/abstained
-    sets, and the per-pair action/qa verdicts) must be IDENTICAL whether smoothness is
-    1, 2, or 4 (x4 unblocked via the env flag) — only output_fps/duration may differ."""
+    sets, and the per-pair action/qa verdicts) must be IDENTICAL across every supported
+    smoothness — only output_fps/duration may differ.
+
+    The supported set is now {1, 2}: ×4 was descoped and the COPILOT_SMOOTHNESS_X4 flag
+    that used to unblock a third arm here no longer exists, so that arm was returning
+    422 and failing the test. Dropping it narrows the sweep but does not weaken the
+    claim — the invariant is that QA never sees `cfg`, which one comparison already
+    exercises."""
     import json
     import re
 
-    monkeypatch.setenv("COPILOT_SMOOTHNESS_X4", "1")   # unblock the x4 run too
     c = TestClient(app)
     video_bytes = _mp4_bytes_near_static(6)   # near-static so pairs actually FILL
 
@@ -268,9 +299,8 @@ def test_qa_invariant_across_smoothness(monkeypatch):
 
     result1, qa1 = _run(1)
     result2, qa2 = _run(2)
-    result4, qa4 = _run(4)
 
-    for label, result, qa in (("smoothness=2", result2, qa2), ("smoothness=4", result4, qa4)):
+    for label, result, qa in (("smoothness=2", result2, qa2),):
         assert result["n_autopass"] == result1["n_autopass"], label
         assert len(result["flagged"]) == len(result1["flagged"]), label
         assert len(result["abstained"]) == len(result1["abstained"]), label

@@ -36,6 +36,35 @@ def build_session_context(state: dict) -> str:
             steps = "; ".join(f"{r.action_kind} — {getattr(r, 'reason', '')}"
                               for r in corr.rounds)
             row += f" | correction[{corr.status}]: {steps}"
+        # The gate's diagnosis for a refused pair — the class it recognised, the
+        # measurement behind it, and the instruction it wrote for the artist. This
+        # is the answer to "why was it refused" and "where do I draw", so it goes
+        # in front of the agent instead of being left in the payload unread.
+        triage = getattr(p, "triage", None)
+        if isinstance(triage, dict) and triage:
+            ev = triage.get("evidence") or {}
+            facts = " ".join(f"{k}={v}" for k, v in ev.items() if v is not None)
+            row += (f" | triage[{triage.get('cls', '?')}"
+                    f", keys_suggested={triage.get('keys_suggested', '?')}"
+                    f", confidence={triage.get('confidence', '?')}]")
+            if facts:
+                row += f" {facts}"
+            brief = str(triage.get("brief") or "").strip()
+            if brief:
+                row += f" | brief: {brief}"
+        # What the vision model actually saw, and where. Computed by explain_pairs
+        # and stored on the session, but never shown to the agent before — so the
+        # agent could offer the picture and still not say what was in it.
+        exp = (state.get("explanations") or {})
+        info = exp.get(p.index) or exp.get(str(p.index))
+        if isinstance(info, dict) and info:
+            row += (f" | vlm[{info.get('err_type', '?')}"
+                    f" @ {info.get('region', '?')}]")
+            note = str(info.get("explanation") or "").strip()
+            if note:
+                row += f" {note}"
+            if info.get("annotated_url"):
+                row += " | annotated image available"
         lines.append(row)
         if sum(len(ln) + 1 for ln in lines) > _MAX_CTX:
             lines.append(f"... (truncated at pair {p.index} of {len(res.pairs)})")

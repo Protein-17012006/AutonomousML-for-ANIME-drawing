@@ -59,7 +59,8 @@ def stream_session(key_arrays: list[np.ndarray], engines: str, *,
                    history_pid: str | None = None,
                    workspace_input: dict | None = None,
                    source_video: bytes | None = None,
-                   active_workspace=None) -> StreamingResponse:
+                   active_workspace=None,
+                   gt_frames: list | None = None) -> StreamingResponse:
     """Start one run and adapt its pair/result callbacks to an SSE response."""
     cfg = model_or_422(
         SessionCfg,
@@ -159,6 +160,7 @@ def stream_session(key_arrays: list[np.ndarray], engines: str, *,
             try:
                 outcome = use_case.execute(
                     sid, session_dir, key_arrays, eng, cfg, sampling=sampling,
+                    gt_frames=gt_frames,
                     emit_pair=lambda pair, url: emit("pair", (pair, url)),
                 )
                 emit("result", outcome)
@@ -232,6 +234,7 @@ def stream_session(key_arrays: list[np.ndarray], engines: str, *,
                     yield sse("result", ResultEvent.from_result(
                         outcome.result,
                         outcome.artifact_urls,
+                        sid=outcome.sid,
                         explanations=outcome.explanations,
                         pair_mids=outcome.pair_mids,
                         key_urls=outcome.key_urls,

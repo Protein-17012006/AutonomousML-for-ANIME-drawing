@@ -2,15 +2,22 @@
 from __future__ import annotations
 
 from inbetween_copilot.pipeline.copilot import aggregate_result
-from inbetween_copilot.pipeline.models import CopilotResult
+from inbetween_copilot.pipeline.models import CopilotCfg, CopilotResult
 from inbetween_copilot.pipeline.ports import CopilotPorts
 from inbetween_copilot.pipeline.service import RunCopilot
 
 
-def run_session(keys, engines: CopilotPorts, on_pair=None) -> CopilotResult:
+def run_session(keys, engines: CopilotPorts, on_pair=None,
+                cfg=None) -> CopilotResult:
+    """cfg: the session's SessionCfg (or None -> calibrated defaults). Mapping
+    it to CopilotCfg HERE is what makes the deployment tau_gate override reach
+    the gate — SessionCfg.tau_gate used to be dead config (fixed 2026-07-23)."""
     if len(keys) < 2:
         raise ValueError("need >= 2 keys")
-    return RunCopilot(engines).execute(keys, on_pair=on_pair)
+    copilot_cfg = None
+    if cfg is not None:
+        copilot_cfg = CopilotCfg(tau_gate=cfg.tau_gate, tau_soft=cfg.tau_soft)
+    return RunCopilot(engines).execute(keys, cfg=copilot_cfg, on_pair=on_pair)
 
 
 def recompute_result(pairs) -> CopilotResult:

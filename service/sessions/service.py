@@ -25,6 +25,10 @@ class SessionWorkflowAdapters:
 @dataclass
 class SessionOutcome:
     result: Any
+    # the session this outcome belongs to, so clients never have to recover it by
+    # parsing an artifact URL (a published session re-serves those under a
+    # different prefix, which silently yielded no id and killed grounded Q&A)
+    sid: int
     artifact_urls: dict
     explanations: dict
     pair_mids: dict
@@ -40,7 +44,8 @@ class RunSession:
         self.adapters = adapters
 
     def execute(self, sid: int, session_dir: str, key_arrays: list, eng, cfg,
-                *, sampling: dict | None, emit_pair: Callable) -> SessionOutcome:
+                *, sampling: dict | None, emit_pair: Callable,
+                gt_frames: list | None = None) -> SessionOutcome:
         a = self.adapters
 
         def on_pair(pair):
@@ -48,7 +53,7 @@ class RunSession:
             mid_url = f"/session/{sid}/{mid_fn}" if mid_fn else None
             emit_pair(pair, mid_url)
 
-        result = a.run_pipeline(key_arrays, eng, on_pair=on_pair)
+        result = a.run_pipeline(key_arrays, eng, on_pair=on_pair, cfg=cfg)
         rendered = a.render_artifacts(
             result,
             key_arrays,
@@ -59,6 +64,7 @@ class RunSession:
             mid_engine=eng.rife_engine,
             vlm_struct_fn=eng.vlm_struct_fn,
             softness_fn=eng.softness_fn,
+            gt_frames=gt_frames,
         )
         metadata = build_render_metadata(
             sid, rendered, cfg, eng, base_sampling=sampling)
@@ -73,9 +79,13 @@ class RunSession:
             "explanations": persisted_explanations,
             "qa_degraded": metadata.qa_degraded,
             "sampling": persisted_sampling,
+            # per-gap real GT (video flow; None for PNG uploads) — the compare
+            # artifact's ORIGINAL pane on review re-renders
+            "gt_frames": gt_frames,
         })
         return SessionOutcome(
             result=result,
+            sid=sid,
             artifact_urls=metadata.artifact_urls,
             explanations=metadata.explanations,
             pair_mids=metadata.pair_mids,

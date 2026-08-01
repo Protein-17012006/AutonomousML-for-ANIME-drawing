@@ -1,0 +1,193 @@
+"""build_compare: box-style side-by-side ORIGINAL|RECON per session.
+
+Left = the original (per-gap GT frame when the session has one, else the held
+left key = the artist's stepped cadence), right = key + the pair's QA'd mid.
+Frame-synced at cadence*2 fps — the box compare_video presentation.
+"""
+import numpy as np
+import pytest
+
+pytest.importorskip("imageio")
+from service.media.artifacts import build_compare
+from inbetween_copilot.pipeline.models import CopilotResult, PairResult
+
+
+def _f(v):  # 8x8 uint8 frame
+    return np.full((8, 8, 3), v, np.uint8)
+
+
+def _filled(i, a, mid, b):
+    return PairResult(i, "filled", "rife", [a, mid, b], None, 0)
+
+
+def _needs_key(i):
+    return PairResult(i, "needs_key", None, None, None, 1)
+
+
+def _result(pairs):
+    return CopilotResult(pairs=pairs, keys_requested_total=0, flagged=[],
+                         n_autopass=0)
+
+
+def test_png_flow_holds_key_as_original(tmp_path):
+    keys = [_f(0), _f(100)]
+    res = _result([_filled(0, keys[0], _f(50), keys[1])])
+    name = build_compare(res, keys, str(tmp_path), fps=24)
+    assert name == "compare.mp4" and (tmp_path / name).is_file()
+    import imageio.v2 as imageio
+    r = imageio.get_reader(str(tmp_path / name))
+    meta = r.get_meta_data()
+    assert round(meta["fps"]) == 24
+    first = r.get_data(0)   # left key | divider | right key (identical keys)
+    assert first.shape[1] > 8 * 2        # two panes + divider
+    frame1 = r.get_data(1)  # left = HELD key(0) vs right = mid(50)
+    left = frame1[:, :8].mean()
+    right = frame1[:, -8:].mean()
+    assert left < 20 and 35 < right < 65   # H.264 is lossy; generous bands
+
+
+def test_video_flow_uses_real_gt(tmp_path):
+    keys = [_f(0), _f(200)]
+    res = _result([_filled(0, keys[0], _f(50), keys[1])])
+    name = build_compare(res, keys, str(tmp_path), fps=24, gt_frames=[_f(90)])
+    import imageio.v2 as imageio
+    frame1 = imageio.get_reader(str(tmp_path / name)).get_data(1)
+    assert 75 < frame1[:, :8].mean() < 105      # left = real GT (90)
+
+
+def test_skipped_gap_keeps_sides_synced(tmp_path):
+    keys = [_f(0), _f(60), _f(120)]
+    res = _result([_needs_key(0), _filled(1, keys[1], _f(90), keys[2])])
+    name = build_compare(res, keys, str(tmp_path), fps=24, gt_frames=[None, None])
+    import imageio.v2 as imageio
+    r = imageio.get_reader(str(tmp_path / name))
+    assert r.count_frames() == 3   # key1, gt/mid, key2 — gap 0 skipped on both sides
+
+
+def test_no_filled_pairs_returns_none(tmp_path):
+    keys = [_f(0), _f(60)]
+    assert build_compare(_result([_needs_key(0)]), keys, str(tmp_path), fps=24) is None
+
+
+# --- e2e: the session pipeline renders and surfaces the artifact -------------
+
+def _png(v: int):
+    import io
+    from PIL import Image
+    b = io.BytesIO()
+    Image.fromarray(np.full((8, 8, 3), v, np.uint8)).save(b, "PNG")
+    b.seek(0)
+    return b
+
+
+def _result_event(body: str) -> dict:
+    import json, re
+    block = re.search(r"event: result\ndata: (.+)", body)
+    assert block, f"no result event in: {body[:400]}"
+    return json.loads(block.group(1))
+
+
+def test_session_result_carries_compare_artifact():
+    from fastapi.testclient import TestClient
+    from service.app import app
+    c = TestClient(app)
+    files = [
+        ("keys", ("0.png", _png(0), "image/png")),
+        ("keys", ("1.png", _png(1), "image/png")),   # stub gap 0.01 < tau -> FILLS
+    ]
+    r = c.post("/session", files=files, data={"engines": "stub"})
+    assert r.status_code == 200
+    data = _result_event(r.text)
+    assert "compare" in data["artifacts"], data["artifacts"]
+    resp = c.get(data["artifacts"]["compare"])
+    assert resp.status_code == 200
+    assert resp.content[:12].find(b"ftyp") != -1 or len(resp.content) > 0
+
+
+def test_video_session_carries_gt_and_add_key_splices():
+    """Drop-a-video: state keeps per-gap GT; a drawn key splices [None, None]
+    into the split gap so the compare falls back to held-key there."""
+    import os
+    import tempfile
+
+    from fastapi.testclient import TestClient
+    from service.app import app
+    from service.sessions.dependencies import default_session_repository
+
+    import imageio.v2 as imageio
+    frames = [np.full((16, 16, 3), (i // 2) % 256, np.uint8) for i in range(8)]
+    fd, path = tempfile.mkstemp(suffix=".mp4")
+    os.close(fd)
+    try:
+        imageio.mimwrite(path, frames, fps=24, codec="libx264",
+                         pixelformat="yuv420p", macro_block_size=None)
+        with open(path, "rb") as fh:
+            clip = fh.read()
+    finally:
+        os.remove(path)
+
+    c = TestClient(app)
+    r = c.post("/session/video",
+               files={"video": ("cut.mp4", clip, "video/mp4")},
+               data={"engines": "stub"})
+    assert r.status_code == 200
+    result = _result_event(r.text)
+    assert "compare" in result["artifacts"]
+    sid = int(result["artifacts"]["montage"].split("/")[2])
+    state = default_session_repository.state_for(sid)
+    assert state["gt_frames"] is not None
+    assert len(state["gt_frames"]) == len(state["keys"]) - 1
+
+    def _png16(v):
+        import io
+        from PIL import Image
+        b = io.BytesIO()
+        Image.fromarray(np.full((16, 16, 3), v, np.uint8)).save(b, "PNG")
+        b.seek(0)
+        return b
+
+    rk = c.post(f"/session/{sid}/key",
+                files=[("key", ("m.png", _png16(0), "image/png"))],
+                data={"index": "0"})
+    assert rk.status_code == 200
+    assert "compare" in rk.json()["result"]["artifacts"]
+    new_state = default_session_repository.state_for(sid)
+    assert len(new_state["gt_frames"]) == len(new_state["keys"]) - 1
+    assert new_state["gt_frames"][0] is None and new_state["gt_frames"][1] is None
+    assert new_state["gt_frames"][2] is not None   # untouched gap keeps its real GT
+
+
+def test_workspace_snapshot_keeps_compare_artifact():
+    """History restore must not drop the compare tab: the published workspace
+    snapshot's result.artifacts carries compare.mp4 when it was uploaded."""
+    from service.infrastructure.publisher import _workspace_snapshot
+
+    class _Outcome:
+        result = _result([_filled(0, _f(0), _f(50), _f(100))])
+        pair_mids = {}
+        key_urls = {}
+        explanations = {}
+        sampling = {}
+        csq = None
+        qa_degraded = False
+
+    snapshot = _workspace_snapshot(
+        _Outcome(),
+        {"montage.png", "reconstructed.mp4", "compare.mp4"},
+        {"mode": "frames", "label": "t", "filenames": []},
+    )
+    assert snapshot.result.artifacts["compare"] == "compare.mp4"
+    assert snapshot.result.artifacts["video"] == "reconstructed.mp4"
+
+
+def test_needs_key_only_session_has_no_compare():
+    from fastapi.testclient import TestClient
+    from service.app import app
+    c = TestClient(app)
+    files = [
+        ("keys", ("0.png", _png(0), "image/png")),
+        ("keys", ("1.png", _png(200), "image/png")),  # stub gap 2.0 >> tau -> needs_key
+    ]
+    r = c.post("/session", files=files, data={"engines": "stub"})
+    assert r.status_code == 200
+    assert "compare" not in _result_event(r.text)["artifacts"]

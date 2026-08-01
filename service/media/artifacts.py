@@ -282,3 +282,66 @@ def build_key_frames(keys: List[np.ndarray], out_dir: str) -> "dict[int, str]":
         Image.fromarray(arr.astype(np.uint8)).save(os.path.join(out_dir, fname))
         out[i] = fname
     return out
+
+
+def encode_h264(frames: List[np.ndarray], path: str, fps: int) -> str:
+    """Encode frames to a browser-playable H.264/yuv420p mp4 (EVEN dims required)."""
+    h, w = frames[0].shape[:2]
+    h2, w2 = h - (h % 2), w - (w % 2)
+    frames = [f[:h2, :w2] for f in frames]
+    import imageio
+    imageio.mimwrite(path, frames, fps=fps, codec="libx264",
+                     pixelformat="yuv420p", macro_block_size=None)
+    return path
+
+
+def build_compare(result: CopilotResult, keys: List[np.ndarray], out_dir: str,
+                  *, fps: int, gt_frames: "List | None" = None) -> "str | None":
+    """Box-style side-by-side ``compare.mp4``: left = ORIGINAL (the per-gap GT
+    frame when the session has one, else the HELD left key = the artist's stepped
+    cadence), right = RECON (key + the pair's QA'd mid). FILLED/GENERATED pairs
+    only -- refused gaps are skipped on BOTH sides (jump-cut), so the panes stay
+    frame-synced. Encode at cadence*2 fps (the box compare_video rate). Returns
+    the basename, or None when nothing was filled."""
+    from inbetween_copilot.reporting.compare import side_by_side
+
+    left: List[np.ndarray] = []
+    right: List[np.ndarray] = []
+    last_key = None
+    for pair in result.pairs:
+        frames = getattr(pair, "frames", None)
+        if pair.action not in ("filled", "generated") or not frames or len(frames) < 3:
+            continue
+        i = pair.index
+        gt = gt_frames[i] if gt_frames is not None and i < len(gt_frames) else None
+        left += [keys[i], gt if gt is not None else keys[i]]
+        right += [keys[i], np.asarray(frames[1], np.uint8)]
+        last_key = keys[i + 1]
+    if last_key is None:
+        return None
+    left.append(last_key)
+    right.append(last_key)
+    stacked = [side_by_side(l, r) for l, r in zip(left, right)]
+    encode_h264(stacked, os.path.join(out_dir, "compare.mp4"), fps)
+    return "compare.mp4"
+
+
+def write_transcript(session_dir: str, state: dict):
+    """Write the agent-to-agent conversation as markdown for the exported bundle.
+
+    Returns the filename, or None when the session has no transcript. NEVER
+    raises — an artifact failure must not affect the session. The orchestration
+    import is deliberately inside the function: media must not depend on the
+    orchestration package at module level."""
+    try:
+        from service.orchestration.transcript import entries_for, render_markdown
+        entries = entries_for(state)
+        if not entries:
+            return None
+        name = "agent_conversation.md"
+        with open(os.path.join(session_dir, name), "w", encoding="utf-8") as fh:
+            fh.write(render_markdown(entries))
+        return name
+    except Exception as exc:    # noqa: BLE001 — by contract this never raises
+        print(f"[artifacts] WARN transcript not written: {exc}", flush=True)
+        return None

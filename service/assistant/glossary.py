@@ -21,4 +21,9 @@ window: the 16-frame context the vision model looks at around a pair when judgin
 cadence: the shooting rate of the output — 24, 12, or 8 fps of unique drawings.
 smoothness: display depth — x1 keeps cadence as-is, x2 doubles the in-between density (x4 does not exist).
 needs_key: the gate refused to interpolate this pair; a drawn key is requested instead.
+genga: the key drawing defining a pose. The co-pilot's input is a sequence of genga.
+douga: the in-between/clean-up drawing between two genga — the work this co-pilot assists ("genga to douga").
+breakdown: an in-between drawn to define HOW motion travels (arc, overshoot, ease), not just to fill time. What the gate asks for on a needs_key pair.
+timing chart: the artist's notation of frame exposure — on-1s/on-2s/on-3s. Sets cadence; not the same as smoothness.
+on-2s: each drawing held two frames (12 unique drawings/sec at 24 fps). TV-anime standard and the default here.
 """

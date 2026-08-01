@@ -1,0 +1,51 @@
+from service.orchestration.models import (ENTRY_KINDS, MAX_PLAN_STEPS,
+                                          MAX_TRANSCRIPT_ENTRIES, STATUSES,
+                                          Plan, Step, StepResult, TranscriptEntry)
+
+
+def test_the_five_statuses_are_frozen():
+    assert STATUSES == ("ok", "refused", "queued", "rejected", "error")
+
+
+def test_entry_kinds_are_frozen():
+    assert ENTRY_KINDS == ("ask", "reply", "refuse", "queue", "error")
+
+
+def test_caps():
+    assert MAX_PLAN_STEPS == 5
+    assert MAX_TRANSCRIPT_ENTRIES == 64
+
+
+def test_a_step_defaults_to_no_args():
+    step = Step(id=1, target="triage", kind="agent", ask="why refused?")
+    assert step.args == {}
+
+
+def test_an_empty_plan_carries_a_reason():
+    plan = Plan(goal="do a thing", steps=(), reason="planner offline")
+    assert plan.steps == ()
+    assert plan.reason == "planner offline"
+    assert not plan.is_actionable()
+
+
+def test_a_populated_plan_is_actionable():
+    plan = Plan(goal="g", steps=(Step(1, "open_board", "tool"),))
+    assert plan.is_actionable()
+
+
+def test_step_result_rejects_an_unknown_status():
+    try:
+        StepResult(step_id=1, target="triage", kind="agent", status="maybe")
+    except ValueError as exc:
+        assert "maybe" in str(exc)
+    else:
+        raise AssertionError("an unknown status must raise")
+
+
+def test_transcript_entry_round_trips_through_a_dict():
+    entry = TranscriptEntry(seq=0, frm="orchestrator", to="triage", kind="ask",
+                            text="why was pair 1 refused?", data={"index": 1},
+                            ms=12, ts=1.5)
+    d = entry.as_dict()
+    assert d["frm"] == "orchestrator" and d["to"] == "triage"
+    assert TranscriptEntry(**d) == entry
