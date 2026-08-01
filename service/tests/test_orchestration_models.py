@@ -49,3 +49,20 @@ def test_transcript_entry_round_trips_through_a_dict():
     d = entry.as_dict()
     assert d["frm"] == "orchestrator" and d["to"] == "triage"
     assert TranscriptEntry(**d) == entry
+
+
+def test_a_step_result_may_carry_a_handoff_and_defaults_to_none():
+    from service.orchestration.models import StepResult
+    plain = StepResult(1, "triage", "agent", "ok")
+    assert plain.handoff is None
+    routed = StepResult(1, "triage", "agent", "refused",
+                        handoff={"to": "perception", "args": {"index": 2},
+                                 "why": "the pair was filled"})
+    assert routed.handoff["to"] == "perception"
+
+
+def test_the_handoff_field_is_last_so_positional_construction_still_works():
+    from service.orchestration.models import StepResult
+    r = StepResult(1, "triage", "agent", "ok", "said", {"cls": "x"}, 12)
+    assert r.says == "said" and r.payload == {"cls": "x"} and r.ms == 12
+    assert r.handoff is None
