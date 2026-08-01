@@ -5,6 +5,7 @@ import type { ChatMsg } from "../../lib/chatModel";
 import { ErrorMessage } from "./ErrorMessage";
 import { ProgressMessage } from "./ProgressMessage";
 import { QaMessage } from "./QaMessage";
+import { AgentActionBubble } from "./AgentActionBubble";
 import { ResultCard } from "./ResultCard";
 import { UploadMessage } from "./UploadMessage";
 
@@ -13,11 +14,17 @@ export function ChatView({
   keyUrls,
   onOpenBoard,
   onExport,
+  onAcceptAction,
+  onDismissAction,
+  actionBusy,
 }: {
   msgs: ChatMsg[];
   keyUrls: string[];
   onOpenBoard: () => void;
   onExport: (result: ResultEvent) => void;
+  onAcceptAction: (turn: number) => void;
+  onDismissAction: (turn: number) => void;
+  actionBusy?: boolean;
 }) {
   const endRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -52,15 +59,29 @@ export function ChatView({
               />
             );
           
-          case "qa":
+          case "qa": {
+            // `qa-<n>` is the turn's index in the qa list; the accept handler
+            // needs it to update the right turn.
+            const turn = Number(m.id.slice(3));
             return (
-              <QaMessage
-                key={m.id}
-                question={m.q}
-                answer={m.answer}
-                grounded={m.grounded}
-              />
+              <div key={m.id}>
+                <QaMessage
+                  question={m.q}
+                  answer={m.answer}
+                  grounded={m.grounded}
+                />
+                <AgentActionBubble
+                  action={m.action}
+                  done={m.actionDone}
+                  note={m.actionNote}
+                  rejectedTool={m.rejectedTool}
+                  busy={actionBusy}
+                  onAccept={() => onAcceptAction(turn)}
+                  onDismiss={() => onDismissAction(turn)}
+                />
+              </div>
             );
+          }
             
           case "error":
             return <ErrorMessage key={m.id} text={m.text} />;

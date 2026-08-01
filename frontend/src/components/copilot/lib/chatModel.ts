@@ -3,6 +3,7 @@
 // events incrementally: the draw-key splice REPLACES the whole log, which an
 // incremental reducer cannot survive but a derive-function handles for free.
 import type { PairEvent, ResultEvent } from "../types";
+import type { AgentAction } from "../api";
 
 export type ChatMsg =
   | { kind: "user-upload"; id: string; text: string }
@@ -19,6 +20,11 @@ export type ChatMsg =
       q: string;
       answer: string | null;
       grounded?: boolean;
+      action?: AgentAction | null;
+      actionDone?: boolean;
+      actionNote?: string | null;
+      rejectedTool?: string;
+      followups?: string[];
     }
   | { kind: "error"; id: string; text: string };
 
@@ -30,6 +36,17 @@ export interface QaTurn {
   q: string;
   answer: string | null;
   grounded?: boolean;
+  /** The one tool the agent proposed this turn, if any. Nothing has run: it is
+   *  waiting on the artist, which is the whole contract. */
+  action?: AgentAction | null;
+  /** Set once the artist accepted it, so the card stops offering a second run. */
+  actionDone?: boolean;
+  /** What the server said when the action was carried out, or why it failed. */
+  actionNote?: string | null;
+  /** The model named a tool the server refused. Its prose may still describe
+   *  that action, so this is shown rather than swallowed. */
+  rejectedTool?: string;
+  followups?: string[];
 }
 
 export function deriveMessages(i: {

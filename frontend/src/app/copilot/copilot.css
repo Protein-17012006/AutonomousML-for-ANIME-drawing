@@ -2370,6 +2370,62 @@ body:has(.copilot-shell) {
 .qa-offline {
   color: var(--color-abstain);
 }
+/* AgentActionBubble.tsx — what the agent proposed, and the button that is the
+   only way it happens. Deliberately set apart from the reply bubbles: this is
+   the one part of a turn that changes something. */
+.agent-action {
+  max-width: 96%;
+  margin-left: auto;
+  margin-right: auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-ao);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--color-ao) 8%, transparent);
+}
+.agent-action__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 12rem;
+  flex: 1;
+}
+.agent-action__label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+.agent-action__detail,
+.agent-action__note {
+  font-size: 0.875rem;
+  color: var(--color-ash);
+}
+.agent-action__note {
+  color: var(--color-abstain);
+}
+.agent-action__buttons {
+  display: flex;
+  gap: 6px;
+}
+.agent-action--done,
+.agent-action--refused {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 0.875rem;
+  background: none;
+  border: none;
+  padding: 2px 12px;
+  color: var(--color-ash);
+}
+.agent-action--refused {
+  color: var(--color-abstain);
+}
 /* ResultCard.tsx */
 .result-card {
   max-width: 96%;
