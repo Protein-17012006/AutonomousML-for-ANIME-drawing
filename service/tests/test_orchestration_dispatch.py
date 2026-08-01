@@ -132,3 +132,28 @@ def test_the_transcript_records_who_asked_whom():
 
 def test_an_empty_plan_dispatches_nothing():
     assert dispatch(AgentContext(_state()), Plan(goal="g", steps=())) == []
+
+
+def test_a_rerun_that_changes_nothing_is_refused_on_the_orchestration_rail():
+    """The chat rail and the orchestration rail read the SAME TOOLS table
+    precisely so they cannot drift. A no-op re-run must die on both."""
+    state = _state()
+    state["cfg"] = MagicMock(engines="stub", cadence_fps=12, smoothness=1,
+                             interpolator="rife")
+    plan = Plan(goal="run it again", steps=(
+        Step(1, "rerun_session", "tool", args={"smoothness": 1}),
+    ))
+    result = dispatch(AgentContext(state), plan)[0]
+    assert result.status == "rejected"
+    assert "refused" in result.says
+
+
+def test_a_rerun_that_changes_something_still_queues_on_the_orchestration_rail():
+    state = _state()
+    state["cfg"] = MagicMock(engines="stub", cadence_fps=12, smoothness=1,
+                             interpolator="rife")
+    plan = Plan(goal="smoother", steps=(
+        Step(1, "rerun_session", "tool", args={"smoothness": 2}),
+    ))
+    result = dispatch(AgentContext(state), plan)[0]
+    assert result.status == "queued"

@@ -25,6 +25,16 @@ def build_session_context(state: dict) -> str:
         f"flagged: {len(res.flagged)} | abstained: {len(res.abstained)} | "
         f"keys requested: {res.keys_requested_total}",
     ]
+    # The session's OWN configuration. Without it the agent cannot tell a real
+    # change from a no-op — on 2026-08-01 it proposed rerun_session{smoothness: 2}
+    # against a session already running at smoothness 2, offering a no-op as an
+    # improvement — and /ask could not answer "what cadence am I running?" at all.
+    cfg = state.get("cfg")
+    if cfg is not None:
+        lines.append(
+            f"settings: cadence={getattr(cfg, 'cadence_fps', '?')}fps "
+            f"smoothness=x{getattr(cfg, 'smoothness', '?')} "
+            f"interpolator={getattr(cfg, 'interpolator', '?')}")
     for p in res.pairs:
         qa = p.qa.status if p.qa is not None else "-"
         reason = p.qa.reason if p.qa is not None else ""

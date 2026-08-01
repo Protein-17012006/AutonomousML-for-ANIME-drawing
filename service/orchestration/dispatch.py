@@ -36,13 +36,13 @@ def _entry(seq, frm, to, kind, text, data=None, ms=0) -> TranscriptEntry:
                            text=text, data=data or {}, ms=ms, ts=time.time())
 
 
-def _run_tool(step, n_pairs: int) -> StepResult:
+def _run_tool(step, n_pairs: int, cfg=None) -> StepResult:
     spec = TOOLS.get(step.target)
     if spec is None:                    # unreachable via the planner; defensive
         return StepResult(step.id, step.target, "tool", "rejected",
                           says=f"{step.target} is not a tool I can call.")
     try:
-        valid = bool(spec["validate"](step.args, n_pairs))
+        valid = bool(spec["validate"](step.args, n_pairs, cfg))
     except Exception:                   # noqa: BLE001 — a validator must not escape
         valid = False
     if not valid:
@@ -90,7 +90,8 @@ def run_step(ctx, step, seq):
                 result = StepResult(step.id, step.target, "agent", "error",
                                     says=f"{step.target} failed: {exc}")
     else:
-        result = _run_tool(step, len(ctx.state["result"].pairs))
+        result = _run_tool(step, len(ctx.state["result"].pairs),
+                           ctx.state.get("cfg"))
 
     if not result.ms:
         result = StepResult(result.step_id, result.target, result.kind,
