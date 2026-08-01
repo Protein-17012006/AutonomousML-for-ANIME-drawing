@@ -86,5 +86,18 @@ def plan_goal(state: dict, goal: str, history: list, ask_fn) -> Plan:
 
     steps = _steps_from(doc)
     if not steps:
-        return Plan(goal=goal, steps=(), reason="planner produced no usable step")
+        # Two very different things used to share one reason string, and the
+        # difference is the whole diagnosis. An empty list is the planner USING
+        # the instruction above ("a plain question, a greeting, or anything you
+        # cannot decompose") - the correct answer for a goal already settled
+        # earlier in the chat. A non-empty list that survives as nothing means
+        # every target it named is unregistered, which is a planner/registry
+        # disagreement and a defect. Reporting both as "no usable step" made the
+        # second invisible behind the first.
+        proposed = doc.get("steps")
+        if isinstance(proposed, list) and proposed:
+            return Plan(goal=goal, steps=(),
+                        reason="planner named no registered target")
+        return Plan(goal=goal, steps=(),
+                    reason="planner judged this needs no specialist step")
     return Plan(goal=goal, steps=steps)

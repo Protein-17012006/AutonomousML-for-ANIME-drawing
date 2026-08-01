@@ -309,6 +309,12 @@ export interface AgentReply {
    *  still describe the action, so the artist is told it will not happen
    *  rather than shown a promise with no button. */
   rejected_tool?: string;
+  /** Planned turns only: whether specialists were actually consulted. False
+   *  means the planner answered single-turn, and `plan_reason` says why. The
+   *  transcript is then empty, and without these two the artist cannot tell a
+   *  deliberate "this needs no specialist" from the layer being broken. */
+  orchestrated?: boolean;
+  plan_reason?: string;
 }
 
 const TOOL_NAMES: AgentToolName[] = [
@@ -502,6 +508,9 @@ export async function runOrchestration(
             : [],
           rejected_tool:
             typeof raw.rejected_tool === "string" ? raw.rejected_tool : undefined,
+          orchestrated: raw.orchestrated === true,
+          plan_reason:
+            typeof raw.plan_reason === "string" ? raw.plan_reason : undefined,
         });
       } else if (e.name === "error") {
         const raw = (e.data ?? {}) as Record<string, unknown>;

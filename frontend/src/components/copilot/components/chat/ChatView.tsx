@@ -75,6 +75,8 @@ export function ChatView({
                   <AgentTranscript
                     entries={m.transcript}
                     running={m.answer === null}
+                    orchestrated={m.orchestrated}
+                    planReason={m.planReason}
                   />
                 ) : null}
                 <AgentActionBubble

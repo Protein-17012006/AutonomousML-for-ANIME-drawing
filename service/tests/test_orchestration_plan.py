@@ -56,6 +56,25 @@ def test_garbage_yields_an_empty_plan_with_a_reason():
     assert plan.reason
 
 
+def test_a_deliberate_empty_plan_is_not_reported_as_a_broken_one():
+    """`{"steps": []}` is the planner OBEYING its prompt, not failing.
+
+    The prompt tells it to return an empty list for a plain question or a goal
+    it cannot decompose, and the common live case is a goal already settled
+    earlier in the chat. Reporting that as the same "no usable step" as a plan
+    whose targets were all rejected hid a real defect behind a normal one."""
+    plan = plan_goal(_state(), "hello", [], _ask('{"steps": []}'))
+    assert plan.steps == ()
+    assert plan.reason == "planner judged this needs no specialist step"
+
+
+def test_a_plan_whose_every_target_is_unregistered_says_so():
+    raw = '{"steps": [{"target": "rm_rf", "kind": "tool", "args": {}}]}'
+    plan = plan_goal(_state(), "do something unregistered", [], _ask(raw))
+    assert plan.steps == ()
+    assert plan.reason == "planner named no registered target"
+
+
 def test_an_unregistered_target_is_dropped_not_executed():
     raw = """{"steps": [
         {"target": "rm_rf", "kind": "tool", "args": {}},

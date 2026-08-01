@@ -26,6 +26,8 @@ export type ChatMsg =
       rejectedTool?: string;
       followups?: string[];
       transcript?: TranscriptEntry[];
+      orchestrated?: boolean;
+      planReason?: string;
     }
   | { kind: "error"; id: string; text: string };
 
@@ -50,6 +52,12 @@ export interface QaTurn {
   followups?: string[];
   /** Present only for a planned turn: who said what, in order. */
   transcript?: TranscriptEntry[];
+  /** Planned turns only. `false` means the planner answered without consulting
+   *  a specialist, and `planReason` is its stated reason. An empty transcript
+   *  on its own is ambiguous — it reads identically whether the layer declined
+   *  or failed — so both are carried and shown. */
+  orchestrated?: boolean;
+  planReason?: string;
 }
 
 export function deriveMessages(i: {

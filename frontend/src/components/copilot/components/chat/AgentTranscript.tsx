@@ -23,14 +23,60 @@ function speaker(name: string): string {
   return SPEAKER[name] ?? name;
 }
 
+/** What the planner said when it chose not to open a plan, in the artist's terms. */
+const PLAN_REASON: Record<string, string> = {
+  "planner judged this needs no specialist step":
+    "The planner answered this one directly — no specialist was needed.",
+  "planner named no registered target":
+    "The planner asked for a specialist this build does not have, so it answered directly.",
+  "planner unavailable (no LLM configured)":
+    "The planner is offline, so this was answered directly.",
+};
+
+function planNote(reason: string): string {
+  return (
+    PLAN_REASON[reason] ??
+    (reason.startsWith("planner call failed")
+      ? "The planner could not be reached, so this was answered directly."
+      : `The planner answered directly (${reason}).`)
+  );
+}
+
 export function AgentTranscript({
   entries,
   running,
+  orchestrated,
+  planReason,
 }: {
   entries: TranscriptEntry[];
   running: boolean;
+  /** Planned turns only: whether specialists were actually consulted. */
+  orchestrated?: boolean;
+  planReason?: string;
 }) {
-  if (entries.length === 0 && !running) return null;
+  // An empty transcript used to render nothing, which made a planner that
+  // DECLINED look exactly like a planner that was never asked. On a build whose
+  // selling point is that specialists can refuse, silence is the one thing this
+  // must not do — so a declined plan says so, and says why.
+  const declined = !running && entries.length === 0 && orchestrated === false;
+  if (entries.length === 0 && !running && !declined) return null;
+
+  if (declined) {
+    return (
+      <div className="agent-transcript">
+        <p className="agent-transcript__head">How it was worked out</p>
+        <ol className="agent-transcript__list">
+          <li className="agent-transcript__row agent-transcript__row--refuse">
+            <span className="agent-transcript__who">{speaker("orchestrator")}</span>
+            <span className="agent-transcript__text">
+              {planNote(planReason ?? "")}
+            </span>
+            <span className="agent-transcript__tag">no plan</span>
+          </li>
+        </ol>
+      </div>
+    );
+  }
 
   return (
     <div className="agent-transcript">

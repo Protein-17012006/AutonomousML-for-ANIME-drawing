@@ -875,6 +875,8 @@ export default function App() {
             action: r.action,
             rejectedTool: r.rejected_tool,
             followups: r.followups,
+            orchestrated: r.orchestrated,
+            planReason: r.plan_reason,
           }),
         onError: (message) =>
           noteTurn(n, { answer: message, grounded: false }),
