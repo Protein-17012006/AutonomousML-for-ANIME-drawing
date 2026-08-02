@@ -456,3 +456,19 @@ registry.register_agent("triage", triage_agent)
 registry.register_agent("perception", perception_agent)
 registry.register_agent("qa_csq", qa_csq_agent)
 registry.register_agent("cut_survey", cut_survey_agent)
+
+
+def run_triage_for_chat(state: dict, index: int, message: str, ask_fn) -> str:
+    """Adapter so ORDINARY CHAT reaches the same handler Plan mode uses.
+
+    Chat cannot import this module (the assistant -> orchestration edge is
+    one-way), so service/app.py binds this at composition time. Going through
+    `triage_agent` rather than reimplementing is the point: the two modes gave
+    two different answers about one pair once already (e0ab729d)."""
+    from service.orchestration.models import Step
+
+    result = triage_agent(
+        AgentContext(state=state, ask_fn=ask_fn, goal=message),
+        Step(id=0, target="triage", kind="agent", ask=message,
+             args={"index": index}))
+    return result.says

@@ -190,6 +190,7 @@ def post_agent(sid: int, req: AgentReq, request: Request,
     if not _agent_rate_ok(request, sid):
         raise HTTPException(status_code=429, detail="Agent rate limit reached; retry shortly")
     from service.assistant.agent import append_chat, decide_agent
+    from service.assistant.delegation import resolve_specialist
     from service.infrastructure.director_llm import make_ask_fn
 
     try:
@@ -206,18 +207,21 @@ def post_agent(sid: int, req: AgentReq, request: Request,
                 if not chat or chat[-1]["role"] != "user":
                     raise HTTPException(
                         status_code=422, detail="Nothing to regenerate yet")
+                ask_fn, memories = make_ask_fn(), _user_memories(request)
                 output = decide_agent(
-                    state, chat[-1]["text"], chat[:-1], make_ask_fn(),
-                    _user_memories(request),
-                )
+                    state, chat[-1]["text"], chat[:-1], ask_fn, memories)
+                output = resolve_specialist(state, chat[-1]["text"], output,
+                                            ask_fn, memories, chat[:-1])
                 append_chat(state, "assistant", output["say"])
                 sessions.save_state(sid, state)
                 record_turn(transcripts, state, chat[-1]["text"], output,
                             owner_sub=sessions.owner_for(sid))
                 return output
 
-            output = decide_agent(
-                state, req.message, chat, make_ask_fn(), _user_memories(request))
+            ask_fn, memories = make_ask_fn(), _user_memories(request)
+            output = decide_agent(state, req.message, chat, ask_fn, memories)
+            output = resolve_specialist(state, req.message, output, ask_fn,
+                                        memories, chat)
             append_chat(state, "user", req.message)
             append_chat(state, "assistant", output["say"])
             sessions.save_state(sid, state)

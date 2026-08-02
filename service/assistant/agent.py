@@ -94,6 +94,28 @@ def _valid_repairable(args: dict, n_pairs: int, state=None) -> bool:
                 or mids.get(args["index"]) or mids.get(str(args["index"])))
 
 
+def _valid_specialist_pair(args: dict, n_pairs: int, state=None) -> bool:
+    """`triage` fetches the gate diagnosis, which exists only for a pair the gate
+    REFUSED. Proposing it on a filled pair would promise an artefact that was
+    never produced — the trap `_valid_annotated` already learned — and would send
+    classify_gap off the population it was fitted on."""
+    if not _valid_index(args, n_pairs, state):
+        return False
+    if state is None:                    # no state to check against; see _valid_rerun
+        return True
+    pair = {p.index: p for p in state["result"].pairs}.get(args["index"])
+    return pair is not None and str(getattr(pair, "action", "")) == "needs_key"
+
+
+# Specialists are NOT tools. A tool is an artist-facing proposal that runs only
+# on confirmation; a specialist is a colleague the director ASKS, and its answer
+# is data. Keeping them in separate tables is what stops `triage` — already an
+# orchestration AGENT — from being resolvable as a tool, and keeps the
+# assistant -> orchestration edge from existing at all: the handler is injected
+# at composition time (see delegation.set_specialist_runner).
+SPECIALISTS = {"triage": _valid_specialist_pair}
+
+
 # proposal key -> the SessionCfg attribute it would change
 _RERUN_FIELDS = {"cadence": "cadence_fps", "smoothness": "smoothness",
                  "interpolator": "interpolator"}
@@ -191,8 +213,14 @@ def _prompt(ctx: str, hist: str, q: str, memories: list[MemoryItem] | None = Non
         '  remember_memory args {"kind": "preference"|"show_context", "key": <one of the '
         'keys listed below>, "value": <short value>}\n'
         + _MEMORY_KEY_HELP
+        + 'Specialists you may ASK (not artist-facing actions; their answer is '
+        'data you then report):\n'
+        '  triage  {"name": "triage", "index": int}   (why a needs_key pair was '
+        'refused, what to draw and how many keys — the ONLY way to get that; the '
+        'session facts do NOT contain it)\n'
         + 'Reply STRICT JSON only: {"say": "<=100 words", "tool": <name or null>, '
-        '"args": <object or null>, "followups": [<=3 short suggested next questions]}\n'
+        '"args": <object or null>, "ask": <specialist object or null>, '
+        '"followups": [<=3 short suggested next questions]}\n'
         "Rules: reply in the language of the user's LATEST message (ignore the "
         "language of earlier turns); propose a tool ONLY when the user's request "
         "calls for one — otherwise tool=null. Propose remember_memory ONLY when the "
@@ -230,6 +258,23 @@ def _followups(doc: dict) -> list[str]:
     return [str(x).strip()[:120] for x in f if isinstance(x, str) and x.strip()][:3]
 
 
+def _specialist_ask(state: dict, doc: dict) -> dict | None:
+    """Whitelist a proposed specialist question. Returns {"name", "index"} or None.
+
+    Kept off `action` on purpose: `action` is what the client renders as a button
+    the artist may accept, and asking a colleague is not that. A malformed ask is
+    dropped silently — the director simply answers without it, which is the same
+    degradation as an unreachable specialist."""
+    ask = doc.get("ask")
+    if not isinstance(ask, dict):
+        return None
+    name = ask.get("name")
+    validate = SPECIALISTS.get(name)
+    if validate is None or not validate(ask, len(state["result"].pairs), state):
+        return None
+    return {"name": name, "index": ask["index"]}
+
+
 def _decide_from_raw(state: dict, raw: str, ctx: str) -> dict:
     """Parse + whitelist one raw LLM reply into the response dict. Never raises.
     Shared by the blocking route and the SSE stream's final decision."""
@@ -248,6 +293,7 @@ def _decide_from_raw(state: dict, raw: str, ctx: str) -> dict:
                 "followups": []}
 
     fups = _followups(doc)
+    asked = _specialist_ask(state, doc)
     spec = TOOLS.get(tool)
     n_pairs = len(state["result"].pairs)
     # Validators take the whole state, not just cfg. This signature has now been
@@ -259,7 +305,7 @@ def _decide_from_raw(state: dict, raw: str, ctx: str) -> dict:
         # ("confirm and I'll save it"), so the artist reads a promise with no button
         # anywhere. Report the rejection so the client can say so instead.
         out = {"say": say or fallback_answer(ctx), "grounded": True, "action": None,
-               "followups": fups}
+               "followups": fups, "specialist": asked}
         if isinstance(tool, str) and tool:
             out["rejected_tool"] = tool     # present only when there is one to report
         return out
@@ -274,6 +320,7 @@ def _decide_from_raw(state: dict, raw: str, ctx: str) -> dict:
             "label": spec["label"],
         },
         "followups": fups,
+        "specialist": asked,
     }
 
 

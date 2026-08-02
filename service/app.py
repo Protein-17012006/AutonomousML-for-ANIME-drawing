@@ -13,6 +13,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from service.assistant import api as assistant_routes
+from service.assistant.delegation import set_specialist_runner
 from service import auth_api
 from service.composition.image_edit_runtime import build_image_edit_http_runtime
 from service.composition.session_runtime import (
@@ -24,6 +25,7 @@ from service.image_edit import api as image_edit_routes
 from service.media import api as demo_routes
 from service.memory import api as memory_routes
 from service.orchestration import api as orchestration_routes
+from service.orchestration.agents import run_triage_for_chat
 from service.review import api as review_routes
 from service.session_history import api as session_history_routes
 from service.session_history.dependencies import configure_session_history
@@ -43,6 +45,11 @@ app.state.review_http_runtime = build_review_http_runtime()
 app.state.image_edit_http_runtime = build_image_edit_http_runtime()
 configure_session_history(app)
 configure_active_workspaces(app)
+# Ordinary chat must be able to ASK the triage specialist, not read a copy of its
+# answer out of the session facts. The handler is bound here because this is the
+# only place allowed to see both packages: service/assistant/** may not import
+# service.orchestration (the edge is one-way, enforced by test_architecture).
+set_specialist_runner("triage", run_triage_for_chat)
 
 
 @app.middleware("http")

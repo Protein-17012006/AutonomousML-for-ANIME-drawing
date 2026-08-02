@@ -44,8 +44,11 @@ def test_degrades_without_ask_fn():
 def test_plain_answer_no_tool():
     fn = lambda p: '{"say": "Pair 1 ghosted.", "tool": null, "args": null}'
     out = decide_agent(_state(), "why flagged?", [], ask_fn=fn)
+    # `specialist` is part of the reply contract since 2026-08-03: the director
+    # may ask a colleague, and that is reported separately from `action` because
+    # asking is not something the artist confirms.
     assert out == {"say": "Pair 1 ghosted.", "grounded": True, "action": None,
-                   "followups": []}
+                   "followups": [], "specialist": None}
 
 
 def test_valid_rerun_proposal_needs_confirm():
@@ -345,16 +348,17 @@ def test_user_message_is_capped():
     # itself. A model that has a repair tool and no such sentence narrates
     # having used it — the same failure the needs_key rule above was bought to
     # stop, on a tool that now writes pixels.
-    # 2026-08-03: 5_450 -> 5_900. Two purchases, ~380 together, and the first is
-    # a REFUND that did not arrive: taking cls/evidence/brief out of the fact
-    # rows shortens a session with many refused pairs but not this fixture, which
-    # has none. What is bought is (a) the `settings:` line now naming tau_gate and
-    # stating that the gate decision IS gap-vs-tau and that the class is written
-    # afterwards, and (b) the rule directing a needs_key "why" to triage rather
-    # than to explain_pair. Both exist because a live answer said the gate "saw a
-    # pose snap" — a residual bucket reported as a cause — and because the same
-    # answer went out for two different questions.
-    assert len(empty["p"]) < 5_900, "static prompt has ballooned"
+    # 2026-08-03: 5_450 -> 6_250. Three purchases, ~680 together — and note the
+    # REFUND that did not arrive: taking cls/evidence/brief out of the fact rows
+    # shortens a session with many refused pairs, but not this fixture, which has
+    # none. Bought: (a) the `settings:` line now naming tau_gate and stating that
+    # the gate decision IS gap-vs-tau and that the class is written afterwards;
+    # (b) the rule sending a needs_key "why" to triage rather than explain_pair;
+    # (c) the SPECIALISTS block and the "ask" field in the reply contract. All
+    # three exist because one live answer said the gate "saw a pose snap" — a
+    # residual bucket reported as a cause — and returned that same text for two
+    # different questions.
+    assert len(empty["p"]) < 6_250, "static prompt has ballooned"
 
 
 def test_agent_route_keeps_history_server_side(monkeypatch):
