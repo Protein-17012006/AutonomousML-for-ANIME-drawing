@@ -7,10 +7,12 @@ exactly as in single-turn chat. Nothing in this module runs a tool's effect.
 from __future__ import annotations
 
 import time
+from dataclasses import replace
 
 from service.assistant.agent import TOOLS
 from service.orchestration import agents as _agents      # noqa: F401 — binds handlers
 from service.orchestration import registry
+from service.orchestration.binding import is_reference, resolve_args
 from service.orchestration.models import StepResult, TranscriptEntry
 
 ORCHESTRATOR = "orchestrator"
@@ -66,17 +68,35 @@ def _run_tool(step, n_pairs: int, state=None) -> StepResult:
                  "label": spec["label"]})
 
 
-def run_step(ctx, step, seq):
+def run_step(ctx, step, seq, sources=None, asker=ORCHESTRATOR):
     """Run ONE step. Returns (entries, result) — the caller decides what to do with
-    the entries, which is what lets the SSE route stream them as they happen."""
+    the entries, which is what lets the SSE route stream them as they happen.
+
+    `sources` holds the payloads of steps that have already run, so this step's
+    args may name one. `asker` is who addressed this step: the orchestrator, or
+    the AGENT that handed the work over."""
     target = registry.resolve(step.target)
     if target is None:                  # unreachable via the planner; defensive
         return [], None
 
-    entries = [_entry(seq, ORCHESTRATOR, step.target, "ask",
-                      step.ask or f"{step.target} {step.args}",
-                      data=dict(step.args))]
+    resolved, bound, error = resolve_args(step.args, sources)
+    ask_data = dict(step.args) if resolved is None else dict(resolved)
+    if bound:
+        # Both ends, or the mechanism is invisible.
+        ask_data["_bound"] = dict(bound)
+    entries = [_entry(seq, asker, step.target, "ask",
+                      step.ask or f"{step.target} {ask_data}", data=ask_data)]
     started = time.monotonic()
+
+    if error:
+        # The server refused these arguments before anyone was asked. Same status
+        # a tool gets for a failed validation, and it reaches synthesis the same way.
+        result = StepResult(step.id, step.target, target.kind, "rejected", says=error)
+        entries.append(_entry(seq, step.target, asker, "error", error,
+                              data={"status": "rejected"}))
+        return entries, result
+
+    step = replace(step, args=resolved)
 
     if target.kind == "agent":
         handler = target.handler
@@ -93,11 +113,9 @@ def run_step(ctx, step, seq):
         result = _run_tool(step, len(ctx.state["result"].pairs), ctx.state)
 
     if not result.ms:
-        result = StepResult(result.step_id, result.target, result.kind,
-                            result.status, result.says, result.payload,
-                            int((time.monotonic() - started) * 1000))
+        result = replace(result, ms=int((time.monotonic() - started) * 1000))
 
-    entries.append(_entry(seq, step.target, ORCHESTRATOR,
+    entries.append(_entry(seq, step.target, asker,
                           _ENTRY_KIND_FOR.get(result.status, "reply"), result.says,
                           data={"status": result.status, **result.payload},
                           ms=result.ms))
@@ -114,10 +132,12 @@ def run_plan(ctx, plan):
     if not plan.is_actionable():
         return
     seq = Seq()
+    sources: dict = {}          # step id -> {"kind", "payload"}, finished steps only
     for step in plan.steps:
-        entries, result = run_step(ctx, step, seq)
+        entries, result = run_step(ctx, step, seq, sources)
         if result is None:
             continue
+        sources[step.id] = {"kind": result.kind, "payload": dict(result.payload)}
         yield entries, result
 
 
