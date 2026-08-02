@@ -14,14 +14,21 @@ service/engines.py.
 from __future__ import annotations
 
 
-def make_triage_fn(*, tau_hold: float, tau_snap: float, ask_fn=None):
+def make_triage_fn(*, tau_hold: float, tau_snap: float, ask_fn=None,
+                   key_vlm_fn=None):
     """Real triage: signals-based class + DeepSeek brief (template on any failure).
-    ask_fn = director_llm.make_ask_fn() product, or None -> template-only."""
+
+    ask_fn = director_llm.make_ask_fn() product, or None -> template-only.
+    key_vlm_fn = a (prompt, frames) -> dict caller that reads the two KEY
+    drawings; None keeps the scalar-only diagnosis this had before, which is
+    what the stub engines and any VLM-less deployment get.
+    """
     from inbetween_copilot.triage.brief import LLMBriefWriter, TemplateBriefWriter
     from inbetween_copilot.triage.service import TriagePair
 
     writer = LLMBriefWriter(ask_fn) if ask_fn is not None else TemplateBriefWriter()
-    service = TriagePair(tau_hold=tau_hold, tau_snap=tau_snap, brief_writer=writer)
+    service = TriagePair(tau_hold=tau_hold, tau_snap=tau_snap, brief_writer=writer,
+                         key_vlm_fn=key_vlm_fn)
 
     def triage_fn(a, b, pp):
         return service.execute(a, b, pp).to_payload()

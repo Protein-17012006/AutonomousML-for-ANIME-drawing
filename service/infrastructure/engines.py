@@ -349,6 +349,11 @@ def box_engines(cfg=None, *, interpolator: str | None = None) -> EngineBundle:
         csq_artifact=art,
         reason_fn=reason_fn,
         ask_fn=make_ask_fn(),
+        # Reads the two KEY drawings of a gate-refused pair. Until now nothing
+        # looked at them: the VLM only ever saw interpolated frames, and a
+        # refused pair has none, so the brief was written from three scalars and
+        # could never name the hand that enters the frame.
+        key_vlm_fn=_post_vlm,
     )
     # surface the calibrated abstain band so the UI dial can draw the measured pass/abstain/flag
     # zones (per-u-bin thresholds on p_error) — the trust instrument, not just a bare %.

@@ -33,6 +33,7 @@ def build_real_ports(
     use_director: bool = True,
     csq_artifact=None,
     ask_fn=None,
+    key_vlm_fn=None,
 ) -> CopilotPorts:
     """Assemble production implementations without leaking them into the pipeline."""
 
@@ -58,6 +59,7 @@ def build_real_ports(
             tau_hold=tau_hold,
             tau_snap=tau_snap,
             ask_fn=ask_fn,
+            key_vlm_fn=key_vlm_fn,
         ),
         keys_needed_fn=keys_from_gap,
         gen_fn=build_generator(anisora_gen, spec),
