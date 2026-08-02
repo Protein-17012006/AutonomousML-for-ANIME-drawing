@@ -29,7 +29,12 @@ def append_chat(state: dict, role: str, text: str) -> None:
     del chat[:-MAX_CHAT_TURNS]
 
 def _valid_index(args: dict, n_pairs: int, state=None) -> bool:
-    return isinstance(args.get("index"), int) and 0 <= args["index"] < n_pairs
+    # `bool` is a subclass of `int`, and a pair lookup keyed by index answers
+    # `{0: p0, 1: p1}.get(True)` with pair 1 — so a model emitting JSON `true`
+    # would address a pair it never named. Every index tool shares this check.
+    index = args.get("index")
+    return (isinstance(index, int) and not isinstance(index, bool)
+            and 0 <= index < n_pairs)
 
 
 def _explanation_for(state, index: int) -> dict:
@@ -67,6 +72,26 @@ def _valid_annotated(args: dict, n_pairs: int, state=None) -> bool:
     if state is None:
         return True
     return bool(_explanation_for(state, args["index"]).get("annotated_url"))
+
+
+def _valid_repairable(args: dict, n_pairs: int, state=None) -> bool:
+    """`image_edit` opens the paint surface over a GENERATED frame.
+
+    A needs_key pair was refused by the gate before interpolation, so no frame
+    exists to paint on and the proposal would promise a missing artefact — the
+    same trap `_valid_annotated` already learned. A pair that carries no
+    rendered mid is refused for the same reason even when it was fillable."""
+    if not _valid_index(args, n_pairs, state):
+        return False
+    if state is None:
+        return True
+    pairs = {pair.index: pair for pair in state["result"].pairs}
+    pair = pairs.get(args["index"])
+    if pair is None or str(getattr(pair, "action", "")) == "needs_key":
+        return False
+    mids = state.get("pair_mids") or {}
+    return bool(getattr(pair, "mid_url", None)
+                or mids.get(args["index"]) or mids.get(str(args["index"])))
 
 
 # proposal key -> the SessionCfg attribute it would change
@@ -115,6 +140,8 @@ TOOLS = {
                       "validate": lambda a, n, c=None: a in ({}, None),
                       "label": "Export bundle"},
     "rerun_session": {"needs_confirm": True,  "validate": _valid_rerun,  "label": "Re-run session"},
+    "image_edit":    {"needs_confirm": True,  "validate": _valid_repairable,
+                      "label": "Repair a frame"},
     "remember_memory":{"needs_confirm": True,  "validate": _valid_memory, "label": "Remember this"},
 }
 
@@ -156,6 +183,10 @@ def _prompt(ctx: str, hist: str, q: str, memories: list[MemoryItem] | None = Non
         '  rerun_session args {"cadence": 24|12|8|null, "smoothness": 1|2|null, '
         '"interpolator": "rife"|"gimm"|null}  (interpolator is the frame-generation '
         'model — use it when the artist is unhappy with the generated motion itself)\n'
+        '  image_edit    args {"index": int}   (opens the paint surface over that '
+        "pair's generated frame so the ARTIST marks the wrong region; you never "
+        'choose the region and you never repair anything yourself. Only pairs that '
+        'have a generated frame — never a needs_key pair)\n'
         '  remember_memory args {"kind": "preference"|"show_context", "key": <one of the '
         'keys listed below>, "value": <short value>}\n'
         + _MEMORY_KEY_HELP

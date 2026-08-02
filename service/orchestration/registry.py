@@ -91,6 +91,10 @@ _TOOL_ARGS = {
     "rerun_session":  '{"cadence": 24|12|8|null, "smoothness": 1|2|null, '
                       '"interpolator": "rife"|"gimm"|null}  (at least ONE of '
                       'cadence/smoothness/interpolator must be set; never send "engines")',
+    # The artist marks the region on the canvas the proposal opens; a step must
+    # never try to supply a mask or a frame list here.
+    "image_edit":     '{"index": <int, 0..n_pairs-1>}  (only a pair that HAS a '
+                      'generated frame; never a needs_key pair)',
     "remember_memory": '{"kind": "preference"|"show_context", "key": <an allowed key>, '
                        '"value": <short string>}',
 }

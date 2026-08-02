@@ -61,6 +61,94 @@ def test_x4_rejected_server_side():
     assert out["action"] is None
 
 
+def _repair_state(action="fill", *, mid_url="/session/1/mid_000.png", frames=True):
+    state = _state()
+    pair = state["result"].pairs[0]
+    pair.action = action
+    pair.mid_url = mid_url
+    pair.frames = [b"a", b"m", b"b"] if frames else None
+    state["pair_mids"] = {"0": mid_url} if mid_url else {}
+    return state
+
+
+def _validate_image_edit(state, index=0):
+    from service.assistant.agent import TOOLS
+    return TOOLS["image_edit"]["validate"](
+        {"index": index}, len(state["result"].pairs), state)
+
+
+def test_image_edit_is_refused_for_a_needs_key_pair():
+    # The gate refused this pair BEFORE interpolation, so there is nothing to
+    # paint on. The mid_url is left PRESENT on purpose: a pair the artist just
+    # rejected becomes needs_key while a stale mid is still listed, and without
+    # that the no-rendered-frame guard would answer this test instead and the
+    # needs_key rule itself would be pinned by nothing.
+    assert _validate_image_edit(
+        _repair_state("needs_key", frames=False)) is False
+
+
+def test_image_edit_refuses_an_index_that_is_not_an_integer():
+    # The args come from an LLM. `true` is JSON-legal and `{0: ...}.get(True)`
+    # returns pair 1, so a dropped type check silently repairs the wrong pair.
+    state = _repair_state("fill")
+    n = len(state["result"].pairs)
+    from service.assistant.agent import TOOLS
+    validate = TOOLS["image_edit"]["validate"]
+    assert validate({"index": True}, n, state) is False
+    assert validate({"index": "0"}, n, state) is False
+    assert validate({"index": 1.0}, n, state) is False
+
+
+def test_image_edit_is_refused_when_a_filled_pair_has_no_rendered_frame():
+    assert _validate_image_edit(
+        _repair_state("fill", mid_url=None, frames=False)) is False
+
+
+def test_image_edit_is_allowed_for_a_filled_pair_with_a_frame():
+    assert _validate_image_edit(_repair_state("fill")) is True
+
+
+def test_image_edit_requires_confirmation():
+    from service.assistant.agent import TOOLS
+    assert TOOLS["image_edit"]["needs_confirm"] is True
+
+
+def test_image_edit_rejects_an_index_outside_the_result():
+    assert _validate_image_edit(_repair_state("fill"), index=99) is False
+
+
+def test_image_edit_proposal_survives_decide_agent_and_needs_confirm():
+    fn = lambda p: '{"say": "Mark the wrong area.", "tool": "image_edit", "args": {"index": 0}}'
+    out = decide_agent(_repair_state("fill"), "pair 0 sai chỗ tay", [], ask_fn=fn)
+    assert out["action"]["tool"] == "image_edit"
+    assert out["action"]["needs_confirm"] is True
+
+
+def test_image_edit_proposal_for_a_needs_key_pair_is_dropped():
+    fn = lambda p: '{"say": "I will fix it.", "tool": "image_edit", "args": {"index": 0}}'
+    out = decide_agent(
+        _repair_state("needs_key", mid_url=None, frames=False),
+        "sửa pair 0", [], ask_fn=fn)
+    assert out["action"] is None
+
+
+def test_prompt_tells_the_agent_it_does_not_choose_the_region_or_repair():
+    # The agent proposes the surface; the ARTIST marks the region. Without this
+    # the model narrates having repaired something, which it cannot do.
+    from service.assistant.agent import decide_agent as _decide
+    seen = {}
+
+    def capture(prompt):
+        seen["prompt"] = prompt
+        return '{"say": "ok", "tool": null, "args": null}'
+
+    _decide(_repair_state("fill"), "hi", [], ask_fn=capture)
+    prompt = seen["prompt"]
+    assert "image_edit" in prompt
+    assert "never choose the region" in prompt
+    assert "never repair anything yourself" in prompt
+
+
 def test_unknown_tool_dropped():
     fn = lambda p: '{"say": "ok", "tool": "delete_session", "args": {}}'
     out = decide_agent(_state(), "demo an error", [], ask_fn=fn)
@@ -251,7 +339,13 @@ def test_user_message_is_capped():
     # circle. The server rail now refuses both tools there; this text stops the
     # offer being MADE, which is the difference between a refusal the artist
     # reads and a promise that quietly does nothing.
-    assert len(empty["p"]) < 5_200, "static prompt has ballooned"
+    # 2026-08-02: 5_200 -> 5_450. One purchase, ~200, for the image_edit tool
+    # line. Two thirds of it is not the tool's shape but its LIMITS: the artist
+    # marks the region, the agent never does, and it never repairs anything
+    # itself. A model that has a repair tool and no such sentence narrates
+    # having used it — the same failure the needs_key rule above was bought to
+    # stop, on a tool that now writes pixels.
+    assert len(empty["p"]) < 5_450, "static prompt has ballooned"
 
 
 def test_agent_route_keeps_history_server_side(monkeypatch):
