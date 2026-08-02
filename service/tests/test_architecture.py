@@ -141,3 +141,20 @@ def test_in_memory_repository_owns_state_and_bounded_paths(tmp_path):
     assert repository.state_for(1) is None
     assert not first.exists()
     assert repository.path_for(2) == str(second)
+
+
+def test_binding_is_pure_of_the_rest_of_the_service():
+    """The resolver is a value transform; it must not reach for state or I/O."""
+    for name in _imports("orchestration/binding.py"):
+        assert not name.startswith("service.assistant"), name
+        assert not name.startswith("service.sessions"), name
+        assert not name.startswith("service.infrastructure"), name
+        assert not name.startswith("fastapi"), name
+
+
+def test_the_orchestration_loop_lives_in_exactly_one_place():
+    """dispatch() and run_goal_stream() used to keep separate copies of the step
+    loop; anything added to one silently did nothing in the other."""
+    source = (SERVICE_ROOT / "orchestration" / "service.py").read_text(encoding="utf-8")
+    assert "run_plan" in source
+    assert "for step in plan.steps" not in source

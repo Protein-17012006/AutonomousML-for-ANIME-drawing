@@ -318,3 +318,14 @@ def test_a_handoff_on_a_fast_synchronous_result_survives_the_ms_rebuild():
 
     assert result.handoff == {"to": "qa_csq", "reason": "wrong agent"}
     assert result.ms >= 0    # the rebuild DID fire (ms was 0 going in)
+
+
+def test_a_plan_with_no_references_and_no_handoffs_behaves_exactly_as_before():
+    """If the new layer does not fire, what runs is what ran yesterday."""
+    results = dispatch(AgentContext(_state()), _demo_plan())
+    assert [(r.target, r.kind, r.status) for r in results] == [
+        ("triage", "agent", "ok"),
+        ("open_board", "tool", "ok"),
+        ("rerun_session", "tool", "queued"),
+    ]
+    assert all(r.handoff is None for r in results)
