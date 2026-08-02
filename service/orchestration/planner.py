@@ -31,8 +31,9 @@ def _prompt(ctx: str, hist: str, goal: str) -> str:
         '{"index": "$1.first_index"}. Use it when you do not know the value yet: '
         "ask cut_survey first, then point the next step at what it answered. "
         "Only fields listed under OUTPUTS above exist, and only steps BEFORE this "
-        "one may be named. Prefer a literal whenever the artist already told you "
-        "the number.\n"
+        "one may be named. The named field's value must itself be a single number, "
+        "string, or boolean — never a list or an object — or the step is rejected. "
+        "Prefer a literal whenever the artist already told you the number.\n"
         "\n\nReply STRICT JSON only: "
         '{"steps": [{"target": <name>, "kind": "agent"|"tool", '
         '"ask": <short question, agents only>, "args": <object>}]}\n'

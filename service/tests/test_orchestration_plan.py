@@ -142,7 +142,15 @@ def test_the_prompt_teaches_the_reference_syntax_with_a_worked_example():
     from service.orchestration.planner import _prompt
     text = _prompt("facts", "", "where do I start?")
     assert "$1.first_index" in text
-    assert "cut_survey" in text
+    # "cut_survey" alone is already in the registry's agent listing and would
+    # survive deleting this instruction entirely — this phrase is not.
+    assert "ask cut_survey first" in text
+
+
+def test_the_prompt_states_the_reference_must_resolve_to_a_scalar():
+    from service.orchestration.planner import _prompt
+    text = _prompt("facts", "", "where do I start?")
+    assert "never a list or an object" in text
 
 
 def test_a_plan_carrying_a_reference_parses_and_keeps_it_verbatim():
