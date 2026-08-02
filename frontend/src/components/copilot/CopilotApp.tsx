@@ -150,6 +150,23 @@ export default function App() {
 
   // chat-first surface state (vault 'Chat-First Copilot Surface')
   const [view, setView] = useState<"chat" | "board">("chat");
+  // Opening the board is a navigation as far as the artist is concerned, but it
+  // changed no URL — so Back left the app entirely and the remount lost the
+  // conversation. Push one history entry when the board opens and treat Back as
+  // "return to the chat", so nothing unmounts.
+  useEffect(() => {
+    const onPop = () => setView("chat");
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+  useEffect(() => {
+    if (view !== "board") return;
+    const current = window.history.state as Record<string, unknown> | null;
+    if (current?.copilotView === "board") return;   // already pushed
+    // Spread the router's own state: replacing it wholesale would strip what
+    // Next.js keeps there and break client-side navigation.
+    window.history.pushState({ ...(current ?? {}), copilotView: "board" }, "");
+  }, [view]);
   const [boardFocus, setBoardFocus] = useState<number | null>(null);
   // The pair whose burnt-in QA mark the agent was asked to show. The nonce makes
   // a second request for the SAME pair a distinct event, so asking again after
@@ -479,11 +496,12 @@ export default function App() {
       result,
       verdicts,
       activeDraftPid,
+      qaTurns,
     };
     void saveState(ownerSub, state).catch((error) =>
       console.warn("could not cache active workspace state", error),
     );
-  }, [activeDraftPid, activeWorkspace, log, ownerSub, recoverableWorkspace, result, running, sessionMode, upload, verdicts]);
+  }, [activeDraftPid, activeWorkspace, log, ownerSub, qaTurns, recoverableWorkspace, result, running, sessionMode, upload, verdicts]);
 
   const selectHistorySession = async (session: PublishedSessionSummary) => {
     setSelectedPid(session.pid);
@@ -1149,6 +1167,10 @@ export default function App() {
         setResult(cached.state.result);
         setVerdicts(cached.state.verdicts);
         setActiveDraftPid(cached.state.activeDraftPid);
+        // Restore the conversation too. The run card used to come back on its
+        // own and the chat came back empty, which reads as "the co-pilot forgot
+        // everything" even though the service still had the turns.
+        if (cached.state.qaTurns?.length) setQaTurns(cached.state.qaTurns);
       } else {
         if (ownerSub) await clearCache(ownerSub);
         clearAll();
