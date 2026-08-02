@@ -256,6 +256,13 @@ def test_a_reference_to_a_field_the_agent_withheld_is_rejected():
     results = [r for _e, r in run_plan(AgentContext(state), plan)]
     assert results[0].status == "ok"
     assert results[1].status == "rejected"
+    # Pin the CAUSE, not just the status: "rejected" is also what a forward
+    # reference to a step that never ran produces (see the previous test), and
+    # a mis-keyed `sources` lookup can turn THIS failure into THAT one while
+    # leaving the status unchanged. The withheld-field message says "did not
+    # report"; the never-ran message says "has not run" — they must not be
+    # interchangeable here.
+    assert "did not report" in results[1].says
 
 
 def test_a_resolved_value_still_passes_through_the_normal_tool_validator():
