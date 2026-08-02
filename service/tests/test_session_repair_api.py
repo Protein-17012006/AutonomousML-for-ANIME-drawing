@@ -146,7 +146,7 @@ def test_repair_installs_the_re_run_verdict_over_the_old_one(live):
     repository.state_for(sid)["eng"].qa_fn = staticmethod(lambda frames: True)
     try:
         _review(repository).repair_pair(
-            sid, 1, [{"frame": 3, "png": PNG}], span_editor=_bright_editor)
+            sid, 1, [{"frame": 1, "png": PNG}], span_editor=_bright_editor)
     finally:
         repository.state_for(sid)["eng"].qa_fn = _Eng.qa_fn
     stored = repository.state_for(sid)["result"]
@@ -219,7 +219,7 @@ def test_repair_refuses_a_needs_key_pair_before_touching_the_gpu(live):
 
     with pytest.raises(ValueError, match="no generated frame"):
         _review(repository).repair_pair(
-            sid, 1, [{"frame": 3, "png": PNG}], span_editor=must_not_run)
+            sid, 1, [{"frame": 1, "png": PNG}], span_editor=must_not_run)
 
 
 def test_repair_recomputes_neighbours_when_qa_judges_a_shared_window(live):

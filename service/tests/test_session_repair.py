@@ -136,11 +136,21 @@ def test_rejects_a_frame_outside_the_reconstructed_cut(state):
         validate_repair_request(state, 1, [{"frame": 9999, "png": PNG}], 1)
 
 
-def test_rejects_a_frame_belonging_to_another_pair(state):
-    # The route is pair-scoped. Cut frame 4 is pair 2's; accepting it here would
-    # write repaired pixels into a pair the request never named.
-    with pytest.raises(ValueError, match="pair 1"):
-        validate_repair_request(state, 1, [{"frame": 4, "png": PNG}], 1)
+def test_rejects_the_key_a_pair_shares_with_its_predecessor(state):
+    # Pair 2's position 0 is the key it shares with pair 1; the assembler drops
+    # it, so on screen that frame belongs to pair 1. The route is pair-scoped
+    # and must not write another pair's frame.
+    with pytest.raises(ValueError, match="pair 2"):
+        validate_repair_request(state, 2, [{"frame": 0, "png": PNG}], 1)
+
+
+def test_translates_pair_positions_into_cut_frames(state):
+    # The wire is pair-local; context_bounds needs cut coordinates. Pair 2's
+    # positions 1 and 2 are cut frames 3 and 4, NOT 1 and 2 -- so a translation
+    # that merely passed the number through would go red here.
+    decoded = validate_repair_request(
+        state, 2, [{"frame": 1, "png": PNG}, {"frame": 2, "png": PNG}], 1)
+    assert [cut_frame for cut_frame, _ in decoded] == [3, 4]
 
 
 def test_rejects_a_mask_that_is_not_a_png(state):

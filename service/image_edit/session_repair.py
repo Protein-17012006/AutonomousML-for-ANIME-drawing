@@ -64,6 +64,12 @@ def _decode_data_url(payload) -> bytes:
 def validate_repair_request(state: dict, index: int, masks, refinement_passes: int):
     """Return ``[(cut_frame, png_bytes), ...]`` sorted by frame, or raise.
 
+    Masks arrive keyed by POSITION WITHIN THE PAIR — ``{"frame": 1}`` is that
+    pair's mid — and leave in reconstructed-cut coordinates, which is what
+    ``context_bounds`` needs. Keeping the public payload pair-local is what
+    makes "a frame belonging to another pair" unrepresentable rather than
+    merely refused: the route is pair-scoped, so its coordinates should be too.
+
     Every refusal states its reason, because a route that answers 422 without
     naming which rule fired cannot be diagnosed and cannot be tested for.
     """
@@ -91,25 +97,33 @@ def validate_repair_request(state: dict, index: int, masks, refinement_passes: i
     if str(pair.action) == "needs_key" or not pair.frames:
         raise ValueError(f"pair {index} has no generated frame to repair")
 
-    # No redundant "owns no cut frames" guard here: it would raise the same
-    # sentence as the check above, making the two indistinguishable to a test.
-    owned = _pair_frame_positions(state, index)
+    # position within pair.frames -> index into the reconstructed cut. A
+    # position the assembler deduped away (a pair's shared leading key) is
+    # absent here and is refused below: it is another pair's frame on screen.
+    # No redundant "owns nothing" guard: it would raise the same sentence as
+    # the needs_key check above, making the two indistinguishable to a test.
+    cut_index_of = {
+        position: cut_index
+        for cut_index, position in _pair_frame_positions(state, index).items()
+    }
     seen: set[int] = set()
     decoded: list[tuple[int, bytes]] = []
     for entry in masks:
-        frame = entry.get("frame") if isinstance(entry, dict) else None
-        if not isinstance(frame, int) or isinstance(frame, bool):
+        position = entry.get("frame") if isinstance(entry, dict) else None
+        if not isinstance(position, int) or isinstance(position, bool):
             raise ValueError("each mask must name an integer frame")
-        if frame in seen:
-            raise ValueError(f"frame {frame} was submitted twice")
-        seen.add(frame)
-        if frame not in owned:
+        if position in seen:
+            raise ValueError(f"frame {position} was submitted twice")
+        seen.add(position)
+        if position not in cut_index_of:
             raise ValueError(
-                f"frame {frame} is outside pair {index}'s generated frames"
+                f"frame {position} is outside pair {index}'s generated frames"
             )
-        decoded.append((frame, _decode_data_url(entry.get("png"))))
+        decoded.append((cut_index_of[position],
+                        _decode_data_url(entry.get("png"))))
 
-    span = max(seen) - min(seen) + 1
+    cut_frames = [cut_index for cut_index, _ in decoded]
+    span = max(cut_frames) - min(cut_frames) + 1
     if span > MAX_REPAIR_SPAN:
         raise ValueError(
             f"the painted frames span {span} frames, over the {MAX_REPAIR_SPAN} limit"
