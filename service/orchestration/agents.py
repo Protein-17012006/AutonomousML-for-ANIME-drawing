@@ -95,9 +95,15 @@ def triage_agent(ctx: AgentContext, step) -> StepResult:
     stored = getattr(pair, "triage", None)
     if isinstance(stored, dict) and stored:
         # On-population: the gate refused this pair and triage already ran on it.
-        brief = str(stored.get("brief") or "").strip()
-        return _result(step, "ok", brief or f"Diagnosis: {stored.get('cls', '?')}.",
-                       payload=dict(stored), started=started)
+        #
+        # The MEASUREMENTS stay frozen — regenerating a diagnosis can contradict
+        # what is on screen, the failure Spec 4 closed. The ANSWER is written for
+        # THIS question: returning `brief` replayed one string written during the
+        # pipeline, so two different questions about one pair came back
+        # byte-identical and neither was about what was asked.
+        from inbetween_copilot.triage.answer import answer_refusal
+        says = answer_refusal(ctx.goal, stored, ctx.ask_fn, index=index)
+        return _result(step, "ok", says, payload=dict(stored), started=started)
 
     keys = ctx.state.get("keys") or []
     if not isinstance(index, int) or index < 0 or index + 1 >= len(keys):

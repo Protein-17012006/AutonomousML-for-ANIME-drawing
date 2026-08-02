@@ -121,21 +121,33 @@ def test_live_entries_are_streamed_to_the_callback():
 
 def test_utterances_are_yielded_BEFORE_the_synthesis_runs():
     """Liveness: the transcript must not be a recording replayed after the turn.
-    The synthesis call must not have happened while entries are still arriving."""
+    The synthesis call must not have happened while entries are still arriving.
+
+    Counting ask_fn calls is NOT enough any more, and the difference matters.
+    Since 2026-08-03 the triage specialist writes its own answer through the same
+    say_ask_fn, so a bare call count no longer isolates synthesis — it would go
+    green on a run where synthesis had not happened and red on one where it had.
+    Only prompts carrying the decide_agent contract count as synthesis."""
     from service.orchestration.service import run_goal_stream
 
-    calls = {"say": 0}
+    prompts = []
 
     def say(prompt):
-        calls["say"] += 1
+        prompts.append(prompt)
         return '{"say": "ok", "tool": null}'
+
+    def n_synthesis():
+        return sum(1 for p in prompts if "Reply STRICT JSON only:" in p)
 
     stream = run_goal_stream(_state(), "g", [], plan_ask_fn=lambda p: _PLAN,
                              say_ask_fn=say)
     kind, payload = next(stream)
     assert kind == "agent"
     assert payload.frm == "orchestrator"
-    assert calls["say"] == 0, "synthesis ran before the first utterance was emitted"
+    assert n_synthesis() == 0, "synthesis ran before the first utterance was emitted"
+    # ...and the specialist really did do its own thinking, rather than the
+    # director answering on its behalf from the session facts.
+    assert any("gap-triage specialist" in p for p in prompts)
 
     kinds = [kind] + [k for k, _ in stream]
     assert kinds[-1] == "decision"
