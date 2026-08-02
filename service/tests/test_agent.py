@@ -345,7 +345,16 @@ def test_user_message_is_capped():
     # itself. A model that has a repair tool and no such sentence narrates
     # having used it — the same failure the needs_key rule above was bought to
     # stop, on a tool that now writes pixels.
-    assert len(empty["p"]) < 5_450, "static prompt has ballooned"
+    # 2026-08-03: 5_450 -> 5_900. Two purchases, ~380 together, and the first is
+    # a REFUND that did not arrive: taking cls/evidence/brief out of the fact
+    # rows shortens a session with many refused pairs but not this fixture, which
+    # has none. What is bought is (a) the `settings:` line now naming tau_gate and
+    # stating that the gate decision IS gap-vs-tau and that the class is written
+    # afterwards, and (b) the rule directing a needs_key "why" to triage rather
+    # than to explain_pair. Both exist because a live answer said the gate "saw a
+    # pose snap" — a residual bucket reported as a cause — and because the same
+    # answer went out for two different questions.
+    assert len(empty["p"]) < 5_900, "static prompt has ballooned"
 
 
 def test_agent_route_keeps_history_server_side(monkeypatch):
@@ -542,18 +551,24 @@ def _needs_key_pair(index: int = 1):
     return pair
 
 
-def test_context_carries_the_triage_brief_for_a_refused_pair():
-    """R2. The gate computes an animator-grade instruction for every refused pair
-    and the agent was never shown it, so "where do I draw?" got a generic answer."""
+def test_context_points_at_triage_instead_of_copying_its_answer():
+    """R2 was "the agent was never shown the gate's instruction", and copying the
+    whole diagnosis into the facts was the first fix. It cost more than it paid:
+    with a literal already in front of it the director never delegated (audit
+    2026-08-02 — routed 13/14, cooperated 0/14), and the brief in this row is the
+    exact string that got replayed verbatim to every question about the pair.
+
+    R2 is now met by delegation. What must survive here is the MEASUREMENT, so
+    two pairs can still be compared, and a pointer naming who holds the rest."""
     from service.assistant.ask import build_session_context
 
     state = _state()
     state["result"].pairs = [_needs_key_pair(1)]
     ctx = build_session_context(state)
 
-    assert "pose_snap" in ctx
-    assert "0.043" in ctx
-    assert "overshoot extreme" in ctx
+    assert "pose_snap" not in ctx
+    assert "overshoot extreme" not in ctx
+    assert "held by triage" in ctx
 
 
 def test_glossary_defines_genga_and_douga():

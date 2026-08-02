@@ -176,9 +176,10 @@ def _prompt(ctx: str, hist: str, q: str, memories: list[MemoryItem] | None = Non
         # Without this the model offers "the detailed gate triage and annotated
         # frame" for exactly those pairs — the one case where neither exists.
         '  A pair whose action is needs_key has NO vlm finding and NO annotated '
-        'image. Never offer explain_pair or show_annotated for one: say the gate '
-        'reason inline from the facts, and use open_board if the artist wants to '
-        'draw the key it asked for.\n'
+        'image. Never offer explain_pair or show_annotated for one: propose '
+        '`triage`, which is the ONLY way to get its gate diagnosis, key budget '
+        'and drawing brief — the session facts do not contain them. Use '
+        'open_board if the artist wants to draw the key it asked for.\n'
         '  export_bundle args {}\n'
         '  rerun_session args {"cadence": 24|12|8|null, "smoothness": 1|2|null, '
         '"interpolator": "rife"|"gimm"|null}  (interpolator is the frame-generation '
@@ -197,10 +198,13 @@ def _prompt(ctx: str, hist: str, q: str, memories: list[MemoryItem] | None = Non
         "calls for one — otherwise tool=null. Propose remember_memory ONLY when the "
         "user explicitly asks to remember/save something for future sessions; it "
         "always requires user confirmation.\n"
-        "  When the user asks WHY a pair was flagged, abstained, refused or "
-        "corrected, propose explain_pair for that pair instead of saying the facts "
-        "do not explain it — explain_pair is what retrieves the per-pair evidence, "
-        "including the annotated image the run already rendered.\n"
+        "  When the user asks WHY a pair was flagged, abstained or corrected, "
+        "propose explain_pair for that pair instead of saying the facts do not "
+        "explain it — explain_pair is what retrieves the per-pair evidence, "
+        "including the annotated image the run already rendered. When they ask "
+        "why a pair was REFUSED (action needs_key), propose triage instead: "
+        "explain_pair has nothing to read out for a pair that was never "
+        "interpolated.\n"
         "  The `settings:` fact line states the cadence, smoothness and "
         "interpolator the session is already running. Never propose "
         "rerun_session with those same values — it re-renders the whole cut and "

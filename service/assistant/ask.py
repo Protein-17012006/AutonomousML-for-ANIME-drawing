@@ -34,7 +34,11 @@ def build_session_context(state: dict) -> str:
         lines.append(
             f"settings: cadence={getattr(cfg, 'cadence_fps', '?')}fps "
             f"smoothness=x{getattr(cfg, 'smoothness', '?')} "
-            f"interpolator={getattr(cfg, 'interpolator', '?')}")
+            f"interpolator={getattr(cfg, 'interpolator', '?')} "
+            f"tau_gate={getattr(cfg, 'tau_gate', '?')} "
+            "(a pair is refused when its gap reaches tau_gate — that comparison "
+            "is the entire gate decision; the pair's class is a description "
+            "written afterwards, never the reason)")
     for p in res.pairs:
         qa = p.qa.status if p.qa is not None else "-"
         reason = p.qa.reason if p.qa is not None else ""
@@ -46,22 +50,23 @@ def build_session_context(state: dict) -> str:
             steps = "; ".join(f"{r.action_kind} — {getattr(r, 'reason', '')}"
                               for r in corr.rounds)
             row += f" | correction[{corr.status}]: {steps}"
-        # The gate's diagnosis for a refused pair — the class it recognised, the
-        # measurement behind it, and the instruction it wrote for the artist. This
-        # is the answer to "why was it refused" and "where do I draw", so it goes
-        # in front of the agent instead of being left in the payload unread.
-        triage = getattr(p, "triage", None)
-        if isinstance(triage, dict) and triage:
-            ev = triage.get("evidence") or {}
-            facts = " ".join(f"{k}={v}" for k, v in ev.items() if v is not None)
-            row += (f" | triage[{triage.get('cls', '?')}"
-                    f", keys_suggested={triage.get('keys_suggested', '?')}"
-                    f", confidence={triage.get('confidence', '?')}]")
-            if facts:
-                row += f" {facts}"
-            brief = str(triage.get("brief") or "").strip()
-            if brief:
-                row += f" | brief: {brief}"
+        # The MEASUREMENT the gate compared, for EVERY pair. Without it the
+        # artist cannot compare two pairs at all — which is the question that
+        # started this: "pair 5's gap looks bigger and it was not refused".
+        # Type-checked, not just None-checked: this fact sheet is built on every
+        # chat turn, and an unguarded format on a pair carrying anything other
+        # than a number raises straight through the whole turn.
+        gap = getattr(p, "gap", None)
+        if isinstance(gap, (int, float)) and not isinstance(gap, bool):
+            row += f" gap={gap:.5f}"
+        # The DIAGNOSIS is held by the triage specialist and deliberately NOT
+        # copied here. This row used to carry cls, the whole evidence dict and
+        # the brief, and that had two costs: the director never had to ask anyone
+        # (audit 2026-08-02 — routed 13/14, cooperated 0/14, because a literal was
+        # already in front of it), and the frozen brief was the string replayed
+        # verbatim to every question about the pair.
+        if isinstance(getattr(p, "triage", None), dict) and p.triage:
+            row += " | gate diagnosis held by triage — propose the triage tool to get it"
         # What the vision model actually saw, and where. Computed by explain_pairs
         # and stored on the session, but never shown to the agent before — so the
         # agent could offer the picture and still not say what was in it.
