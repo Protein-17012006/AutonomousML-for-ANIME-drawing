@@ -59,6 +59,11 @@ class TriagePair:
         """
         evidence = dict(diagnosis.evidence or {})
         located = hot_cell(a, b)
+        # Recorded even when nothing is found. `hot_cell` is simply ABSENT when
+        # no cell stands out, which left every reader inferring "not localized"
+        # from silence — and silence also covers "the localizer never ran" (the
+        # stub path). Absence of a key is not evidence; this separates the two.
+        evidence["hot_cell_searched"] = True
         if located is not None:
             cell, score, ratio = located
             evidence["hot_cell"] = cell

@@ -182,6 +182,9 @@ class ResumeSession:
                 "result": result,
                 "rev": int((snapshot.get("resume") or {}).get("rev") or 0),
                 "explanations": dict(result_event.get("explanations") or {}),
+                # Published with the result event, so a reopened session can
+                # still point the artist at where the drawing travels.
+                "pair_keys": dict(result_event.get("pair_keys") or {}),
                 "qa_degraded": bool(result_event.get("qa_degraded")),
                 "sampling": dict(result_event.get("sampling") or {}),
                 # Per-gap ground truth is not published (it would mean storing

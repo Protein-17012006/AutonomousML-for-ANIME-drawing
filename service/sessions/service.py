@@ -88,6 +88,11 @@ class RunSession:
             "result": result,
             "rev": 0,
             "explanations": persisted_explanations,
+            # The key-travel overlay for each GATE-REFUSED pair. It was returned
+            # to the client and never persisted, so no agent could see it: asked
+            # "where in the image?", triage answered "there is nothing to point
+            # at" while pair_1_keys.png sat in this very directory.
+            "pair_keys": dict(metadata.pair_keys or {}),
             "qa_degraded": metadata.qa_degraded,
             "sampling": persisted_sampling,
             # per-gap real GT (video flow; None for PNG uploads) — the compare

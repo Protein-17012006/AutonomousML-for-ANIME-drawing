@@ -102,7 +102,10 @@ def triage_agent(ctx: AgentContext, step) -> StepResult:
         # pipeline, so two different questions about one pair came back
         # byte-identical and neither was about what was asked.
         from inbetween_copilot.triage.answer import answer_refusal
-        says = answer_refusal(ctx.goal, stored, ctx.ask_fn, index=index)
+        overlays = ctx.state.get("pair_keys") or {}
+        says = answer_refusal(
+            ctx.goal, stored, ctx.ask_fn, index=index,
+            overlay=bool(overlays.get(index) or overlays.get(str(index))))
         return _result(step, "ok", says, payload=dict(stored), started=started)
 
     keys = ctx.state.get("keys") or []

@@ -45,6 +45,16 @@ _COMPARISON_RULE = (
 )
 
 
+_OVERLAY_RULE = (
+    "WHERE TO POINT WHEN ASKED\n"
+    "  A key-travel overlay for this pair ALREADY EXISTS and is on the artist's "
+    "review board: the held line in grey, where the drawing IS in red, where it "
+    "MOVES TO in blue. If they ask where the change is, point them at it — and "
+    "NEVER say there is nothing to show them. Saying no cell stood out is "
+    "correct; saying there is nothing to look at is not.\n"
+)
+
+
 def _facts(payload: dict) -> str:
     ev = dict(payload.get("evidence") or {})
     lines = [
@@ -53,13 +63,20 @@ def _facts(payload: dict) -> str:
         f"  keys_suggested = {payload.get('keys_suggested', '?')}",
     ]
     lines += [f"  {k} = {ev[k]}" for k in _EVIDENCE_KEYS if ev.get(k) is not None]
+    # State the negative result rather than leaving the key out. Absence read as
+    # "not localized" is an inference; this is the measurement.
+    if ev.get("hot_cell_searched") and ev.get("hot_cell") is None:
+        lines.append(
+            "  hot_cell = NONE — the localizer ran and no single cell stood out "
+            "(none beat the runner-up by 1.4x), so the change is spread across "
+            "the drawing rather than sitting in one place")
     brief = str(payload.get("brief") or "").strip()
     if brief:
         lines.append(f"  drawing brief already written for this pair: {brief}")
     return "\n".join(lines)
 
 
-def prompt_for(question: str, payload: dict, index=None) -> str:
+def prompt_for(question: str, payload: dict, index=None, overlay: bool = False) -> str:
     where = f"pair {index}" if index is not None else "this pair"
     return (
         "You are the In-Between Co-pilot's gap-triage specialist. An artist is "
@@ -67,7 +84,8 @@ def prompt_for(question: str, payload: dict, index=None) -> str:
         "no in-between frame was ever generated for it.\n\n"
         "WHAT YOU MEASURED (your only facts — never invent another):\n"
         + _facts(payload) + "\n\n"
-        + _GATE_RULES + "\n" + _COMPARISON_RULE + "\n"
+        + _GATE_RULES + "\n" + _COMPARISON_RULE
+        + ("\n" + _OVERLAY_RULE if overlay else "") + "\n"
         "Answer the question that was asked, in the artist's own language, in at "
         "most 90 words. Whenever you give the reason, state gap and tau_gate as "
         "numbers. Never claim to have seen more than the two key drawings.\n\n"
@@ -93,11 +111,12 @@ def deterministic_answer(payload: dict, index=None) -> str:
     return head + tail + (f" {brief}" if brief else "")
 
 
-def answer_refusal(question: str, payload: dict, ask_fn, index=None) -> str:
+def answer_refusal(question: str, payload: dict, ask_fn, index=None,
+                   overlay: bool = False) -> str:
     """The specialist's answer to THIS question, grounded in the STORED payload."""
     if ask_fn is not None:
         try:
-            said = (ask_fn(prompt_for(question, payload, index)) or "").strip()
+            said = (ask_fn(prompt_for(question, payload, index, overlay)) or "").strip()
         except Exception:      # noqa: BLE001 — a dead LLM costs the wording, not the answer
             said = ""
         if said:

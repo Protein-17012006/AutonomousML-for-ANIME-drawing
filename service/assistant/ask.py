@@ -67,6 +67,14 @@ def build_session_context(state: dict) -> str:
         # verbatim to every question about the pair.
         if isinstance(getattr(p, "triage", None), dict) and p.triage:
             row += " | gate diagnosis held by triage — propose the triage tool to get it"
+        # A refused pair has no generated frame and no annotated image, but it
+        # DOES have this: the two keys drawn over each other. Announced because
+        # "where is the change?" was answered "there is nothing to point at"
+        # while the file already existed.
+        overlays = state.get("pair_keys") or {}
+        if overlays.get(p.index) or overlays.get(str(p.index)):
+            row += (" | key-travel overlay available (held line grey, where the "
+                    "drawing is red, where it moves to blue)")
         # What the vision model actually saw, and where. Computed by explain_pairs
         # and stored on the session, but never shown to the agent before — so the
         # agent could offer the picture and still not say what was in it.
