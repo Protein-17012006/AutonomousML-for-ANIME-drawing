@@ -1,7 +1,15 @@
 from unittest.mock import MagicMock
 
 from service.orchestration.agents import AgentContext, cut_survey_agent
-from service.orchestration.models import Step
+from service.orchestration.models import Step, StepResult
+
+
+class _Bare:
+    """A pair-shaped object with NO attributes at all — not even `.index`. This
+    reproduces round-2 review's AttributeError: `int(pair.index)` used to raise
+    past the (TypeError, ValueError) guard when the attribute was entirely
+    absent, not merely present-but-wrong-typed. A MagicMock cannot exercise
+    this: it auto-creates any attribute you read from it."""
 
 
 def _pair(index, action="filled", qa_status="pass", keys_requested=0):
@@ -70,15 +78,30 @@ def test_flag_and_needs_key_are_NOT_forced_into_one_ranking():
 
 
 def test_work_order_is_positional_across_all_actionable_buckets_not_grouped_by_bucket():
-    """Interleave flag / needs_key / abstain out of bucket-declaration order
-    (_ACTIONABLE = flag, needs_key, abstain) and confirm work_order tracks cut
-    position only, never bucket type."""
-    out = _run(_state([_pair(0, qa_status="flag"),
-                       _pair(1, action="needs_key", keys_requested=1),
-                       _pair(2, qa_status="abstain"),
-                       _pair(3, qa_status="pass")]))
+    """Discriminating arrangement: abstain@0, flag@1, needs_key@2.
+
+    _ACTIONABLE is declared ("flag", "needs_key", "abstain"), so bucket-first
+    grouping would emit flag's pair (1), then needs_key's pair (2), then
+    abstain's pair (0) last -> [1, 2, 0], first_index=1. Positional-by-cut
+    order gives [0, 1, 2], first_index=0. The two orderings disagree on every
+    element here, so this test fails against bucket-first code and cannot
+    pass vacuously the way flag@0/needs_key@1/abstain@2 would (those already
+    ascend in both orderings' declared sequence)."""
+    out = _run(_state([_pair(0, qa_status="abstain"),
+                       _pair(1, qa_status="flag"),
+                       _pair(2, action="needs_key", keys_requested=1)]))
     assert [w["index"] for w in out.payload["work_order"]] == [0, 1, 2]
     assert out.payload["first_index"] == 0
+
+
+def test_a_pair_missing_the_index_attribute_entirely_does_not_raise():
+    """Regression for round-2: a pair-shaped object with no `.index` at all
+    must be reported, not raised. It is silently excluded from every bucket
+    (the same deferred-minor behaviour as a non-coercible index) but the call
+    itself must still return a StepResult."""
+    out = _run(_state([_Bare()]))
+    assert isinstance(out, StepResult)
+    assert out.payload["n_pairs"] == 1
 
 
 def test_it_says_WHY_it_orders_by_position_and_not_by_severity():

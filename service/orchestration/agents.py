@@ -239,15 +239,18 @@ def cut_survey_agent(ctx: AgentContext, step) -> StepResult:
             "sensible and mean nothing. Re-run the cut once the detector is back up.",
             payload={"qa_degraded": True}, started=started)
 
-    # A pair whose index will not coerce to int cannot be placed in a
-    # cut-position order; drop it from the order rather than let sort/int()
-    # raise — this agent reports, it never propagates. This is the only
-    # boundary this function crosses (attribute values it does not control),
-    # so it is the only place that gets a guard.
+    # A pair whose index is absent, or present but won't coerce to int, cannot
+    # be placed in a cut-position order; drop it from the order rather than
+    # let getattr/int() raise — this agent reports, it never propagates. The
+    # attribute read is defensive (getattr with a None default) so a bare
+    # object missing `.index` hits the same (TypeError, ValueError) clause as
+    # a bad value, instead of raising AttributeError past this guard. This is
+    # the only boundary this function crosses (attribute values it does not
+    # control), so it is the only place that gets a guard.
     placed = []
     for pair in pairs:
         try:
-            idx = int(pair.index)
+            idx = int(getattr(pair, "index", None))
         except (TypeError, ValueError):
             continue
         placed.append((idx, pair, _bucket_for(pair)))
