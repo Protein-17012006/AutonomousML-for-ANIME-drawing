@@ -13,7 +13,8 @@ from service.assistant.agent import TOOLS
 from service.orchestration import agents as _agents      # noqa: F401 — binds handlers
 from service.orchestration import registry
 from service.orchestration.binding import is_reference, resolve_args
-from service.orchestration.models import StepResult, TranscriptEntry
+from service.orchestration.models import (MAX_PLAN_STEPS, Step, StepResult,
+                                          TranscriptEntry)
 
 ORCHESTRATOR = "orchestrator"
 
@@ -122,22 +123,77 @@ def run_step(ctx, step, seq, sources=None, asker=ORCHESTRATOR):
     return entries, result
 
 
+def _handoff_refusal(result, is_born: bool, handed_to: set, planned: int) -> str:
+    """Why this handoff must NOT run — "" means run it. Never raises.
+
+    A handoff is an agent choosing the next specialist. It is honoured only from a
+    refusal ("I cannot help, but X can"), never toward a tool (that would queue an
+    action the planner never proposed and the artist never saw in the plan), and
+    never past the caps that keep one turn finite."""
+    handoff = getattr(result, "handoff", None)
+    if not isinstance(handoff, dict) or not handoff:
+        return ""                       # nothing offered; nothing to report
+    if result.status != "refused":
+        return "a handoff is only honoured from a refusal"
+    if is_born:
+        return "handoff depth is 1: a handoff-born step may not hand off again"
+    to = handoff.get("to")
+    target = registry.resolve(to) if isinstance(to, str) else None
+    if target is None:
+        return f"handoff to unknown target {to!r}"
+    if target.kind != "agent":
+        return (f"handoff to '{to}' refused: it is a tool, and an agent may not "
+                "queue an action the planner never proposed")
+    if to in handed_to:
+        return f"{to} already received a handoff this turn"
+    if planned >= MAX_PLAN_STEPS:
+        return f"the {MAX_PLAN_STEPS}-step budget for this turn is spent"
+    args = handoff.get("args")
+    if not isinstance(args, dict) or any(is_reference(v) for v in args.values()):
+        return "handoff args must be plain values"
+    return ""
+
+
 def run_plan(ctx, plan):
     """Generator: yields (entries, result) for each step actually run, in order.
 
-    The single owner of the step loop. `dispatch` drains it with a callback and
-    `run_goal_stream` drains it while yielding to SSE — they used to keep separate
-    copies of this loop, so anything added to one silently did nothing in the other.
-    Never raises."""
+    Owns the work queue, late binding and handoff. A handoff-born step spends the
+    SAME budget as a planned one — there is no separate allowance — and it is
+    addressed by the agent that authored it, not by the orchestrator. Never raises."""
     if not plan.is_actionable():
         return
     seq = Seq()
-    sources: dict = {}          # step id -> {"kind", "payload"}, finished steps only
-    for step in plan.steps:
-        entries, result = run_step(ctx, step, seq, sources)
+    queue = [(step, ORCHESTRATOR, False) for step in plan.steps]
+    sources: dict = {}
+    handed_to: set = set()
+    ran = 0
+    next_id = max((step.id for step in plan.steps), default=0)
+
+    while queue and ran < MAX_PLAN_STEPS:
+        step, asker, is_born = queue.pop(0)
+        entries, result = run_step(ctx, step, seq, sources, asker)
         if result is None:
             continue
+        ran += 1
         sources[step.id] = {"kind": result.kind, "payload": dict(result.payload)}
+
+        refusal = _handoff_refusal(result, is_born, handed_to, ran + len(queue))
+        handoff = getattr(result, "handoff", None)
+        if isinstance(handoff, dict) and handoff:
+            if refusal:
+                # Dropped, never swallowed: a mechanism nobody can see is a
+                # mechanism nobody can trust.
+                entries.append(_entry(seq, step.target, ORCHESTRATOR, "error",
+                                      f"handoff to {handoff.get('to')!r} not run: "
+                                      f"{refusal}",
+                                      data={"status": "handoff_dropped"}))
+            else:
+                next_id += 1
+                handed_to.add(handoff["to"])
+                queue.append((Step(next_id, handoff["to"], "agent",
+                                   ask=str(handoff.get("why") or "")[:300],
+                                   args=dict(handoff.get("args") or {})),
+                              step.target, True))
         yield entries, result
 
 

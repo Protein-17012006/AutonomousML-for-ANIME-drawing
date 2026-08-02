@@ -52,11 +52,12 @@ def _pair_by_index(state: dict, index):
     return {p.index: p for p in state["result"].pairs}.get(index)
 
 
-def _result(step, status, says, payload=None, started=0.0):
+def _result(step, status, says, payload=None, started=0.0, handoff=None):
     return StepResult(
         step_id=step.id, target=step.target, kind="agent", status=status,
         says=says, payload=payload or {},
-        ms=int((time.monotonic() - started) * 1000) if started else 0)
+        ms=int((time.monotonic() - started) * 1000) if started else 0,
+        handoff=handoff)
 
 
 # --- Triage -----------------------------------------------------------------
@@ -122,16 +123,32 @@ def triage_agent(ctx: AgentContext, step) -> StepResult:
         "accepted by the gate.")
     ev = payload.get("evidence") or {}
     facts = ", ".join(f"{k}={v}" for k, v in ev.items() if v is not None)
+
+    # CORRECTION 2: point at perception ONLY when perception actually has a
+    # finding for this pair. Otherwise this is a promise of an artefact that does
+    # not exist — the defect fixed on 2026-08-01.
+    exp = ctx.state.get("explanations") or {}
+    info = exp.get(index) or exp.get(str(index)) or {}
+    has_finding = bool(isinstance(info, dict) and info.get("explanation"))
+
     says = (
         f"What I can measure: this reads as {payload.get('cls', 'unclassified')}"
         + (f" ({facts})" if facts else "")
         + ". What I will not give you is a key count or a drawing brief. My key "
           "budget was fitted on pairs the gate REFUSED, and the gate accepted this "
           "one — a prescription from me here would look confident and be "
-          "unverified. For a pair that was filled, ask perception what went wrong "
-          "in it instead."
+          "unverified."
+        + (" Perception did examine this pair, so I am passing it over."
+           if has_finding else
+           " Nobody examined the frames of this pair either, so I have nothing "
+           "further to hand you.")
     )
-    return _result(step, "refused", says, payload=payload, started=started)
+    handoff = ({"to": "perception", "args": {"index": index},
+                "why": "the gate accepted this pair, so perception has frames "
+                       "to read and a finding on record"}
+               if has_finding else None)
+    return _result(step, "refused", says, payload=payload, started=started,
+                   handoff=handoff)
 
 
 # --- Perception -------------------------------------------------------------
