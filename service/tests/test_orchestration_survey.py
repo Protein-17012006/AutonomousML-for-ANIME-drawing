@@ -104,6 +104,31 @@ def test_a_pair_missing_the_index_attribute_entirely_does_not_raise():
     assert out.payload["n_pairs"] == 1
 
 
+def test_an_unreadable_pair_is_never_reported_as_having_passed():
+    """Regression for round-3: a pair that could not be bucketed at all was
+    never reviewed, so it must not be folded into an "all passed" verdict —
+    that would tell the artist QA ran clean on data QA never saw. With the
+    ONLY pair in the session unreadable, the reply must say it could not be
+    read, not that it passed, and `unreadable` must be in the payload so the
+    gap is legible rather than silent inside n_pairs."""
+    out = _run(_state([_Bare()]))
+    assert out.status == "ok"
+    assert out.payload["unreadable"] == 1
+    assert "all 1 pair" not in out.says.lower()
+    assert "passed" not in out.says.lower() or "could not read" in out.says.lower()
+
+
+def test_the_has_work_reply_also_surfaces_unreadable_pairs():
+    """An unreadable pair alongside real work must not be dropped silently —
+    understating the count in a way the artist cannot detect is the same
+    failure as claiming a false pass, just on the has-work branch."""
+    out = _run(_state([_pair(0, qa_status="flag"), _Bare()]))
+    assert out.payload["unreadable"] == 1
+    assert out.payload["n_pairs"] == 2
+    assert "1" in out.says
+    assert "no usable index" in out.says.lower() or "unreadable" in out.says.lower()
+
+
 def test_it_says_WHY_it_orders_by_position_and_not_by_severity():
     out = _run(_state([_pair(0, qa_status="flag"), _pair(1, qa_status="flag")]))
     assert "severity" in out.says.lower() or "worse" in out.says.lower()

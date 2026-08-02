@@ -274,15 +274,33 @@ def cut_survey_agent(ctx: AgentContext, step) -> StepResult:
     work_order = [{"index": idx, "bucket": bucket, "why": _WHY[bucket]}
                   for idx, _pair, bucket in placed if bucket in _ACTIONABLE]
 
+    # A pair dropped above because its index could not be read is NOT a pair
+    # that was reviewed and found clean — it was never bucketed at all. Fold
+    # it into "all passed" and the artist closes the cut believing QA ran on
+    # data QA never saw. Surface it instead of collapsing it into silence,
+    # the same way `qa_degraded` above refuses to let a dead channel read as
+    # a clean verdict.
+    unreadable = len(pairs) - len(placed)
+
     payload = {"work_order": work_order, "buckets": buckets,
                "keys_outstanding": keys_outstanding, "n_pairs": len(pairs),
-               "withheld": _WITHHELD}
+               "unreadable": unreadable, "withheld": _WITHHELD}
 
     if not work_order:
-        return _result(step, "ok",
-                       f"All {len(pairs)} pairs passed. There is nothing in this "
-                       "cut that needs your attention.",
-                       payload=payload, started=started)
+        if unreadable:
+            readable = len(placed)
+            who = (f"Of the {readable} pair(s) I could read, all passed."
+                   if readable else
+                   f"I could not read any of the {len(pairs)} pair(s) in this cut.")
+            says = (
+                f"{who} {unreadable} pair(s) had no usable index, so I could "
+                "not bucket or evaluate them at all — that is NOT a pass, it "
+                "is data I never saw. They are excluded from this verdict."
+            )
+        else:
+            says = (f"All {len(pairs)} pairs passed. There is nothing in this "
+                    "cut that needs your attention.")
+        return _result(step, "ok", says, payload=payload, started=started)
 
     # Only offered when there IS work — an absent field refuses a reference to it
     # with a stated reason, which is the honest answer to "where do I start?"
@@ -296,7 +314,10 @@ def cut_survey_agent(ctx: AgentContext, step) -> StepResult:
         "I do not rank a flagged pair above a refused one or the reverse — the "
         "bucket is a label, not a priority."
         + (f" {keys_outstanding} key(s) are still outstanding."
-           if keys_outstanding else ""))
+           if keys_outstanding else "")
+        + (f" {unreadable} pair(s) had no usable index and could not be "
+           "evaluated at all — they are not counted above."
+           if unreadable else ""))
     return _result(step, "ok", says, payload=payload, started=started)
 
 
