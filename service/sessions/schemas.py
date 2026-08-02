@@ -124,6 +124,10 @@ class ResultEvent(BaseModel):
     # {key_index(str): key PNG url}. Only populated for the drop-a-video flow (keys decoded
     # server-side); for PNG upload the client already has object URLs so this stays empty.
     key_urls: dict = {}
+    # {pair_index(str): url} — the two keys of a GATE-REFUSED pair overlaid,
+    # with the measured region marked. Such a pair has no in-between, so this
+    # is the only image of it that can honestly exist.
+    pair_keys: dict = {}
     # drop-a-video decimation summary {source_frames, requested_stride, stride, kept} so the UI
     # can show "kept K of N frames (every S-th)" and flag a coarse auto-fit. None for PNG upload.
     sampling: Optional[dict] = None
@@ -139,7 +143,7 @@ class ResultEvent(BaseModel):
     def from_result(cls, result, artifacts: dict = None, explanations: dict = None,
                     pair_mids: dict = None, csq: dict = None, key_urls: dict = None,
                     sampling: dict = None, qa_degraded: bool = False,
-                    sid: int | None = None) -> "ResultEvent":
+                    sid: int | None = None, pair_keys: dict = None) -> "ResultEvent":
         if artifacts is None:
             artifacts = {}
         if explanations is None:
@@ -148,6 +152,8 @@ class ResultEvent(BaseModel):
             pair_mids = {}
         if key_urls is None:
             key_urls = {}
+        if pair_keys is None:
+            pair_keys = {}
         needs_key = [p.index for p in result.pairs if p.action == "needs_key"]
         return cls(
             sid=sid,
@@ -161,6 +167,7 @@ class ResultEvent(BaseModel):
             explanations=explanations,
             pair_mids=pair_mids,
             key_urls=key_urls,
+            pair_keys=pair_keys,
             sampling=sampling,
             csq=csq,
             qa_degraded=qa_degraded,

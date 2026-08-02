@@ -55,6 +55,11 @@ def _workspace_snapshot(outcome, uploaded_names: set[str], workspace_input) -> W
         for index, value in (getattr(outcome, "key_urls", {}) or {}).items()
         if (name := available(value)) is not None
     }
+    pair_keys = {
+        str(index): name
+        for index, value in (getattr(outcome, "pair_keys", {}) or {}).items()
+        if (name := available(value)) is not None
+    }
     explanations = json.loads(json.dumps(getattr(outcome, "explanations", {}) or {}))
     for explanation in explanations.values():
         if isinstance(explanation, dict) and "annotated_url" in explanation:
@@ -89,6 +94,7 @@ def _workspace_snapshot(outcome, uploaded_names: set[str], workspace_input) -> W
         explanations=explanations,
         pair_mids=pair_mids,
         key_urls=key_urls,
+        pair_keys=pair_keys,
         sampling=dict(getattr(outcome, "sampling", {}) or {}),
         csq=getattr(outcome, "csq", None),
         qa_degraded=bool(getattr(outcome, "qa_degraded", False)),

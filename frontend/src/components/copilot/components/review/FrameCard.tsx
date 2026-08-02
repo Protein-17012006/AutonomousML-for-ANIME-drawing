@@ -18,6 +18,7 @@ function FrameTrip({
   refillEnabled = true,
   marked = false,
   onToggleMarked,
+  keyOverlay,
 }: {
   p: PairEvent;
   a?: string;
@@ -28,6 +29,7 @@ function FrameTrip({
   refillEnabled?: boolean;
   marked?: boolean;
   onToggleMarked?: (index: number) => void;
+  keyOverlay?: string;
 }) {
   // The server burns the QA region into `pair_<i>_annotated.png` and sends its
   // URL here. Until now nothing read that field, so "Show marked image" landed
@@ -92,7 +94,15 @@ function FrameTrip({
               )}
             </div>
           ) : p.action === "needs_key" ? (
-            <div className="fcell-draw">
+            // The gate refused this pair, so no in-between exists to show. What
+            // does exist is the two keys and the travel between them — red where
+            // the drawing is, blue where it moves to, black where it is held —
+            // which is the distance the breakdown has to cover. The upload stays
+            // on top of it: this cell is still where the artist draws.
+            <div className={cn("fcell-draw", keyOverlay && "fcell-draw-over")}>
+              {keyOverlay && (
+                <img src={keyOverlay} alt={`keys A and B of pair ${p.index} overlaid`} />
+              )}
               {/* //! REDESIGN: IMPORT KEYFRAMEUPLOAD COMPONENT INTO THIS ONE, MAKE THIS ONE IMPORTABLE (your change) */}
               <KeyframeUploadButton
                 disabled={!refillEnabled}
@@ -130,6 +140,7 @@ export function FrameCard({
   pendingKeyUrl,
   marked,
   onToggleMarked,
+  keyOverlay,
 }: {
   p: PairEvent;
   a?: string;
@@ -144,6 +155,8 @@ export function FrameCard({
   pendingKeyUrl?: string;
   marked?: boolean;
   onToggleMarked?: (index: number) => void;
+  /** Overlay of the two keys; only a gate-refused pair has one. */
+  keyOverlay?: string;
 }) {
   return (
     <figure
@@ -172,6 +185,7 @@ export function FrameCard({
         refillEnabled={refillEnabled}
         marked={marked}
         onToggleMarked={onToggleMarked}
+        keyOverlay={keyOverlay}
       />
     </figure>
   );

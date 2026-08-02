@@ -211,6 +211,7 @@ class ReviewSession:
             explanations=metadata.explanations,
             pair_mids=metadata.pair_mids,
             key_urls=metadata.key_urls,
+            pair_keys=metadata.pair_keys,
             sampling=metadata.sampling,
             csq=metadata.csq,
             qa_degraded=metadata.qa_degraded,

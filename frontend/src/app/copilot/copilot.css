@@ -2603,3 +2603,22 @@ body:has(.copilot-shell) {
   justify-content: flex-end;
   gap: 8px;
 }
+
+/* A gate-refused pair has no in-between, so its middle cell shows the two keys
+   overlaid instead of empty paper. The upload control sits ON the overlay: this
+   is still the cell where the artist draws the breakdown. */
+.fcell-draw-over {
+  position: relative;
+  padding: 0;
+}
+.fcell-draw-over img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.fcell-draw-over > :not(img) {
+  position: absolute;
+  inset: auto 0 0 0;
+  background: color-mix(in srgb, var(--color-sumi, #14140f) 72%, transparent);
+  backdrop-filter: blur(2px);
+}

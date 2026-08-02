@@ -7,6 +7,7 @@ from typing import Any, Callable
 from service.media import artifacts
 from service.media.annotate import annotate_explained_pairs
 from service.media.explain import explain_pairs, region_box
+from service.media.onion import build_key_overlays
 
 
 @dataclass(frozen=True)
@@ -17,6 +18,10 @@ class RenderedSessionArtifacts:
     annotated_files: dict[int, str]
     pair_files: dict[int, str]
     key_files: dict[int, str]
+    # One overlay per GATE-REFUSED pair: the two keys and the travel between
+    # them. A needs_key pair has no in-between, so this is the only image of
+    # it that can honestly exist.
+    key_overlay_files: dict[int, str]
     frame_count: int
     duration: float
     compare_file: "str | None" = None   # compare.mp4 basename; None when nothing filled
@@ -91,6 +96,13 @@ def render_session_artifacts(
     )
     pair_files = artifacts.build_pair_frames(result, out_dir)
     key_files = artifacts.build_key_frames(keys, out_dir)
+    # The cell comes from the pair's own triage evidence, measured during the
+    # run; no box is drawn for a pair where nothing stood out.
+    overlay_cells = {
+        pair.index: ((getattr(pair, 'triage', None) or {}).get('evidence') or {}).get('hot_cell')
+        for pair in result.pairs
+    }
+    key_overlay_files = build_key_overlays(result, keys, out_dir, cells=overlay_cells)
     # box-style side-by-side ORIGINAL|RECON. cadence*2 = the restored full rate
     # (on-2s 12 -> 24fps, the box compare_video rate) — NOT output_fps, which
     # differs at smoothness 1.
@@ -102,6 +114,7 @@ def render_session_artifacts(
         annotated_files=annotated_files,
         pair_files=pair_files,
         key_files=key_files,
+        key_overlay_files=key_overlay_files,
         frame_count=len(frames),
         duration=duration,
         compare_file=compare_file,

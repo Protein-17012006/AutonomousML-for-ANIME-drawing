@@ -7,7 +7,7 @@ composition layer.
 from __future__ import annotations
 
 import copy
-from dataclasses import dataclass
+from dataclasses import dataclass, field as dataclasses_field
 from typing import Any, Callable
 
 from service.sessions.presentation import build_render_metadata
@@ -41,6 +41,10 @@ class SessionOutcome:
     # `engines` or the taus, and without those a reopened session cannot be
     # rebuilt into a working one. Optional: not every producer of an outcome has
     # them, and a missing block only costs the resume path a derivation.
+    # Overlay urls for GATE-REFUSED pairs (see RenderMetadata.pair_keys).
+    # Defaulted and last: SessionOutcome is built positionally elsewhere, so a
+    # field inserted mid-list silently shifts every argument after it.
+    pair_keys: dict = dataclasses_field(default_factory=dict)
     cfg: Any = None
     rev: int = 0
 
@@ -97,6 +101,7 @@ class RunSession:
             explanations=metadata.explanations,
             pair_mids=metadata.pair_mids,
             key_urls=metadata.key_urls,
+            pair_keys=metadata.pair_keys,
             sampling=metadata.sampling,
             csq=metadata.csq,
             qa_degraded=metadata.qa_degraded,

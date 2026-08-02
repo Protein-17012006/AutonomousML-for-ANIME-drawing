@@ -99,6 +99,7 @@ export function ReviewWorkbench({
   const compareUrl = result?.artifacts?.compare;
   const explanations = result?.explanations;
   const mids = result?.pair_mids;
+  const keyOverlays = result?.pair_keys;
   const loadingPreview = running && !result;
   const reconFailed = video != null && failedReconUrl === video;
   const compareFailed = compareUrl != null && failedCompareUrl === compareUrl;
@@ -473,6 +474,7 @@ export function ReviewWorkbench({
                     a={keyUrls[pair.index]}
                     b={keyUrls[pair.index + 1]}
                     mid={pair.mid_url ?? mids?.[String(pair.index)]}
+                    keyOverlay={keyOverlays?.[String(pair.index)]}
                     ex={explanations?.[String(pair.index)]}
                     i={index}
                     focused={selectedIndex === pair.index}
