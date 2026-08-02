@@ -184,6 +184,45 @@ export async function submitReplacementKeys(
   }
 }
 
+/** Submit painted masks for one pair and stream the repair revision.
+ *
+ * `stopAfterResult` for the same reason the other two revision submitters use
+ * it: the repair's result event is emitted only once the durable revision has
+ * committed, so a transport close afterwards must not overwrite that success
+ * with a browser network error. */
+export async function submitRepair(
+  sid: string,
+  pairIndex: number,
+  masks: { frame: number; png: string }[],
+  h: SessionHandlers,
+  refinementPasses = 1,
+): Promise<void> {
+  try {
+    const resp = await authenticatedFetch(
+      `/session/${sid}/pair/${pairIndex}/repair`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ masks, refinement_passes: refinementPasses }),
+      },
+    );
+    if (!resp.ok || !resp.body) {
+      // The service names which rule refused a 422; showing its own sentence
+      // beats a status code the artist cannot act on.
+      let detail = "";
+      try {
+        const body = await resp.clone().json();
+        if (isRecord(body) && typeof body.detail === "string") detail = body.detail;
+      } catch { /* not a JSON body */ }
+      h.onError(detail || `Repair failed: ${resp.status}`);
+      return;
+    }
+    await pumpSSE(resp.body, h, { stopAfterResult: true });
+  } catch (error) {
+    h.onError(error instanceof Error ? `Repair failed: ${error.message}` : "Repair failed.");
+  }
+}
+
 /** POST keyframes, stream the SSE decision-log, dispatch each event to handlers. */
 export async function runSession(
   files: File[],

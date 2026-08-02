@@ -7,6 +7,7 @@ import { QAPanel } from "./QAPanel";
 import { RunLoader } from "./RunLoader";
 import { ReconPlayer } from "./ReconPlayer";
 import { ComparePlayer } from "./ComparePlayer";
+import { RepairCanvas } from "./RepairCanvas";
 import { FrameCard } from "./FrameCard";
 import { ReviewPairRow } from "./ReviewPairRow";
 import { cn } from "@/lib/utils";
@@ -16,8 +17,9 @@ import { Download, Film, PanelsTopLeft } from "lucide-react";
 type MainFilter = "filled" | "needs_key";
 type FilledFilter = "pass" | "abstain";
 type SelectionSource = "left" | "right";
-// OUTPUT view: the filled cut, or the box-style original-vs-RIFE loop.
-type OutputTab = "recon" | "compare";
+// OUTPUT view: the filled cut, the box-style original-vs-RIFE loop, or the
+// paint surface for repairing the focused pair's generated frame.
+type OutputTab = "recon" | "compare" | "repair";
 
 export function ReviewWorkbench({
   log,
@@ -32,6 +34,7 @@ export function ReviewWorkbench({
   onSubmitVerdicts,
   onSubmitRefills,
   onDiscardStaged,
+  onRepair,
   fps,
   initialFocus,
 }: {
@@ -47,6 +50,8 @@ export function ReviewWorkbench({
   onSubmitVerdicts: () => void;
   onSubmitRefills: () => void;
   onDiscardStaged: () => void;
+  /** Absent on a read-only history session; the Repair tab hides with it. */
+  onRepair?: (pairIndex: number, maskPng: string) => void;
   fps: number;
   initialFocus?: number | null;
 }) {
@@ -92,6 +97,11 @@ export function ReviewWorkbench({
   const loadingPreview = running && !result;
   const reconFailed = video != null && failedReconUrl === video;
   const compareFailed = compareUrl != null && failedCompareUrl === compareUrl;
+  // A needs_key pair was refused before interpolation, so it has no generated
+  // frame to paint on; offering Repair there would promise a missing artefact.
+  const repairFrameUrl =
+    focused != null && mids ? (mids[String(focused)] ?? null) : null;
+  const canRepair = Boolean(canEdit && onRepair && repairFrameUrl && !running);
   const selectedIndex =
     focused != null && shown.some((pair) => pair.index === focused)
       ? focused
@@ -276,7 +286,7 @@ export function ReviewWorkbench({
             <div className={cn("recon-output", compareUrl && "is-tabbed")}>
               {/* the compare loop only exists once the server rendered one, so
                   the switch appears with it rather than sitting dead */}
-              {compareUrl && (
+              {(compareUrl || canRepair) && (
                 <div
                   className="recon-mode-tabs review-subfilters"
                   role="tablist"
@@ -292,20 +302,47 @@ export function ReviewWorkbench({
                   >
                     Reconstructed
                   </Button>
-                  <Button
-                    variant="ghost"
-                    type="button"
-                    role="tab"
-                    aria-selected={outTab === "compare"}
-                    className={cn(outTab === "compare" && "is-active")}
-                    onClick={() => setOutTab("compare")}
-                  >
-                    Original vs RIFE
-                  </Button>
+                  {compareUrl && (
+                    <Button
+                      variant="ghost"
+                      type="button"
+                      role="tab"
+                      aria-selected={outTab === "compare"}
+                      className={cn(outTab === "compare" && "is-active")}
+                      onClick={() => setOutTab("compare")}
+                    >
+                      Original vs RIFE
+                    </Button>
+                  )}
+                  {canRepair && (
+                    <Button
+                      variant="ghost"
+                      type="button"
+                      role="tab"
+                      aria-selected={outTab === "repair"}
+                      className={cn(outTab === "repair" && "is-active")}
+                      onClick={() => setOutTab("repair")}
+                    >
+                      Repair pair {focused}
+                    </Button>
+                  )}
                 </div>
               )}
               <div className="recon-media">
-                {compareUrl && outTab === "compare" ? (
+                {outTab === "repair" && canRepair ? (
+                  <RepairCanvas
+                    // Remount on a pair change: a canvas carrying the previous
+                    // pair's strokes would submit them against this frame.
+                    key={`${focused}-${repairFrameUrl}`}
+                    frameUrl={repairFrameUrl!}
+                    disabled={running}
+                    onSubmit={(maskPng) => {
+                      onRepair!(focused!, maskPng);
+                      setOutTab("recon");
+                    }}
+                    onCancel={() => setOutTab("recon")}
+                  />
+                ) : compareUrl && outTab === "compare" ? (
                   compareFailed ? (
                     <RunLoader message="The comparison could not be played. Try reopening the preview." />
                   ) : (

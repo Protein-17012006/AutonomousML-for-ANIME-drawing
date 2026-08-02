@@ -14,6 +14,7 @@ import {
   rememberMemory,
   submitReplacementKeys,
   submitVerdicts,
+  submitRepair,
   runOrchestration,
   type AgentAction,
   type TranscriptEntry,
@@ -110,7 +111,7 @@ export default function App() {
   );
   const [stagedRefills, setStagedRefills] = useState<Record<number, { file: File; url: string }>>({});
   const stagedRefillsRef = useRef<Record<number, { file: File; url: string }>>({});
-  const [reviewSubmit, setReviewSubmit] = useState<{ kind: "verdicts" | "keys"; phase: string; error?: string } | null>(null);
+  const [reviewSubmit, setReviewSubmit] = useState<{ kind: "verdicts" | "keys" | "repair"; phase: string; error?: string } | null>(null);
   const setVerdict = (idx: number, v: "accept" | "reject") => {
     // Staged only. The artist's keep/redraw IS the per-show calibration signal
     // the QA thresholds are refit against, but it reaches the feedback store
@@ -818,6 +819,19 @@ export default function App() {
     });
   };
 
+  const submitPairRepair = (pairIndex: number, maskPng: string) => {
+    if (!liveSid || !durablePid) return;
+    setReviewSubmit({ kind: "repair", phase: "Sending the painted region" });
+    // frame 1 is the pair's generated middle -- the frame the workbench shows
+    // and the only one the canvas can paint. Positions are pair-local.
+    void submitRepair(liveSid, pairIndex, [{ frame: 1, png: maskPng }], {
+      onPair: () => undefined,
+      onResult: () => finalizeDurableReview(),
+      onProgress: (phase) => setReviewSubmit({ kind: "repair", phase }),
+      onError: (error) => setReviewSubmit({ kind: "repair", phase: "Could not repair", error }),
+    });
+  };
+
   const submitReviewKeys = () => {
     if (!liveSid || !durablePid) return;
     const needs = log.filter((pair) => pair.action === "needs_key");
@@ -1280,6 +1294,7 @@ export default function App() {
                 onSubmitVerdicts={submitReviewVerdicts}
                 onSubmitRefills={submitReviewKeys}
                 onDiscardStaged={discardStagedRefills}
+                onRepair={submitPairRepair}
                 fps={
                   result?.sampling?.output_fps ||
                   Number(cadence) * Number(smoothness) ||
@@ -1310,7 +1325,7 @@ export default function App() {
           }}>
             <DialogContent showCloseButton={false} onEscapeKeyDown={(event) => event.preventDefault()} onPointerDownOutside={(event) => event.preventDefault()}>
               <DialogHeader className="items-center text-center">
-                <DialogTitle>{reviewSubmit?.kind === "keys" ? "Applying replacement keys" : "Submitting verdicts"}</DialogTitle>
+                <DialogTitle>{reviewSubmit?.kind === "keys" ? "Applying replacement keys" : reviewSubmit?.kind === "repair" ? "Repairing the frame" : "Submitting verdicts"}</DialogTitle>
                 <DialogDescription className="flex items-center justify-center gap-2 text-center">
                   {!reviewSubmit?.error && <LoaderCircle className="size-4 shrink-0 animate-spin" aria-label="Working" />}
                   <span>{reviewSubmit?.error ?? reviewSubmit?.phase}</span>
