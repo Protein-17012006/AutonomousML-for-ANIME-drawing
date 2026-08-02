@@ -93,6 +93,7 @@ def pair_result_from_event(event: dict) -> PairResult:
         triage=event.get("triage"),
         regime=event.get("regime"),
         artist_verdict=event.get("artist_verdict"),
+        gap=event.get("gap"),
     )
 
 

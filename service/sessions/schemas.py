@@ -67,6 +67,9 @@ class PairEvent(BaseModel):
     # {cls, keys_suggested, confidence, evidence, brief}. None for filled pairs.
     triage: Optional[dict] = None
     artist_verdict: Optional[Literal["accept", "reject"]] = None
+    # The gate's own comparison, kept for EVERY pair so the artist can compare
+    # two of them. None on events written before 2026-08-03.
+    gap: Optional[float] = None
 
     @classmethod
     def from_pair(cls, pair, mid_url: Optional[str] = None) -> "PairEvent":
@@ -94,6 +97,7 @@ class PairEvent(BaseModel):
             qa=qa_status,
             route=pair.route,
             regime=getattr(pair, "regime", None),
+            gap=getattr(pair, "gap", None),
             keys_requested=pair.keys_requested,
             reason=reason,
             verdict_prob=p_err,

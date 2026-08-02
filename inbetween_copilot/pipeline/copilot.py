@@ -100,7 +100,8 @@ def run_copilot(keys, *, gap_fn, regime_fn, interp_fn, qa_fn, softness_fn,
             n_keys = (tri["keys_suggested"] if isinstance(tri, dict)
                       and "keys_suggested" in tri else pp.keys_to_request)
             pairs.append(PairResult(pp.index, PairAction.NEEDS_KEY, None, None, None,
-                                    n_keys, triage=tri, regime=pp.regime))
+                                    n_keys, triage=tri, regime=pp.regime,
+                                    gap=pp.gap))
             if on_pair is not None:
                 on_pair(pairs[-1])
             continue
@@ -109,7 +110,7 @@ def run_copilot(keys, *, gap_fn, regime_fn, interp_fn, qa_fn, softness_fn,
         qa = _qa_for(qa_input, qa_fn, softness_fn, qa3_fn, cfg.tau_soft)
         pair = PairResult(
             pp.index, action, route, frames, qa, 0,
-            regime=pp.regime,
+            regime=pp.regime, gap=pp.gap,
         )  # pair.frames = triplet
         if qa.status == QAStatus.FLAG and corrector is not None:
             corr = corrector(pair.frames, a, b)          # corrector on the TRIPLET
