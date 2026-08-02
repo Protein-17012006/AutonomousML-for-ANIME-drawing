@@ -16,6 +16,8 @@ function FrameTrip({
   ex,
   onRefill,
   refillEnabled = true,
+  marked = false,
+  onToggleMarked,
 }: {
   p: PairEvent;
   a?: string;
@@ -24,7 +26,16 @@ function FrameTrip({
   ex?: Explanation;
   onRefill: (index: number, file: File) => void;
   refillEnabled?: boolean;
+  marked?: boolean;
+  onToggleMarked?: (index: number) => void;
 }) {
+  // The server burns the QA region into `pair_<i>_annotated.png` and sends its
+  // URL here. Until now nothing read that field, so "Show marked image" landed
+  // the artist on an ordinary in-between and looked like the tool had done
+  // nothing. `ex.box` covers only the pairs whose region pinned a 3x3 cell; the
+  // rendered mark also covers `whole`/`none`, which is most of them.
+  const markedUrl = ex?.annotated_url;
+  const showMarked = marked && !!markedUrl;
   return (
     <>
       <figcaption>
@@ -32,6 +43,20 @@ function FrameTrip({
           <StatusGlyph pair={p} />
         </span>
         pair {p.index}
+        {markedUrl && onToggleMarked && (
+          <button
+            type="button"
+            className={cn("frame-mark-toggle", showMarked && "is-on")}
+            aria-pressed={showMarked}
+            onClick={(event) => {
+              event.stopPropagation();
+              onToggleMarked(p.index);
+            }}
+          >
+            <Pencil className="mr-1 inline size-3" aria-hidden="true" />
+            {showMarked ? "Marked" : "Show mark"}
+          </button>
+        )}
       </figcaption>
 
       <div className="frametrip">
@@ -43,9 +68,13 @@ function FrameTrip({
 
           {mid ? (
             <div className="fcell-wrap">
-              <img src={mid} alt="in-between" />
-              {/* //! REVIEW: ERROR BOX CURRENTLY NOT IN USE */}
-              {ex?.box && ex.box.length === 4 && (
+              <img
+                src={showMarked ? markedUrl : mid}
+                alt={showMarked ? `marked in-between for pair ${p.index}` : "in-between"}
+              />
+              {/* The overlay box and the burnt-in mark say the same thing; drawing
+                  both stacks two rings on one region. */}
+              {!showMarked && ex?.box && ex.box.length === 4 && (
                 <span
                   className="region-box"
                   style={{
@@ -99,6 +128,8 @@ export function FrameCard({
   onRefill,
   refillEnabled,
   pendingKeyUrl,
+  marked,
+  onToggleMarked,
 }: {
   p: PairEvent;
   a?: string;
@@ -111,6 +142,8 @@ export function FrameCard({
   onRefill: (index: number, file: File) => void;
   refillEnabled?: boolean;
   pendingKeyUrl?: string;
+  marked?: boolean;
+  onToggleMarked?: (index: number) => void;
 }) {
   return (
     <figure
@@ -129,7 +162,17 @@ export function FrameCard({
         }
       }}
     >
-      <FrameTrip p={p} a={a} b={b} mid={mid ?? pendingKeyUrl} ex={ex} onRefill={onRefill} refillEnabled={refillEnabled} />
+      <FrameTrip
+        p={p}
+        a={a}
+        b={b}
+        mid={mid ?? pendingKeyUrl}
+        ex={ex}
+        onRefill={onRefill}
+        refillEnabled={refillEnabled}
+        marked={marked}
+        onToggleMarked={onToggleMarked}
+      />
     </figure>
   );
 }

@@ -151,6 +151,10 @@ export default function App() {
   // chat-first surface state (vault 'Chat-First Copilot Surface')
   const [view, setView] = useState<"chat" | "board">("chat");
   const [boardFocus, setBoardFocus] = useState<number | null>(null);
+  // The pair whose burnt-in QA mark the agent was asked to show. The nonce makes
+  // a second request for the SAME pair a distinct event, so asking again after
+  // the artist toggled the mark off turns it back on.
+  const [boardMark, setBoardMark] = useState<{ index: number; nonce: number } | null>(null);
   const [upload, setUpload] = useState<UserTurn | null>(null);
   const [qaTurns, setQaTurns] = useState<QaTurn[]>([]);
   const [actionBusy, setActionBusy] = useState(false);
@@ -1003,6 +1007,14 @@ export default function App() {
         case "open_board":
           if (index === null) throw new Error("That pair is no longer available.");
           setBoardFocus(index);
+          // show_annotated used to be byte-identical to open_board: it navigated,
+          // said "Showing the marked frame for pair N", and showed an ordinary
+          // in-between, because nothing in the client read `annotated_url`. The
+          // note was the only thing that differed, which is how a tool that
+          // displayed nothing read as success.
+          if (action.tool === "show_annotated") {
+            setBoardMark({ index, nonce: Date.now() });
+          }
           setView("board");
           noteTurn(turn, {
             actionDone: true,
@@ -1328,6 +1340,7 @@ export default function App() {
                   24
                 }
                 initialFocus={boardFocus}
+                markPair={boardMark}
               />
             </>
           )}

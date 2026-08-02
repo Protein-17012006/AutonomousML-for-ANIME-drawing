@@ -38,6 +38,7 @@ export function ReviewWorkbench({
   onRepair,
   fps,
   initialFocus,
+  markPair,
 }: {
   log: PairEvent[];
   result: ResultEvent | null;
@@ -56,6 +57,8 @@ export function ReviewWorkbench({
   onRepair?: (pairIndex: number, maskPng: string) => void;
   fps: number;
   initialFocus?: number | null;
+  /** Pair whose burnt-in QA mark the agent was asked to show. */
+  markPair?: { index: number; nonce: number } | null;
 }) {
   const [filter, setFilter] = useState<MainFilter>("filled");
   const [filledFilter, setFilledFilter] = useState<FilledFilter>("abstain");
@@ -127,6 +130,28 @@ export function ReviewWorkbench({
     const frame = requestAnimationFrame(() => setFocused(initialFocus));
     return () => cancelAnimationFrame(frame);
   }, [initialFocus]);
+
+  // Which pairs are showing the burnt-in QA mark instead of the clean
+  // in-between. A set, not one index: the artist can leave several open while
+  // comparing, and the agent's "show the marked image" only adds to it.
+  const [markedPairs, setMarkedPairs] = useState<Set<number>>(new Set());
+  const toggleMarked = (index: number) =>
+    setMarkedPairs((current) => {
+      const next = new Set(current);
+      if (!next.delete(index)) next.add(index);
+      return next;
+    });
+  // Adjusted during render rather than in an effect (React's own "adjusting
+  // state when a prop changes" pattern) — an effect here fires a second render
+  // pass and shows the clean frame for one frame first. Keyed by the NONCE, not
+  // the index: asking for the same pair again after toggling the mark off has to
+  // turn it back on, and an unchanged index would look like nothing happened.
+  const [seenMarkNonce, setSeenMarkNonce] = useState<number | null>(null);
+  if (markPair && markPair.nonce !== seenMarkNonce) {
+    setSeenMarkNonce(markPair.nonce);
+    setMarkedPairs((current) =>
+      current.has(markPair.index) ? current : new Set(current).add(markPair.index));
+  }
 
   const scrollPair = (container: HTMLElement | null, index: number) => {
     container
@@ -451,6 +476,8 @@ export function ReviewWorkbench({
                     ex={explanations?.[String(pair.index)]}
                     i={index}
                     focused={selectedIndex === pair.index}
+                    marked={markedPairs.has(pair.index)}
+                    onToggleMarked={toggleMarked}
                     onFocus={() => selectPair(pair.index, "right")}
                     onRefill={(index, file) => { if (canEdit) onRefill(index, file); }}
                     pendingKeyUrl={stagedRefills[pair.index]?.url}
