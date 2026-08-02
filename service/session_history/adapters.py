@@ -24,6 +24,10 @@ from service.session_history.models import (
 )
 
 
+# One turn's stored multi-agent exchange. The snapshot is rewritten whole on
+# every append, so this bounds the growth; reads are never capped.
+_MAX_STORED_TRANSCRIPT_ENTRIES = 40
+
 _LINK_NAMES = {
     "montage.png": "montage",
     "report.md": "report",
@@ -460,8 +464,20 @@ class DynamoTranscriptStore:
         self.artifacts = artifacts
 
     def append_turn(self, pid: str, owner_sub: str, *, question: str,
-                    answer: str, grounded: bool) -> QaTranscriptTurn:
+                    answer: str, grounded: bool,
+                    kind: str = "ask", transcript=None, action=None,
+                    rejected_tool: str | None = None) -> QaTranscriptTurn:
         from botocore.exceptions import ClientError
+
+        # Cap on WRITE, never on read: the whole snapshot is rewritten on every
+        # append, so an unbounded multi-agent transcript would grow the object
+        # each turn. An already-stored turn must still load whatever its size.
+        entries = [
+            {str(k): (v if isinstance(v, (bool, int, float)) else str(v)[:600])
+             for k, v in entry.items()}
+            for entry in (transcript or [])[:_MAX_STORED_TRANSCRIPT_ENTRIES]
+            if isinstance(entry, dict)
+        ]
 
         for _ in range(4):
             row = self.table.get_item(Key={"pid": pid}, ConsistentRead=True).get("Item")
@@ -482,6 +498,10 @@ class DynamoTranscriptStore:
                 answer=answer,
                 grounded=grounded,
                 answered_at=timestamp,
+                kind=kind if kind in ("ask", "agent") else "ask",
+                transcript=entries,
+                action=action if isinstance(action, dict) else None,
+                rejected_tool=rejected_tool or None,
             )
             turns.append(turn)
             next_version = previous_version + 1

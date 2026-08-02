@@ -276,6 +276,19 @@ export default function App() {
       q: turn.question,
       answer: turn.answer,
       grounded: turn.grounded,
+      // A reopened agent turn brings its multi-agent exchange back with it —
+      // the planner/triage/perception lines the artist watched. Without this the
+      // session reopened as a flat Q&A and the cooperation was invisible.
+      transcript: turn.transcript as QaTurn["transcript"],
+      // The proposal is replayed as ALREADY DECIDED. Re-offering a button on a
+      // saved turn would invite the artist to accept an action a second time,
+      // against a session whose state has since moved on.
+      action: null,
+      actionDone: !!turn.action,
+      actionNote: turn.action
+        ? `Proposed ${String((turn.action as { tool?: string }).tool ?? "an action")}.`
+        : null,
+      rejectedTool: turn.rejected_tool ?? undefined,
     })));
     setVerdicts({});
     setRunning(false);

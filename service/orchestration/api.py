@@ -10,7 +10,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from service.assistant.api import (AgentReq, _agent_rate_ok,
-                                   _state_with_private_chat, _user_memories)
+                                   _state_with_private_chat, _user_memories,
+                                   record_turn)
+from service.session_history.dependencies import get_optional_history_transcripts
 from service.infrastructure.director_llm import make_ask_fn
 from service.orchestration.service import run_goal_stream
 from service.sessions.http_dependencies import get_session_repository
@@ -26,7 +28,8 @@ def _sse(name: str, payload) -> str:
 @router.post("/session/{sid}/orchestrate/stream")
 def post_orchestrate_stream(
         sid: int, req: AgentReq, request: Request,
-        sessions: SessionRepository = Depends(get_session_repository)):
+        sessions: SessionRepository = Depends(get_session_repository),
+        transcripts=Depends(get_optional_history_transcripts)):
     stored = sessions.state_for(sid)
     if stored is None:
         raise HTTPException(status_code=404,
@@ -44,11 +47,16 @@ def post_orchestrate_stream(
         # Each utterance leaves the server as it happens — the transcript is live,
         # not a recording replayed after the turn finishes.
         output = {}
+        # Kept as well as streamed: this exchange — planner to triage, triage to
+        # perception — is the evidence that the agents cooperated, and until now
+        # it existed only in the browser that watched it go past.
+        entries = []
         for kind, payload in run_goal_stream(
                 state, message, history,
                 plan_ask_fn=make_ask_fn(), say_ask_fn=make_ask_fn(),
                 memories=memories):
             if kind == "agent":
+                entries.append(payload.as_dict())
                 yield _sse("agent", payload.as_dict())
             else:
                 output = payload
@@ -69,6 +77,8 @@ def post_orchestrate_stream(
             yield _sse("error", {"message": "could not persist chat; retry"})
             return
 
+        record_turn(transcripts, updated, message, output,
+                    owner_sub=sessions.owner_for(sid), entries=entries)
         yield _sse("decision", output)
 
     return StreamingResponse(generate(), media_type="text/event-stream")

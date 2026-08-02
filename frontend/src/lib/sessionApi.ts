@@ -49,6 +49,13 @@ export interface SessionWorkspaceSnapshot {
     answer: string;
     grounded: boolean;
     answered_at: string;
+    /** "ask" for a grounded Q&A turn, "agent" when specialists were involved.
+     *  Absent on sessions saved before agent turns were durable. */
+    kind?: "ask" | "agent";
+    /** Who said what, in order — the planner/triage/perception exchange. */
+    transcript?: Array<Record<string, unknown>>;
+    action?: Record<string, unknown> | null;
+    rejected_tool?: string | null;
   }>;
 }
 

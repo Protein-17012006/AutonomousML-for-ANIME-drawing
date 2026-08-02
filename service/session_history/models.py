@@ -88,6 +88,22 @@ class QaTranscriptTurn(BaseModel):
     answer: str
     grounded: bool
     answered_at: str
+    # Everything below is OPTIONAL so a snapshot written before agent turns were
+    # durable still validates — an artist's old session must keep opening.
+    #
+    # `kind` separates a grounded Q&A turn from an agent turn: only the latter
+    # can carry a multi-agent exchange, and a reopened session has to be able to
+    # tell them apart to render the right thing.
+    kind: Literal["ask", "agent"] = "ask"
+    # Who said what, in order — the planner/triage/perception exchange the
+    # artist actually watched. Capped on write, not here: this is the wire
+    # contract, and an already-stored turn must never fail to load.
+    transcript: list[dict] = Field(default_factory=list)
+    # The one tool the agent proposed. Nothing ran: it was waiting on the artist.
+    action: dict | None = None
+    # A tool the model named and the server refused; its prose may still
+    # describe that action, so it is shown rather than swallowed.
+    rejected_tool: str | None = None
 
 
 class QaTranscriptSnapshot(BaseModel):
