@@ -154,7 +154,18 @@ def test_binding_is_pure_of_the_rest_of_the_service():
 
 def test_the_orchestration_loop_lives_in_exactly_one_place():
     """dispatch() and run_goal_stream() used to keep separate copies of the step
-    loop; anything added to one silently did nothing in the other."""
+    loop; anything added to one silently did nothing in the other. Structural,
+    not textual: a plain substring check on "for step in plan.steps" is defeated
+    by renaming the loop variable (confirmed by mutation — see task-9-report.md),
+    so this walks the AST for any `for`/comprehension whose iterable is a
+    `.steps` attribute access, regardless of what the loop variable is called,
+    how the line is wrapped, or how it is spaced."""
     source = (SERVICE_ROOT / "orchestration" / "service.py").read_text(encoding="utf-8")
     assert "run_plan" in source
-    assert "for step in plan.steps" not in source
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
+        iterable = getattr(node, "iter", None)
+        if isinstance(iterable, ast.Attribute) and iterable.attr == "steps":
+            raise AssertionError(
+                f"a loop over `.steps` was reintroduced at line {node.lineno}: "
+                f"{ast.dump(node)}")
