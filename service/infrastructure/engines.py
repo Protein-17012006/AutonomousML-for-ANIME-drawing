@@ -332,7 +332,18 @@ def box_engines(cfg=None, *, interpolator: str | None = None) -> EngineBundle:
     # --- AniSora placeholder (large-gap generator; out of slice-1.5 scope) ---
     # Real AniSora wiring is deferred: co-residency with the live VLM on 32GB VRAM
     # is not feasible in this slice (see copilot_correct.py escalate note).
-    anisora_gen = lambda a, m, b, references=None: [a, m, b]
+    #
+    # It passes a SUPPLIED middle straight through, which is right for gen_fn —
+    # there the middle is a real drawing. It is NOT right for escalation, where
+    # the caller has no middle and passes key A: that returned [a, a, b] and the
+    # correction loop adopted it, replacing a real in-between with a frozen hold
+    # (measured live 2026-08-03 on four pairs). `is_inert` is what lets the
+    # escalation seam tell "nothing stronger exists" from "here is a better
+    # frame", instead of every caller having to know this lambda's shape.
+    def anisora_gen(a, m, b, references=None):
+        return [a, m, b]
+
+    anisora_gen.is_inert = True
 
     # --- reason_fn (DeepSeek director) — the agentic brain on the LIVE path ---
     # make_reason_fn() reads DEEPSEEK_API_KEY/_MODEL/_BASE_URL from the ambient env

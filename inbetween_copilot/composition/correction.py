@@ -30,6 +30,11 @@ def build_corrector(
         return composite_region(frames, hold_copy(a, b, len(frames)), region)
 
     def escalate_fn(a, b):
+        # No stronger generator wired -> say so, rather than calling a
+        # pass-through with key A as the middle and handing back [a, a, b].
+        # The caller keeps the frames it already has.
+        if anisora_gen is None or getattr(anisora_gen, "is_inert", False):
+            return None
         return anisora_gen(a, a, b, references=references)
 
     def split_fill_fn(a, middle, b):
