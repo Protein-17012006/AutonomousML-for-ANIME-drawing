@@ -361,6 +361,9 @@ def box_engines(cfg=None, *, interpolator: str | None = None) -> EngineBundle:
     return EngineBundle.from_ports(
         ports,
         vlm_struct_fn=vlm_struct_fn,
+        # Also carried on the bundle so the triage AGENT can diagnose a pair on
+        # demand with the same eyes the run had.
+        key_vlm_fn=_post_vlm,
         # Historical field name retained for compatibility; it now holds whichever
         # raw [a, mid, b] interpolation model the request selected.
         rife_engine=interpolation_engine,

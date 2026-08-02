@@ -62,7 +62,7 @@ def _result(step, status, says, payload=None, started=0.0, handoff=None):
 
 # --- Triage -----------------------------------------------------------------
 
-def _diagnose(a, b, index: int, ask_fn) -> dict:
+def _diagnose(a, b, index: int, ask_fn, key_vlm_fn=None) -> dict:
     """Run the real triage service on two retained keys. Pure of the pipeline."""
     from inbetween_copilot.domain.states import PlanAction
     from inbetween_copilot.pipeline.plan_models import PairPlan
@@ -75,8 +75,10 @@ def _diagnose(a, b, index: int, ask_fn) -> dict:
     pair_plan = PairPlan(index=index, gap=gap, regime="small",
                          action=PlanAction.FILL, keys_to_request=0)
     writer = LLMBriefWriter(ask_fn) if ask_fn is not None else TemplateBriefWriter()
+    # Same eyes the run had. Without this the on-demand diagnosis was
+    # scalar-only and would quietly contradict the stored one.
     service = TriagePair(tau_hold=BOX_TAU_HOLD, tau_snap=BOX_TAU_SNAP,
-                         brief_writer=writer)
+                         brief_writer=writer, key_vlm_fn=key_vlm_fn)
     return service.execute(a, b, pair_plan).to_payload()
 
 
@@ -103,7 +105,8 @@ def triage_agent(ctx: AgentContext, step) -> StepResult:
                        "session, so I cannot diagnose it.", started=started)
 
     try:
-        payload = _diagnose(keys[index], keys[index + 1], index, ctx.ask_fn)
+        payload = _diagnose(keys[index], keys[index + 1], index, ctx.ask_fn,
+                            getattr(ctx.state.get("eng"), "key_vlm_fn", None))
     except Exception as exc:            # noqa: BLE001 — an agent reports, never raises
         return _result(step, "error", f"Triage failed: {exc}", started=started)
 
