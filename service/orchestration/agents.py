@@ -251,6 +251,27 @@ def _bucket_for(pair) -> str:
     return status if status in ("flag", "abstain", "pass") else ""
 
 
+def _account(n_pairs: int, n_evaluated: int, reasons: dict) -> tuple:
+    """How many pairs were NOT evaluated, and why — as (total, reasons).
+
+    Extracted so the round-4 property can actually FAIL a test. `total` is the
+    handed-in count MINUS the evaluated count; it is never the sum of the
+    reasons we happened to record. Inside `cut_survey_agent` the two are equal
+    for every reachable input, so no test driving the agent can tell which one
+    produced the number — the re-reviewer mutated the derivation to
+    `sum(reasons.values())` and all 19 tests passed. Here the caller supplies
+    both, so a breakdown that does not add up is expressible, and the rule that
+    the subtraction wins is observable.
+
+    Any shortfall is reported rather than dropped: a future code path that
+    skips a pair without recording why still costs the artist a sentence."""
+    total = n_pairs - n_evaluated
+    unattributed = total - sum(reasons.values())
+    if unattributed > 0:
+        reasons = {**reasons, _UNATTRIBUTED: unattributed}
+    return total, reasons
+
+
 def _not_evaluated_clause(total: int, reasons: dict) -> str:
     """The one sentence that owns population (1) minus population (3).
 
@@ -270,11 +291,14 @@ def cut_survey_agent(ctx: AgentContext, step) -> StepResult:
     started = time.monotonic()
     result = ctx.state.get("result")
     pairs = list(getattr(result, "pairs", None) or [])
-    if not pairs:
-        return _result(step, "refused",
-                       "This session has no pairs, so there is no work to order.",
-                       started=started)
 
+    # Checked before the pairs are read, and deliberately not merged into the
+    # nothing-evaluated rule below: this refuses because the CHANNEL was blind,
+    # which is true of a degraded run whether or not any pairs arrived, and it
+    # withholds even the accounting because those verdicts are not about the
+    # drawings at all. The rule below refuses for the opposite reason — the
+    # pairs are real and none of them could be used.
+    #
     # The refusal that makes this an agent and not a sort function. Verified live
     # 2026-08-01: with :8001 down every pair abstains `vlm_unavailable`.
     if ctx.state.get("qa_degraded"):
@@ -314,12 +338,10 @@ def cut_survey_agent(ctx: AgentContext, step) -> StepResult:
     # The authoritative count of what was NOT evaluated is the total minus the
     # evaluated — never the sum of `reasons`. If the two ever disagree (a
     # future `continue` that forgets to record why), the difference is still
-    # reported, under a reason that says exactly that.
+    # reported, under a reason that says exactly that. `_account` owns that
+    # rule so it can be tested where a disagreement is expressible.
     n_evaluated = len(evaluated)
-    n_not_evaluated = len(pairs) - n_evaluated
-    unattributed = n_not_evaluated - sum(reasons.values())
-    if unattributed > 0:
-        reasons[_UNATTRIBUTED] = unattributed
+    n_not_evaluated, reasons = _account(len(pairs), n_evaluated, reasons)
 
     buckets: dict = {name: [] for name in _BUCKETS}
     keys_outstanding = 0
@@ -343,19 +365,45 @@ def cut_survey_agent(ctx: AgentContext, step) -> StepResult:
                "not_evaluated_reasons": dict(reasons),
                "unreadable": reasons.get(_NO_INDEX, 0), "withheld": _WITHHELD}
 
+    # THE RULE, and there is only one: A SURVEY THAT EVALUATED NOTHING DOES NOT
+    # RETURN A VERDICT. Zero pairs handed in and N pairs handed in that all
+    # turned out to be unusable are the SAME epistemic state — no verdict, no
+    # work order, nothing actionable — and they differ only in how many objects
+    # arrived. Do not re-split this into "empty session" and "nothing usable":
+    # splitting it is what let the unusable case answer `ok` for a round while
+    # its own prose said it had no verdict.
+    #
+    # `status` is the machine-readable half of the answer. `ok` here would tell
+    # service.py's synthesis prompt "[answered]" (_AGENT_NOTE["ok"]) and render
+    # the transcript entry as kind `reply` (dispatch.py's _ENTRY_KIND_FOR),
+    # while the prose said the opposite — the same claim-stronger-than-the-data
+    # defect this agent has now been patched for three rounds, just moved into
+    # the field prose cannot correct.
+    #
+    # The payload still travels: models.py's own contract says a `refused`
+    # result "may still carry what it was willing to provide", and triage_agent
+    # is the precedent (measurements kept, prescription withheld). The
+    # accounting IS what it was willing to provide — refusing to say it too
+    # would hide the very thing that explains the refusal. `first_index` stays
+    # absent, as it is on every path with no work.
+    if not evaluated:
+        says = (
+            "This session has no pairs, so there is no work to order."
+            if not pairs else
+            f"I will not give you a verdict on this cut. I evaluated none of "
+            f"the {len(pairs)} pair(s) in it, so there is nothing for a verdict "
+            f"to be about. {_not_evaluated_clause(n_not_evaluated, reasons)}")
+        return _result(step, "refused", says, payload=payload, started=started)
+
     if not work_order:
-        if n_not_evaluated:
-            # Note what this does NOT say. Not "all N passed", not "the rest
-            # passed" — only the evaluated pairs are inside the verdict, and
-            # when nothing was evaluated there is no verdict to give at all.
-            who = (f"Of the {n_evaluated} pair(s) I actually evaluated, all "
-                   "passed." if n_evaluated else
-                   f"I evaluated none of the {len(pairs)} pair(s) in this cut, "
-                   "so I have no verdict on this cut at all.")
-            says = f"{who} {_not_evaluated_clause(n_not_evaluated, reasons)}"
-        else:
-            says = (f"All {len(pairs)} pairs passed. There is nothing in this "
-                    "cut that needs your attention.")
+        # Everything evaluated, and every evaluated pair passed. Note what this
+        # does NOT say when some pairs went unevaluated: not "all N passed",
+        # not "the rest passed" — only the evaluated pairs are in the verdict.
+        says = (f"Of the {n_evaluated} pair(s) I actually evaluated, all passed. "
+                f"{_not_evaluated_clause(n_not_evaluated, reasons)}"
+                if n_not_evaluated else
+                f"All {len(pairs)} pairs passed. There is nothing in this "
+                "cut that needs your attention.")
         return _result(step, "ok", says, payload=payload, started=started)
 
     # Only offered when there IS work — an absent field refuses a reference to it

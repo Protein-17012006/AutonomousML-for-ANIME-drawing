@@ -123,7 +123,7 @@ def test_an_unreadable_pair_is_never_reported_as_having_passed():
     read, not that it passed, and `unreadable` must be in the payload so the
     gap is legible rather than silent inside n_pairs."""
     out = _run(_state([_Bare()]))
-    assert out.status == "ok"
+    assert out.status == "refused"      # round 5: nothing evaluated, no verdict
     assert out.payload["unreadable"] == 1
     assert "all 1 pair" not in out.says.lower()
     assert "passed" not in out.says.lower() or "could not read" in out.says.lower()
@@ -157,7 +157,7 @@ def test_a_pair_that_was_READ_but_never_BUCKETED_is_not_reported_as_passing():
     pass verdict over a pair that was never looked at. Every bucket here is
     empty; there is nothing that passed."""
     out = _run(_state([_Bare(), _pair(1, qa_status="weird_unrecognized")]))
-    assert out.status == "ok"
+    assert out.status == "refused"      # round 5: nothing evaluated, no verdict
     assert out.payload["buckets"] == {"flag": [], "needs_key": [],
                                       "abstain": [], "pass": []}
     assert out.payload["n_pairs"] == 2
@@ -174,6 +174,7 @@ def test_an_unrecognised_verdict_alone_does_not_make_an_all_passing_cut():
     pair, index perfectly readable, verdict unrecognised. Nothing was
     evaluated, so "All 1 pairs passed" is a claim with no data under it."""
     out = _run(_state([_pair(0, qa_status="not_a_real_status")]))
+    assert out.status == "refused"      # round 5: nothing evaluated, no verdict
     assert out.payload["n_evaluated"] == 0
     assert out.payload["not_evaluated"] == 1
     assert out.payload["unreadable"] == 0
@@ -208,6 +209,122 @@ def test_the_three_populations_always_account_for_every_handed_in_pair():
     assert p["n_evaluated"] == sum(len(v) for v in p["buckets"].values()) == 3
     assert sum(p["not_evaluated_reasons"].values()) == p["not_evaluated"] == 3
     assert p["unreadable"] == 1
+
+    # The honest limit of this test: today `n_pairs - n_evaluated` and
+    # `sum(reasons.values())` are equal for EVERY reachable input, so from
+    # outside the function no assertion can distinguish which one produced
+    # `not_evaluated`. That property is pinned instead at the helper level, by
+    # the two `_not_evaluated_clause` tests below, which fix the contract that
+    # the total is an INPUT independent of the breakdown.
+
+
+# --- The subtraction property, pinned where it can actually fail -------------
+#
+# The re-reviewer mutated `n_not_evaluated = len(pairs) - n_evaluated` to
+# `sum(reasons.values())` — the exact implementation the round-4 restructure
+# exists to forbid — and every test still passed, because they only asserted
+# the two agree. These two call the helper directly, where the distinction is
+# observable: the clause takes the total as its own argument and must speak it
+# even when the breakdown does not add up to it.
+
+def test_not_evaluated_is_the_TOTAL_MINUS_THE_EVALUATED_not_the_sum_of_reasons():
+    """Fails under the mutation `n_not_evaluated = sum(reasons.values())`.
+
+    That mutation is the exact implementation the round-4 restructure exists to
+    forbid, and driving the agent cannot catch it: inside `cut_survey_agent`
+    the two expressions are equal for every reachable input, so the reviewer's
+    mutation left all 19 tests green. `_account` takes both numbers from its
+    caller, so a breakdown that does not add up IS expressible here — 5 handed
+    in, 1 evaluated, one reason recorded. The subtraction says 4; summing the
+    known reasons would say 1."""
+    from service.orchestration.agents import _account
+
+    total, reasons = _account(5, 1, {"no_usable_index": 1})
+    assert total == 4
+    assert reasons["no_usable_index"] == 1
+
+
+def test_a_pair_that_went_unevaluated_for_an_UNRECORDED_reason_is_still_reported():
+    """Fails under the mutation `if unattributed > 0:` -> `if False:`, which
+    left all 19 tests green because the residual branch is unreachable from
+    outside today. This is the guarantee the whole four-round arc turns on: a
+    FUTURE fourth reason for a pair going unevaluated cannot be absorbed into
+    silence, even if whoever adds it forgets to name it. 5 handed in, 1
+    evaluated, only 1 of the 4 accounted for -> the other 3 must still appear,
+    and must still reach the artist's sentence."""
+    from service.orchestration.agents import _account, _not_evaluated_clause
+
+    total, reasons = _account(5, 1, {"no_usable_index": 1})
+    assert sum(reasons.values()) == total == 4
+    assert reasons["reason_not_recorded"] == 3
+    assert "3 " in _not_evaluated_clause(total, reasons)
+
+
+def test_the_clause_speaks_the_TOTAL_even_when_the_reasons_do_not_add_up_to_it():
+    """Fails under the mutation `n_not_evaluated = sum(reasons.values())`.
+
+    That mutation's whole effect is to make an unattributed remainder
+    impossible to represent — the total would become a function of the
+    breakdown, and this call, whose breakdown accounts for 1 of 3, could not
+    exist. The contract being pinned: `total` is the authority, `reasons` is
+    commentary, and two pairs unaccounted for are still SAID."""
+    from service.orchestration.agents import _not_evaluated_clause
+
+    out = _not_evaluated_clause(3, {"no_usable_index": 1})
+    assert out.startswith("3 pair(s) I could not evaluate at all")
+    assert "1 had no usable index" in out
+    assert "pass" in out.lower()          # "that is NOT a pass" — never a verdict
+    assert "passed" not in out.lower()
+
+
+def test_the_clause_still_renders_a_reason_it_has_never_heard_of():
+    """Fails if the `_NOT_EVALUATED_WHY.get(...)` fallback is removed, i.e. if
+    a future fourth reason for a pair going unevaluated would raise a KeyError
+    or vanish from the sentence instead of being reported. This is the same
+    guarantee as the `unattributed` residual, one layer out: an unrecognised
+    reason must still cost the artist a sentence, never silence."""
+    from service.orchestration.agents import _not_evaluated_clause
+
+    out = _not_evaluated_clause(1, {"some_future_key": 1})
+    assert out.startswith("1 pair(s) I could not evaluate at all")
+    assert "1 " in out and "(" in out          # the breakdown rendered at all
+    assert "passed" not in out.lower()
+
+
+def test_a_survey_that_evaluated_NOTHING_refuses_and_still_shows_its_working():
+    """Round-5 Important. `ok` is the machine-readable half of "I answered".
+
+    Two unusable pairs is the same epistemic state as zero pairs: no verdict,
+    no work order, nothing actionable. Returning `ok` told service.py's
+    synthesis prompt "[answered]" (_AGENT_NOTE) and dispatch.py to render the
+    entry as kind `reply`, while the prose said there was no verdict — the
+    claim-stronger-than-the-data defect, moved out of the prose and into the
+    status. The payload survives the refusal (models.py: a refused result "may
+    still carry what it was willing to provide"), because the accounting is
+    precisely what explains the refusal."""
+    out = _run(_state([_Bare(), _pair(1, qa_status="weird_unrecognized")]))
+    assert out.status == "refused"
+    assert "first_index" not in out.payload
+    assert out.payload["n_pairs"] == 2
+    assert out.payload["n_evaluated"] == 0
+    assert out.payload["not_evaluated"] == 2
+    assert out.payload["not_evaluated_reasons"] == {"no_usable_index": 1,
+                                                    "no_recognised_verdict": 1}
+    assert out.payload["work_order"] == []
+
+
+def test_the_empty_session_and_the_all_unusable_session_state_ONE_rule():
+    """They are the same refusal, and must not drift apart again: zero pairs
+    handed in and N pairs handed in of which none could be used differ only in
+    how many objects arrived. Both refuse; neither offers a first_index."""
+    empty = _run(_state([]))
+    unusable = _run(_state([_Bare(), _Bare()]))
+    assert empty.status == unusable.status == "refused"
+    assert "first_index" not in empty.payload
+    assert "first_index" not in unusable.payload
+    assert empty.payload["n_evaluated"] == unusable.payload["n_evaluated"] == 0
+    assert empty.payload["n_pairs"] == 0
+    assert unusable.payload["n_pairs"] == 2
 
 
 def test_it_says_WHY_it_orders_by_position_and_not_by_severity():
