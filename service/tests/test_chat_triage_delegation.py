@@ -29,9 +29,21 @@ def _asked():
             "specialist": {"name": "triage", "index": 0}}
 
 
+@pytest.fixture(autouse=True)
+def _isolate_runner_registry():
+    """The registry is process-global and bound once by service/app.py, which
+    any earlier test may already have imported. Restore it wholesale rather than
+    popping: a pop leaves every LATER test running unbound, which is exactly how
+    the end-to-end suite started failing only when run after this file."""
+    saved = dict(delegation._RUNNERS)
+    yield
+    delegation._RUNNERS.clear()
+    delegation._RUNNERS.update(saved)
+
+
 @pytest.fixture
 def registered():
-    """Bind a runner the way service/app.py does, and unbind it afterwards."""
+    """Bind a runner the way service/app.py does."""
     calls = []
 
     def runner(state, index, message, ask_fn):
@@ -39,8 +51,7 @@ def registered():
         return "gap 0.058 reached tau 0.05."
 
     delegation.set_specialist_runner("triage", runner)
-    yield calls
-    delegation._RUNNERS.pop("triage", None)
+    return calls
 
 
 def _say(_prompt):

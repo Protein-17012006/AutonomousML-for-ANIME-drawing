@@ -30,7 +30,17 @@ def _stub_triage_fn(a, b, pp):
     t = classify_gap(np.atleast_3d(np.asarray(a, np.uint8)),
                      np.atleast_3d(np.asarray(b, np.uint8)),
                      gap=pp.gap, regime=pp.regime, has_cut=False)
-    return {**dataclasses.asdict(t), "brief": template_brief(t)}
+    payload = {**dataclasses.asdict(t), "brief": template_brief(t)}
+    # This is a SECOND implementation of the triage payload — it does not go
+    # through TriagePair.execute — so anything added to the evidence there has to
+    # be added here too or the two paths quietly disagree. tau_gate was added on
+    # 2026-08-03 and was missing here until an end-to-end run caught it: without
+    # it the specialist is asked to "state gap and tau_gate as numbers" and has
+    # no tau to state.
+    tau = getattr(pp, "tau_gate", None)
+    if tau is not None:
+        payload["evidence"] = {**payload["evidence"], "tau_gate": tau}
+    return payload
 
 
 def stub_engines(_cfg=None) -> EngineBundle:
