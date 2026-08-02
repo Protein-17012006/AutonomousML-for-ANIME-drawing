@@ -26,6 +26,13 @@ def _prompt(ctx: str, hist: str, goal: str) -> str:
         "wants a judgement or a diagnosis; call a TOOL when they want an action.\n"
         'An agent may answer "no"; plan the step anyway and let it answer.\n\n'
         + registry.describe_for_prompt() +
+        "\n\nA step's argument may NAME AN EARLIER STEP'S ANSWER instead of a "
+        'literal, written "$<step number>.<output field>" — for example '
+        '{"index": "$1.first_index"}. Use it when you do not know the value yet: '
+        "ask cut_survey first, then point the next step at what it answered. "
+        "Only fields listed under OUTPUTS above exist, and only steps BEFORE this "
+        "one may be named. Prefer a literal whenever the artist already told you "
+        "the number.\n"
         "\n\nReply STRICT JSON only: "
         '{"steps": [{"target": <name>, "kind": "agent"|"tool", '
         '"ask": <short question, agents only>, "args": <object>}]}\n'
