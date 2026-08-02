@@ -23,6 +23,9 @@ _AGENT_NOTE = {
     "ok": " [answered]",
     "refused": " [REFUSED — this specialist declined; say so plainly, do not work around it]",
     "error": " [FAILED]",
+    "rejected": " [NEVER REACHED THE SPECIALIST — the server could not resolve its "
+               "arguments, so nothing was asked; this is neither an answer nor a "
+               "refusal — do not report it as either]",
 }
 _TOOL_NOTE = {
     "ok": " [READY TO PROPOSE — it has NOT run yet; never say it is done]",
@@ -51,7 +54,14 @@ def _fallback_say(results) -> str:
         elif r.status == "refused":
             parts.append(f"{r.target} declined: {r.says}")
         elif r.status == "rejected":
-            parts.append(f"{r.target} was refused by the server and not proposed")
+            if r.kind == "agent":
+                # Tool language ("not proposed") does not fit here: an agent is
+                # never "proposed" in the first place, it is asked. This step
+                # never reached the specialist at all.
+                parts.append(f"{r.target} was never reached — its request "
+                             "could not be resolved")
+            else:
+                parts.append(f"{r.target} was refused by the server and not proposed")
         elif r.status == "error":
             parts.append(f"{r.target} failed")
         elif r.says:
@@ -73,9 +83,11 @@ def run_goal_stream(state: dict, message: str, history: list, *, plan_ask_fn,
     """Generator: yields ("agent", TranscriptEntry) as each utterance HAPPENS, then
     one ("decision", dict). Never raises.
 
-    It loops run_step itself rather than calling dispatch, because a callback cannot
-    be turned into a generator — buffering the whole turn and replaying it afterwards
-    would make the "live" transcript a recording."""
+    It iterates `run_plan` itself rather than calling `dispatch`, because a
+    callback cannot be turned into a generator — buffering the whole turn and
+    replaying it afterwards would make the "live" transcript a recording.
+    `run_plan` is itself the generator that owns late binding and handoff;
+    this function only drains it and re-yields its entries as they arrive."""
     plan = plan_goal(state, message, history, plan_ask_fn)
     if not plan.is_actionable():
         out = decide_agent(state, message, history, say_ask_fn, memories)

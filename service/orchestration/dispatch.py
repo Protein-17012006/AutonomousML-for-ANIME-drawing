@@ -80,7 +80,16 @@ def run_step(ctx, step, seq, sources=None, asker=ORCHESTRATOR):
     if target is None:                  # unreachable via the planner; defensive
         return [], None
 
-    resolved, bound, error = resolve_args(step.args, sources)
+    try:
+        resolved, bound, error = resolve_args(step.args, sources)
+    except Exception as exc:            # noqa: BLE001 — the resolver itself
+        # must not escape: Design §7 commits binding.py raises -> caught here
+        # -> rejected, never past run_step/run_plan/dispatch. A malformed
+        # source payload (e.g. non-string keys) can make binding.py's own
+        # error-message construction raise before it ever returns a tuple.
+        resolved, bound, error = None, {}, (
+            f"the argument resolver itself failed while resolving "
+            f"{step.target}'s arguments: {exc}")
     ask_data = dict(step.args) if resolved is None else dict(resolved)
     if bound:
         # Both ends, or the mechanism is invisible.
@@ -123,8 +132,18 @@ def run_step(ctx, step, seq, sources=None, asker=ORCHESTRATOR):
     return entries, result
 
 
-def _handoff_refusal(result, is_born: bool, handed_to: set, planned: int) -> str:
-    """Why this handoff must NOT run — "" means run it. Never raises.
+def _handoff_refusal(result, is_born: bool, handed_to: set, planned: int) -> str | None:
+    """Whether an offered handoff must NOT run, and why. Never raises.
+
+    Three outcomes, and the empty string is not one of the "nothing to run"
+    cases:
+      None   nothing was offered — there is no handoff to report on at all.
+      ""     a handoff WAS offered and it is valid — run it.
+      str    a handoff was offered but must NOT run — this is why.
+
+    None and "" must stay distinguishable: collapsing them (e.g. a caller
+    testing `if not refusal:`) makes an ordinary step with no handoff at all
+    take the "run it" branch, and `handoff["to"]` then raises on `None`.
 
     A handoff is an agent choosing the next specialist. It is honoured only from a
     refusal ("I cannot help, but X can"), never toward a tool (that would queue an
@@ -132,7 +151,7 @@ def _handoff_refusal(result, is_born: bool, handed_to: set, planned: int) -> str
     never past the caps that keep one turn finite."""
     handoff = getattr(result, "handoff", None)
     if not isinstance(handoff, dict) or not handoff:
-        return ""                       # nothing offered; nothing to report
+        return None                     # nothing offered; nothing to report
     if result.status != "refused":
         return "a handoff is only honoured from a refusal"
     if is_born:
@@ -177,9 +196,13 @@ def run_plan(ctx, plan):
         ran += 1
         sources[step.id] = {"kind": result.kind, "payload": dict(result.payload)}
 
+        # `refusal is None` means nothing was offered — the single place that
+        # decides whether a handoff runs. Do not re-test `result.handoff` here;
+        # that duplicated the decision `_handoff_refusal` already made and let
+        # `if not refusal:` collapse "nothing offered" into "run it".
         refusal = _handoff_refusal(result, is_born, handed_to, ran + len(queue))
-        handoff = getattr(result, "handoff", None)
-        if isinstance(handoff, dict) and handoff:
+        if refusal is not None:
+            handoff = result.handoff
             if refusal:
                 # Dropped, never swallowed: a mechanism nobody can see is a
                 # mechanism nobody can trust.

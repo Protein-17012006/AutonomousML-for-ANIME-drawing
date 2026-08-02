@@ -261,13 +261,21 @@ def test_a_pair_that_went_unevaluated_for_an_UNRECORDED_reason_is_still_reported
 
 
 def test_the_clause_speaks_the_TOTAL_even_when_the_reasons_do_not_add_up_to_it():
-    """Fails under the mutation `n_not_evaluated = sum(reasons.values())`.
+    """Pins `_not_evaluated_clause` directly, NOT `_account` — it is called here
+    with a hand-built `total=3` whose breakdown only accounts for 1, so it
+    cannot reach `_account`'s `total = n_pairs - n_evaluated` derivation at all
+    (that derivation is not on this call path). What this test actually kills:
+    a `_not_evaluated_clause` that recomputed its leading number as
+    `sum(reasons.values())` instead of speaking the `total` it was handed —
+    that mutation would print "1 pair(s)", not "3 pair(s)".
 
-    That mutation's whole effect is to make an unattributed remainder
-    impossible to represent — the total would become a function of the
-    breakdown, and this call, whose breakdown accounts for 1 of 3, could not
-    exist. The contract being pinned: `total` is the authority, `reasons` is
-    commentary, and two pairs unaccounted for are still SAID."""
+    The `n_not_evaluated = sum(reasons.values())` mutation the docstring used to
+    claim this test caught lives inside `_account`, and is instead pinned by
+    the two tests directly above this one —
+    `test_not_evaluated_is_the_TOTAL_MINUS_THE_EVALUATED_not_the_sum_of_reasons`
+    and `test_a_pair_that_went_unevaluated_for_an_UNRECORDED_reason_is_still_reported`
+    — both of which call `_account` itself with numbers where the subtraction
+    and the reason-sum disagree."""
     from service.orchestration.agents import _not_evaluated_clause
 
     out = _not_evaluated_clause(3, {"no_usable_index": 1})

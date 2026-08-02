@@ -320,6 +320,23 @@ def test_a_handoff_on_a_fast_synchronous_result_survives_the_ms_rebuild():
     assert result.ms >= 0    # the rebuild DID fire (ms was 0 going in)
 
 
+def test_a_resolver_crash_is_caught_and_REJECTS_the_step_not_raised():
+    """Reviewer-proven escape: Design §7 commits 'binding.py raises -> caught in
+    run_step -> rejected; never escapes', but `resolve_args` was called bare.
+    An agent payload with a non-string key (an int, say) plus a LATER step's
+    reference to a field that payload does not have makes binding.py's own
+    error-message construction do `sorted(payload)` over mixed int/str keys,
+    which raises TypeError — escaping run_step, run_plan AND dispatch, all
+    three documented "Never raises", and would 500 the SSE route."""
+    from service.orchestration.dispatch import Seq, run_step
+    sources = {1: {"kind": "agent", "payload": {1: "int-keyed", "b": "y"}}}
+    step = Step(2, "qa_csq", "agent", ask="verdict?",
+               args={"index": "$1.missing_field"})
+    entries, result = run_step(AgentContext(_state()), step, Seq(), sources)
+    assert result.status == "rejected"
+    assert entries, "a rejected step must still produce a transcript entry"
+
+
 def test_a_plan_with_no_references_and_no_handoffs_behaves_exactly_as_before():
     """If the new layer does not fire, what runs is what ran yesterday."""
     results = dispatch(AgentContext(_state()), _demo_plan())

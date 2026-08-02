@@ -160,6 +160,47 @@ def test_an_ok_TOOL_is_never_described_to_synthesis_as_already_done():
     assert "NOTHING in this list has been executed" in prompt
 
 
+def test_a_rejected_AGENT_step_carries_an_agent_specific_note_not_the_tool_one():
+    """dispatch.py builds StepResult(..., "agent", "rejected") whenever an
+    AGENT step's late-binding reference fails to resolve — newly reachable on
+    this branch. `_AGENT_NOTE` had no "rejected" entry, so `.get(status, "")`
+    silently fell back to nothing, leaving the synthesising LLM with raw
+    `$`-syntax and a payload key list and no instruction at all."""
+    from service.orchestration.models import StepResult
+    from service.orchestration.service import _findings_block
+    result = StepResult(1, "qa_csq", "agent", "rejected",
+                        says="$1.first_index asks step 1 for 'first_index', "
+                             "which it did not report. It reported: buckets.")
+    block = _findings_block([result])
+    line = next(l for l in block.splitlines() if "qa_csq" in l)
+    assert "[" in line, line            # a bracketed instruction is present
+    # It must be AGENT wording, not the TOOL note leaking onto an agent line:
+    # a tool is "proposed"/"refused by the server"; an agent is only ever
+    # "asked", and this step never reached it.
+    assert "SERVER REFUSED THESE ARGUMENTS" not in line, line
+    assert "not proposed" not in line, line
+
+
+def test_fallback_say_for_a_rejected_agent_does_not_use_tool_language():
+    """`_fallback_say` said 'was refused by the server and not proposed' for
+    EVERY rejected step regardless of kind — true for a tool (the server
+    validated and refused its arguments), false for an agent (its arguments
+    could not even be resolved, so nothing was ever proposed to refuse)."""
+    from service.orchestration.models import StepResult
+    from service.orchestration.service import _fallback_say
+    agent_rejected = StepResult(1, "qa_csq", "agent", "rejected",
+                                says="the resolver failed")
+    out = _fallback_say([agent_rejected])
+    assert "qa_csq" in out
+    assert "not proposed" not in out
+    assert "refused by the server" not in out
+
+    tool_rejected = StepResult(1, "open_board", "tool", "rejected",
+                               says="bad index")
+    tool_out = _fallback_say([tool_rejected])
+    assert "refused by the server" in tool_out   # tool wording is unchanged
+
+
 def test_an_ok_AGENT_and_an_ok_TOOL_carry_different_notes():
     """An agent that answered really did answer; a tool that is `ok` did not run."""
     seen = {}

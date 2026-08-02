@@ -77,6 +77,24 @@ def test_triage_DOES_point_at_perception_when_a_finding_exists():
     assert "perception" in produced[0][1].says.lower()
 
 
+def test_no_handoff_offered_is_distinguishable_from_a_valid_handoff():
+    """`_handoff_refusal` used to return "" both for 'nothing offered' and for
+    'this handoff is valid, run it' — its own docstring claimed "" always means
+    run it, false half the time. The reviewer showed the obvious
+    simplification, collapsing the caller's two tests into `if not refusal:`,
+    makes an ordinary step with NO handoff at all take the accept branch and
+    `handoff["to"]` raise on None. The two cases must not share a value:
+    nothing offered -> None; a valid, run-it handoff -> ""."""
+    from service.orchestration.dispatch import _handoff_refusal
+    from service.orchestration.models import StepResult
+    no_handoff = StepResult(1, "triage", "agent", "ok")
+    assert _handoff_refusal(no_handoff, False, set(), 1) is None
+
+    valid = StepResult(1, "triage", "agent", "refused",
+                       handoff={"to": "perception", "args": {}})
+    assert _handoff_refusal(valid, False, set(), 1) == ""
+
+
 def test_a_handoff_may_not_target_a_TOOL():
     """An agent must not queue an action the planner never proposed."""
     from service.orchestration.dispatch import _handoff_refusal
@@ -175,14 +193,25 @@ def test_a_handoff_to_an_unknown_target_is_refused_not_raised():
         assert isinstance(reason, str) and reason, (bad_to, reason)
 
 
+# Derived from MAX_PLAN_STEPS, not hard-coded: two of the cap tests below used
+# to request exactly 7 steps and assert exactly 2 dropped. If MAX_PLAN_STEPS
+# is ever raised to 7 or more, a literal "7" stops exceeding the cap at all —
+# the cap test would then pass for the wrong reason (nothing was truncated),
+# and the drop-count test would assert a number the cap can no longer produce.
+# Requesting two steps past the cap keeps both tests meaningful at any cap size.
+_STEPS_REQUESTED = MAX_PLAN_STEPS + 2
+_STEPS_DROPPED = _STEPS_REQUESTED - MAX_PLAN_STEPS
+
+
 def test_run_plan_caps_execution_at_MAX_PLAN_STEPS():
     """Changing `while queue and ran < MAX_PLAN_STEPS:` to `while queue:` leaves
-    every other test in this file passing — a 7-step plan then runs 7 steps.
-    `planner._steps_from` truncates at 5 today, which masks it; `Plan` is
-    freely constructible and `run_plan` is the sole enforcement point."""
+    every other test in this file passing — a plan with more steps than the cap
+    then runs every one of them. `planner._steps_from` truncates at 5 today,
+    which masks it; `Plan` is freely constructible and `run_plan` is the sole
+    enforcement point."""
     plan = Plan(goal="x", steps=tuple(
         Step(i, "qa_csq", "agent", ask="verdict?", args={"index": 0})
-        for i in range(1, 8)))            # 7 steps requested, cap is 5
+        for i in range(1, _STEPS_REQUESTED + 1)))   # cap + 2 requested
     produced = list(run_plan(AgentContext(_state()), plan))
     assert len(produced) == MAX_PLAN_STEPS
 
@@ -196,13 +225,13 @@ def test_a_plan_truncated_by_the_budget_SAYS_SO_in_the_transcript():
     "budget" and must not be able to satisfy this assertion instead."""
     plan = Plan(goal="x", steps=tuple(
         Step(i, "qa_csq", "agent", ask="verdict?", args={"index": 0})
-        for i in range(1, 8)))            # 7 requested, only 5 run -> 2 dropped
+        for i in range(1, _STEPS_REQUESTED + 1)))   # cap + 2 requested -> 2 dropped
     produced = list(run_plan(AgentContext(_state()), plan))
     truncated = [e for entries, _r in produced for e in entries
                 if e.data.get("status") == "plan_truncated"]
     all_texts = [e.text for entries, _r in produced for e in entries]
     assert truncated, all_texts
-    assert truncated[0].data.get("not_run") == 2, truncated[0].data
+    assert truncated[0].data.get("not_run") == _STEPS_DROPPED, truncated[0].data
 
 
 def test_a_handoff_to_a_TOOL_is_blocked_end_to_end_through_run_plan(monkeypatch):
