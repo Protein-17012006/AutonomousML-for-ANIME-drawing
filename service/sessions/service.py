@@ -36,6 +36,13 @@ class SessionOutcome:
     sampling: dict
     csq: dict | None
     qa_degraded: bool
+    # The session's own configuration and revision, carried so the publisher can
+    # write a resume block. `sampling` records cadence/smoothness/fps but never
+    # `engines` or the taus, and without those a reopened session cannot be
+    # rebuilt into a working one. Optional: not every producer of an outcome has
+    # them, and a missing block only costs the resume path a derivation.
+    cfg: Any = None
+    rev: int = 0
 
 
 class RunSession:
@@ -93,6 +100,8 @@ class RunSession:
             sampling=metadata.sampling,
             csq=metadata.csq,
             qa_degraded=metadata.qa_degraded,
+            cfg=cfg,
+            rev=0,
         )
 
     def publish(

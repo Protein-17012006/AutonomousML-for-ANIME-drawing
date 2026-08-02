@@ -94,6 +94,17 @@ def validate_repair_request(state: dict, index: int, masks, refinement_passes: i
             f"this session rendered at x{smoothness}"
         )
 
+    # A reopened session restores the artist's inputs and decisions but not the
+    # generated pixels, so NO pair in it can be painted on. Say that: the generic
+    # "no generated frame" below reads as `needs_key`, and the artist would go
+    # and draw a key that is not actually missing.
+    if state.get("resumed"):
+        raise ValueError(
+            "this session was reopened from history, which restores its keys and "
+            "verdicts but not its generated frames; submit a key to regenerate "
+            "them before repairing"
+        )
+
     pair = _pairs_by_index(state).get(index)
     if pair is None:
         raise ValueError(f"pair {index} is outside this result")

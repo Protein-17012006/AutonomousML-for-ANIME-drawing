@@ -176,6 +176,10 @@ class ReviewSession:
                 "keys": new_keys,
                 "result": new_result,
                 "gt_frames": new_gt,
+                # This ran the pipeline, so the frames a reopened session lacked
+                # now exist. Leaving the flag set would refuse repair forever on
+                # a session that is no longer missing anything.
+                "resumed": False,
                 "explanations": copy.deepcopy(metadata.explanations),
                 "qa_degraded": metadata.qa_degraded,
                 "sampling": dict(metadata.sampling),
@@ -210,6 +214,8 @@ class ReviewSession:
             sampling=metadata.sampling,
             csq=metadata.csq,
             qa_degraded=metadata.qa_degraded,
+            cfg=cfg,
+            rev=revision,
         )
 
     def repair_pair(self, sid: int, index: int, masks, *, span_editor,

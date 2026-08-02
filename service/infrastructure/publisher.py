@@ -13,7 +13,11 @@ from urllib.parse import urlsplit
 
 from service.core.auth import auth_required
 from service.core.config import PublisherSettings
-from service.session_history.models import WorkspaceSnapshot, WorkspaceUpload
+from service.session_history.models import (
+    ResumeState,
+    WorkspaceSnapshot,
+    WorkspaceUpload,
+)
 from service.sessions.schemas import PairEvent, ResultEvent
 
 _ARTIFACT_SUFFIXES = {".png", ".md", ".mp4"}
@@ -98,7 +102,22 @@ def _workspace_snapshot(outcome, uploaded_names: set[str], workspace_input) -> W
         upload=upload,
         pairs=pairs,
         result=final,
+        resume=_resume_state(outcome),
     )
+
+
+def _resume_state(outcome) -> ResumeState | None:
+    """The configuration a reopened session has to be rebuilt with.
+
+    None when the producer had no cfg to give — resume then derives what it can
+    from `result.sampling`, so an absent block degrades the fidelity of a resume
+    rather than preventing one.
+    """
+    cfg = getattr(outcome, "cfg", None)
+    dump = getattr(cfg, "model_dump", None)
+    if dump is None:
+        return None
+    return ResumeState(cfg=dump(mode="json"), rev=int(getattr(outcome, "rev", 0) or 0))
 
 
 def publish_session(

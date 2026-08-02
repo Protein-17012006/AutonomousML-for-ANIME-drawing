@@ -55,6 +55,7 @@ import {
   getMySessionWorkspace,
   listMySessions,
   renameMySession,
+  resumeMySession,
   type PublishedSessionSummary,
 } from "@/lib/sessionApi";
 import { discardActiveWorkspace, getActiveWorkspace, retryActiveWorkspacePublish, subscribeActiveWorkspace, type ActiveWorkspace } from "@/lib/activeWorkspace";
@@ -163,6 +164,9 @@ export default function App() {
   const [ownerSub, setOwnerSub] = useState<string | null>(null);
   const [liveSid, setLiveSid] = useState<string | null>(null);
   const [durablePid, setDurablePid] = useState<string | null>(null);
+  // Why a reopened session stayed read-only. Null means it did not — either it
+  // resumed, or nothing has been reopened.
+  const [resumeRefusal, setResumeRefusal] = useState<string | null>(null);
   const [history, setHistory] = useState<PublishedSessionSummary[]>([]);
   const [historyCursor, setHistoryCursor] = useState<string | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -178,6 +182,10 @@ export default function App() {
   const [pendingRun, setPendingRun] = useState<PendingRun | null>(null);
   const cacheWritesEnabled = useRef(false);
   const activeStreamStop = useRef<(() => void) | null>(null);
+  // The session hydration currently in flight. Resume is an await inside that
+  // hydration, so a second click during it must not let the first one install a
+  // live id belonging to the cut the artist just navigated away from.
+  const hydratingPid = useRef<string | null>(null);
   const activeStreamSequence = useRef(0);
 
   const loadHistory = useCallback(async () => {
@@ -232,10 +240,16 @@ export default function App() {
     });
     setLog(workspace.pairs);
     setResult(workspace.result);
-    // Durable history is read-only. Older workspace snapshots can contain a
-    // runtime SID, but that ID must not turn the composer into a permanently
-    // disabled "Saving session…" control after recovery.
-    if (!retainLiveSession) setLiveSid(null);
+    // A snapshot's own SID is dead: it names a runtime session in a process that
+    // has since restarted or evicted it. Clear it, then ask the service to build
+    // a NEW one from this snapshot — that is what makes the reopened workbench
+    // editable instead of a read-only record of a session the artist can no
+    // longer touch.
+    if (!retainLiveSession) {
+      setLiveSid(null);
+      setResumeRefusal(null);
+      hydratingPid.current = selected.pid;
+    }
     setDurablePid(selected.pid);
     setQaTurns(workspace.qa.map((turn) => ({
       q: turn.question,
@@ -245,6 +259,17 @@ export default function App() {
     setVerdicts({});
     setRunning(false);
     setView("chat");
+
+    if (retainLiveSession || selected.status !== "complete") return;
+    try {
+      const resumed = await resumeMySession(selected.pid);
+      if (hydratingPid.current !== selected.pid) return;
+      setLiveSid(resumed.sid);
+      setResumeRefusal(resumed.reason);
+    } catch {
+      if (hydratingPid.current !== selected.pid) return;
+      setResumeRefusal("This session could not be reopened for editing just now.");
+    }
   }, [keys, stagedKeys]);
 
   const finishRecoveredPublication = useCallback(async (pid: string) => {
@@ -402,6 +427,7 @@ export default function App() {
     setView("chat");
     setLiveSid(null);
     setDurablePid(null);
+    setResumeRefusal(null);
   };
 
   const restoreActiveInputs = async (workspace: ActiveWorkspace) => {
@@ -1291,6 +1317,7 @@ export default function App() {
                 onRefill={refillKey}
                 stagedRefills={stagedRefills}
                 canEdit={!!liveSid && !!durablePid}
+                readOnlyReason={resumeRefusal}
                 onSubmitVerdicts={submitReviewVerdicts}
                 onSubmitRefills={submitReviewKeys}
                 onDiscardStaged={discardStagedRefills}

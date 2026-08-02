@@ -31,6 +31,7 @@ export function ReviewWorkbench({
   onRefill,
   stagedRefills,
   canEdit,
+  readOnlyReason,
   onSubmitVerdicts,
   onSubmitRefills,
   onDiscardStaged,
@@ -47,6 +48,7 @@ export function ReviewWorkbench({
   onRefill: (index: number, file: File) => void;
   stagedRefills: Record<number, { file: File; url: string }>;
   canEdit: boolean;
+  readOnlyReason?: string | null;
   onSubmitVerdicts: () => void;
   onSubmitRefills: () => void;
   onDiscardStaged: () => void;
@@ -405,7 +407,14 @@ export function ReviewWorkbench({
             )}
             {!running && (
               <div className="review-submit">
-                {!canEdit ? <p className="review-readonly">This saved session is read-only.</p> : filter === "needs_key" ? (
+                {!canEdit ? (
+                  // A reopened session normally resumes; when it cannot, the
+                  // service says why, and that reason beats a bare "read-only"
+                  // the artist can only guess at.
+                  <p className="review-readonly">
+                    {readOnlyReason ?? "This saved session is read-only."}
+                  </p>
+                ) : filter === "needs_key" ? (
                   <>
                     <Button type="button" onClick={onSubmitRefills} disabled={gaps.length === 0 || gaps.some((pair) => !stagedRefills[pair.index])}>
                       Submit replacement keys

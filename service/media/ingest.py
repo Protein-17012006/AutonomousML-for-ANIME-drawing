@@ -172,6 +172,39 @@ def _load_keys(
     return keys
 
 
+def load_stored_keys(
+    blobs: "List[tuple[str, bytes]]", *, settings: MediaIngestSettings | None = None
+) -> List[np.ndarray]:
+    """Decode already-published key PNGs, in the order given.
+
+    Resume reads these back from durable storage. Unlike `_load_keys` the order
+    is the caller's (the snapshot's key index), never the filename — `key_10.png`
+    sorts before `key_2.png`. The size ceilings still apply: these bytes are
+    fetched from object storage, and a session's own artifacts are no more
+    trustworthy as memory pressure than an upload is.
+    """
+    settings = settings or _ingest_settings()
+    if len(blobs) > settings.max_keys:
+        raise HTTPException(
+            status_code=413,
+            detail=(f"too many stored key frames: got {len(blobs)}, "
+                    f"limit is {settings.max_keys}"),
+        )
+    keys: List[np.ndarray] = []
+    total_pixels = 0
+    for label, data in blobs:
+        image = _decode_image(data, label=label, settings=settings)
+        total_pixels += image.shape[0] * image.shape[1]
+        if total_pixels > settings.max_key_total_pixels:
+            raise HTTPException(
+                status_code=413,
+                detail=(f"stored key frames have {total_pixels} decoded pixels; "
+                        f"limit is {settings.max_key_total_pixels}"),
+            )
+        keys.append(image)
+    return keys
+
+
 def _load_frames_from_video(
     upload: UploadFile,
     stride: int,

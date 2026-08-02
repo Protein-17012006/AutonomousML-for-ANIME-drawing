@@ -15,6 +15,10 @@ class SessionHttpRuntime:
     load_keys: Callable
     load_video_keys: Callable
     stream_session: Callable
+    # Resume reads keys back out of durable storage rather than off an upload,
+    # and needs the engine resolver directly (there is no stream to hand it to).
+    load_stored_keys: Callable | None = None
+    resume_for: Callable | None = None
 
 
 def session_repository_for(app=None) -> SessionRepository:

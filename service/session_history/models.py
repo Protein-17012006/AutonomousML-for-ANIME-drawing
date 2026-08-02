@@ -61,11 +61,25 @@ class WorkspaceUpload(BaseModel):
     filenames: list[str] = Field(default_factory=list)
 
 
+class ResumeState(BaseModel):
+    """What a live session needs back that the result event never carried.
+
+    `result.sampling` already holds cadence/smoothness/output fps/interpolator;
+    `engines`, `tau_gate`, `tau_soft` and `show` exist only here. Optional on
+    purpose: sessions published before this block are still resumable, with the
+    configuration derived from `sampling` plus the deployment's current values.
+    """
+
+    cfg: dict = Field(default_factory=dict)
+    rev: int = 0
+
+
 class WorkspaceSnapshot(BaseModel):
     schema_version: Literal[1]
     upload: WorkspaceUpload
     pairs: list[PairEvent]
     result: ResultEvent
+    resume: ResumeState | None = None
 
 
 class QaTranscriptTurn(BaseModel):
