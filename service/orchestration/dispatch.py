@@ -194,6 +194,19 @@ def run_plan(ctx, plan):
                                    ask=str(handoff.get("why") or "")[:300],
                                    args=dict(handoff.get("args") or {})),
                               step.target, True))
+
+        if ran >= MAX_PLAN_STEPS and queue:
+            # The cap just closed the loop with work still queued (planned steps
+            # beyond MAX_PLAN_STEPS, or a handoff accepted too late to run). The
+            # old `for step in plan.steps` loop ran every step; this cap silently
+            # drops the rest unless it says so here — the same silent-drop this
+            # task went to trouble to avoid for handoffs.
+            entries.append(_entry(seq, ORCHESTRATOR, ORCHESTRATOR, "error",
+                                  f"{len(queue)} step(s) not run: the "
+                                  f"{MAX_PLAN_STEPS}-step budget for this turn "
+                                  "is spent",
+                                  data={"status": "plan_truncated",
+                                       "not_run": len(queue)}))
         yield entries, result
 
 

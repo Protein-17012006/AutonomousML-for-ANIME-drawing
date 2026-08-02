@@ -2,7 +2,7 @@ from unittest.mock import MagicMock
 
 from service.orchestration.agents import AgentContext
 from service.orchestration.dispatch import run_plan
-from service.orchestration.models import Plan, Step
+from service.orchestration.models import MAX_PLAN_STEPS, Plan, Step
 
 
 def _pair(index, action="filled", qa_status="flag"):
@@ -150,3 +150,88 @@ def test_no_handoff_offered_means_no_extra_entry():
     produced = list(run_plan(AgentContext(_state()), plan))
     assert len(produced) == 1
     assert len(produced[0][0]) == 2       # exactly one ask + one reply
+
+
+# --- Fix round 1: unknown-target guard, loop cap, end-to-end tool block -----
+
+def test_a_handoff_to_an_unknown_target_is_refused_not_raised():
+    """Deleting `if target is None: return ...` (dispatch.py) leaves every other
+    test in this file passing, then turns a bad `to` into an AttributeError
+    ('NoneType' object has no attribute 'kind') inside _handoff_refusal — a
+    raise where both _handoff_refusal and run_plan are documented never to
+    raise. This is also the guard that blocks case variants, whitespace, empty
+    strings and non-string values probed directly against `to`."""
+    from service.orchestration.dispatch import _handoff_refusal
+    from service.orchestration.models import StepResult
+    bad_targets = ("not_a_real_agent", "PERCEPTION", " perception", "", None,
+                  0, ["perception"])
+    for bad_to in bad_targets:
+        result = StepResult(1, "triage", "agent", "refused",
+                            handoff={"to": bad_to, "args": {}})
+        reason = _handoff_refusal(result, False, set(), 1)
+        # The failure mode being guarded is a RAISE, not a wrong string — so the
+        # call must simply return, and return something non-empty (a dropped
+        # handoff, not a silently accepted one).
+        assert isinstance(reason, str) and reason, (bad_to, reason)
+
+
+def test_run_plan_caps_execution_at_MAX_PLAN_STEPS():
+    """Changing `while queue and ran < MAX_PLAN_STEPS:` to `while queue:` leaves
+    every other test in this file passing — a 7-step plan then runs 7 steps.
+    `planner._steps_from` truncates at 5 today, which masks it; `Plan` is
+    freely constructible and `run_plan` is the sole enforcement point."""
+    plan = Plan(goal="x", steps=tuple(
+        Step(i, "qa_csq", "agent", ask="verdict?", args={"index": 0})
+        for i in range(1, 8)))            # 7 steps requested, cap is 5
+    produced = list(run_plan(AgentContext(_state()), plan))
+    assert len(produced) == MAX_PLAN_STEPS
+
+
+def test_a_plan_truncated_by_the_budget_SAYS_SO_in_the_transcript():
+    """A step beyond the cap must not just vanish: the old `for step in
+    plan.steps` loop ran every step, so silently dropping the tail on the new
+    cap is a behaviour change, and this task went to trouble to avoid exactly
+    this kind of silent drop for handoffs. Pinned to the truncation entry's own
+    `data["status"]`, not a bare text search — the handoff-drop path also says
+    "budget" and must not be able to satisfy this assertion instead."""
+    plan = Plan(goal="x", steps=tuple(
+        Step(i, "qa_csq", "agent", ask="verdict?", args={"index": 0})
+        for i in range(1, 8)))            # 7 requested, only 5 run -> 2 dropped
+    produced = list(run_plan(AgentContext(_state()), plan))
+    truncated = [e for entries, _r in produced for e in entries
+                if e.data.get("status") == "plan_truncated"]
+    all_texts = [e.text for entries, _r in produced for e in entries]
+    assert truncated, all_texts
+    assert truncated[0].data.get("not_run") == 2, truncated[0].data
+
+
+def test_a_handoff_to_a_TOOL_is_blocked_end_to_end_through_run_plan(monkeypatch):
+    """The six per-reason tests above call _handoff_refusal directly with
+    hand-built StepResults, so they cannot tell whether run_plan actually
+    consults it. Step(..., "agent") is decorative — run_step re-resolves the
+    target through the registry by NAME, so a misbehaving (or malicious)
+    agent handler is free to hand off to a tool name, and _handoff_refusal is
+    the only thing standing between that and _run_tool actually queuing
+    rerun_session. This drives a fake refusing handler through the real
+    run_plan loop and checks the tool never ran."""
+    from service.orchestration import registry
+
+    def _fake_triage(ctx, step):
+        from service.orchestration.models import StepResult
+        return StepResult(step.id, step.target, "agent", "refused",
+                          says="fake refusal handing off to a tool",
+                          handoff={"to": "rerun_session",
+                                   "args": {"smoothness": 1}})
+
+    monkeypatch.setattr(registry, "_AGENT_HANDLERS",
+                        {**registry._AGENT_HANDLERS, "triage": _fake_triage})
+
+    produced = list(run_plan(AgentContext(_state()), _triage_plan()))
+    results = [r for _e, r in produced]
+    texts = [e.text for entries, _r in produced for e in entries]
+
+    # rerun_session needs_confirm=True: if the tool guard were gone, this
+    # handoff-born step would actually run _run_tool and come back "queued".
+    assert all(r.status != "queued" for r in results), results
+    assert all(r.target != "rerun_session" for r in results), results
+    assert any("tool" in t for t in texts), texts
