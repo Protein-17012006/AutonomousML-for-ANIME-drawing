@@ -24,13 +24,41 @@ class Target:
 
 # Agent descriptions are what the planner sees; keep them about WHAT the agent
 # decides, not how it is implemented.
+#
+# (label, what the agent DECIDES, args shape, output fields a later step may read)
+#
+# OUTPUTS is not documentation. A step may name an earlier step's answer as
+# "$<id>.<field>", and the planner can only write that if it has been told the
+# field exists — the same omission that made it invent tool argument names on
+# 2026-08-01. Each list below is read from the handler in
+# service/orchestration/agents.py, not transcribed from a design doc: a field
+# named here that the agent never returns produces a step the server rejects at
+# runtime, and a field the agent returns but this text omits is one the planner
+# can never learn to reference.
 _AGENT_SPECS = {
-    "triage": ("Triage", "diagnoses why a pair was refused and how many keys to draw, and where"),
-    "perception": ("Perception", "reports what defect the vision model saw in a pair and in which region"),
-    "qa_csq": ("QA/CSQ", "owns the calibrated pass/abstain/flag verdict for a pair"),
+    "triage": ("Triage",
+               "diagnoses why a pair was refused and how many keys to draw, and where",
+               '{"index": <int, 0..n_pairs-1>}',
+               "cls, confidence, evidence always; keys_suggested and brief ONLY "
+               "for a gate-refused pair; out_of_population and withheld instead "
+               "when the gate accepted the pair"),
+    "perception": ("Perception",
+                   "reports what defect the vision model saw in a pair and in which region",
+                   '{"index": <int, 0..n_pairs-1>}',
+                   "err_type, region, explanation; annotated_url once a marked "
+                   "frame exists; box (fractional region rectangle) when one "
+                   "could be located"),
+    "qa_csq": ("QA/CSQ",
+               "owns the calibrated pass/abstain/flag verdict for a pair",
+               '{"index": <int, 0..n_pairs-1>}',
+               "status, reason"),
     "cut_survey": ("Cut Survey",
                    "orders the WHOLE cut into work buckets from the calibrated "
-                   "verdicts; ask it FIRST when the artist has not named a pair"),
+                   "verdicts; ask it FIRST when the artist has not named a pair",
+                   "{}",
+                   "work_order, buckets, keys_outstanding, n_pairs, n_evaluated, "
+                   "not_evaluated, not_evaluated_reasons, unreadable, withheld; "
+                   "first_index ONLY when there is actionable work"),
 }
 
 # The planner must be told each tool's ARGUMENT SHAPE, not just its name. Without
@@ -76,7 +104,7 @@ def resolve(name) -> Optional[Target]:
     if not isinstance(name, str) or not name:
         return None
     if name in _AGENT_SPECS:
-        label, _desc = _AGENT_SPECS[name]
+        label = _AGENT_SPECS[name][0]
         return Target(name=name, kind="agent", label=label, needs_confirm=False,
                       handler=_AGENT_HANDLERS.get(name))
     spec = TOOLS.get(name)
@@ -89,8 +117,9 @@ def resolve(name) -> Optional[Target]:
 def describe_for_prompt() -> str:
     lines = ['AGENTS (ask these; each may answer "no" and you must accept it):']
     for name in agent_names():
-        _label, desc = _AGENT_SPECS[name]
-        lines.append(f'  {name} — {desc}; args {{"index": <pair index>}}')
+        _label, desc, args_hint, outputs = _AGENT_SPECS[name]
+        lines.append(f"  {name} — {desc}; args {args_hint}")
+        lines.append(f"      OUTPUTS a later step may read: {outputs}")
     lines.append("TOOLS (deterministic; NOTHING here runs until the artist accepts it):")
     for name in tool_names():
         spec = TOOLS[name]
