@@ -97,15 +97,18 @@ export function ReviewWorkbench({
   const loadingPreview = running && !result;
   const reconFailed = video != null && failedReconUrl === video;
   const compareFailed = compareUrl != null && failedCompareUrl === compareUrl;
-  // A needs_key pair was refused before interpolation, so it has no generated
-  // frame to paint on; offering Repair there would promise a missing artefact.
-  const repairFrameUrl =
-    focused != null && mids ? (mids[String(focused)] ?? null) : null;
-  const canRepair = Boolean(canEdit && onRepair && repairFrameUrl && !running);
   const selectedIndex =
     focused != null && shown.some((pair) => pair.index === focused)
       ? focused
       : (shown[0]?.index ?? null);
+  // Keyed off selectedIndex, NOT `focused`: `focused` is null until the artist
+  // clicks a row, so gating on it hid the Repair tab on exactly the common case
+  // of opening the board and going straight to the output.
+  // A needs_key pair was refused before interpolation and has no generated frame
+  // to paint on, so it has no entry here and the tab correctly stays hidden.
+  const repairFrameUrl =
+    selectedIndex != null && mids ? (mids[String(selectedIndex)] ?? null) : null;
+  const canRepair = Boolean(canEdit && onRepair && repairFrameUrl && !running);
   // Pair events arrive before the rendered result. Keep the QA panel aligned
   // with both review columns: before that result boundary there is no reviewable
   // pair, even though the progress log already contains entries.
@@ -323,7 +326,7 @@ export function ReviewWorkbench({
                       className={cn(outTab === "repair" && "is-active")}
                       onClick={() => setOutTab("repair")}
                     >
-                      Repair pair {focused}
+                      Repair pair {selectedIndex}
                     </Button>
                   )}
                 </div>
@@ -333,11 +336,11 @@ export function ReviewWorkbench({
                   <RepairCanvas
                     // Remount on a pair change: a canvas carrying the previous
                     // pair's strokes would submit them against this frame.
-                    key={`${focused}-${repairFrameUrl}`}
+                    key={`${selectedIndex}-${repairFrameUrl}`}
                     frameUrl={repairFrameUrl!}
                     disabled={running}
                     onSubmit={(maskPng) => {
-                      onRepair!(focused!, maskPng);
+                      onRepair!(selectedIndex!, maskPng);
                       setOutTab("recon");
                     }}
                     onCancel={() => setOutTab("recon")}
