@@ -23,10 +23,27 @@ import numpy as np
 MAX_PROCESS_WIDTH = 960
 MAX_PROCESS_HEIGHT = 540
 
+# DiffuEraser refuses outright below this: `read_video` raises "The resolution
+# of the uploaded video must be larger than 256x256". The still-image path never
+# met it because it sends the WHOLE frame; the span path sends a CROP, so a small
+# painted region -- a hand, a face -- produced a crop the model rejected and the
+# artist was told the worker was unavailable. Found on the box, 2026-08-02; every
+# unit test had mocked the worker and so could not see it. 264 is the first
+# multiple of 8 above the model's limit.
+MIN_MODEL_SIDE = 264
+
 # Real neighbouring frames taken on each side of the painted span, and the
 # model's own floor on how many frames it needs to work at all.
 CONTEXT_FRAMES = 12
 MIN_CONTEXT_FRAMES = 22
+
+# What the MODEL demands, which is NOT the same number: DiffuEraser raises "the
+# number of frames of video, mask, and priori is at least greater than 22", i.e.
+# it needs 23. Long's widening floor above stops AT 22, so a span it considers
+# complete can still be one frame short of acceptable. Kept as its own constant
+# because it belongs to the model, not to his maths. Found on the box 2026-08-02:
+# a short cut came back as a 503 the artist would read as "the worker is down".
+MIN_MODEL_FRAMES = MIN_CONTEXT_FRAMES + 1
 
 # Caps carried over from the Studio's `start_repair`.
 MAX_REFINEMENT_PASSES = 20
@@ -83,6 +100,33 @@ def aligned_crop(mask_union: np.ndarray, width: int, height: int) -> tuple:
     y0 = max(0, (y0 // GRID) * GRID)
     x1 = min(width, ((x1 + GRID - 1) // GRID) * GRID)
     y1 = min(height, ((y1 + GRID - 1) // GRID) * GRID)
+    return x0, y0, x1, y1
+
+
+def grow_crop_to_model_minimum(crop, width: int, height: int,
+                               minimum: int = MIN_MODEL_SIDE) -> tuple:
+    """Widen a crop until the model will accept it, keeping it inside the frame.
+
+    Growing the CROP rather than upscaling it is deliberate: it hands the model
+    more real neighbouring pixels instead of a stretched copy of too few. The
+    result stays on the 8-px grid and is clamped to the frame, so a frame that
+    is itself too small comes back unchanged and is refused upstream with a
+    reason rather than reaching the model and 503-ing."""
+    x0, y0, x1, y1 = crop
+    for low, high, limit, axis in ((x0, x1, width, "x"), (y0, y1, height, "y")):
+        span = high - low
+        if span >= minimum:
+            continue
+        want = min(minimum, (limit // 8) * 8 or limit)
+        grow = want - span
+        low = max(0, low - (grow + 1) // 2)
+        high = min(limit, low + want)
+        low = max(0, high - want)           # re-anchor when the top edge clamped
+        low, high = (low // 8) * 8, min(limit, ((high + 7) // 8) * 8)
+        if axis == "x":
+            x0, x1 = low, high
+        else:
+            y0, y1 = low, high
     return x0, y0, x1, y1
 
 

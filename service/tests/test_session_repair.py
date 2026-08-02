@@ -22,10 +22,12 @@ from inbetween_copilot.pipeline.models import CopilotResult, PairResult
 from inbetween_copilot.qa.models import FrameQA
 
 
-HEIGHT, WIDTH = 32, 32
+# Above span.MIN_MODEL_SIDE: DiffuEraser refuses <=256x256, and repair now
+# refuses such a session up front rather than 503-ing from the worker.
+HEIGHT, WIDTH = 288, 288
 
 
-def _png_bytes(box=(8, 20, 8, 20)) -> bytes:
+def _png_bytes(box=(80, 200, 80, 200)) -> bytes:
     rgba = np.zeros((HEIGHT, WIDTH, 4), np.uint8)
     y0, y1, x0, x1 = box
     rgba[y0:y1, x0:x1] = (255, 255, 255, 255)
@@ -68,16 +70,29 @@ def _pair(index: int, action: str, *, values, qa_status="pass",
     )
 
 
+def _chain(count: int) -> list[PairResult]:
+    """Pairs 1..count, each sharing its leading key with the previous pair."""
+    return [_pair(k, "filled", values=(10 + 20 * (k - 1), 20 + 20 * (k - 1),
+                                       30 + 20 * (k - 1)))
+            for k in range(1, count + 1)]
+
+
 @pytest.fixture
 def state() -> dict:
-    # Pair 0 is gate-refused; pairs 1 and 2 each carry three frames whose shared
-    # boundary key is deduped by the assembler, so the cut is 0..4 and pair 1
-    # owns cut frames 0,1,2 while pair 2 owns 3,4.
-    pairs = [
-        _pair(0, "needs_key", values=None),
-        _pair(1, "filled", values=(10, 20, 30)),
-        _pair(2, "filled", values=(30, 40, 50)),
-    ]
+    # Pair 0 is gate-refused; pairs 1..12 each carry three frames whose shared
+    # boundary key is deduped by the assembler, so pair 1 owns cut frames 0,1,2
+    # and pair 2 owns 3,4 -- and the cut is 25 frames, over the model's floor of
+    # 23. Pairs 3..12 are there only to clear that floor; shortening them puts
+    # every success case back on the short-cut refusal.
+    pairs = [_pair(0, "needs_key", values=None), *_chain(12)]
+    result = CopilotResult(pairs=pairs, keys_requested_total=1, flagged=[],
+                           n_autopass=12)
+    return {"result": result, "cfg": _Cfg(), "eng": None}
+
+
+@pytest.fixture
+def short_state() -> dict:
+    pairs = [_pair(0, "needs_key", values=None), *_chain(2)]
     result = CopilotResult(pairs=pairs, keys_requested_total=1, flagged=[],
                            n_autopass=2)
     return {"result": result, "cfg": _Cfg(), "eng": None}
@@ -170,6 +185,28 @@ def test_rejects_a_payload_whose_bytes_are_not_a_png(state):
     with pytest.raises(ValueError, match="PNG"):
         validate_repair_request(
             state, 1, [{"frame": 1, "png": "data:image/png;base64," + not_png}], 1)
+
+
+def test_rejects_a_cut_too_short_for_the_model(short_state):
+    # DiffuEraser needs MORE than 22 frames. context_bounds deliberately stays
+    # short rather than fabricating any, so a 5-frame cut can never produce an
+    # acceptable span -- and before this guard it came back as a 503 the artist
+    # would read as "the worker is down". Found on the box, not by this suite.
+    with pytest.raises(ValueError, match="needs at least 23"):
+        validate_repair_request(short_state, 1, [{"frame": 1, "png": PNG}], 1)
+
+
+def test_rejects_a_frame_smaller_than_the_model_accepts():
+    # The model refuses <=256x256 outright; say so instead of 503-ing.
+    small = _pair(0, "filled", values=(10, 20, 30))
+    small.frames = [np.full((64, 64, 3), v, np.uint8) for v in (10, 20, 30)]
+    tiny = {
+        "result": CopilotResult(pairs=[small], keys_requested_total=0,
+                                flagged=[], n_autopass=1),
+        "cfg": _Cfg(), "eng": None,
+    }
+    with pytest.raises(ValueError, match="at least 264x264"):
+        validate_repair_request(tiny, 0, [{"frame": 1, "png": PNG}], 1)
 
 
 def test_rejects_smoothness_above_the_supported_ceiling(state):
@@ -273,10 +310,12 @@ def test_repair_pair_leaves_pixels_far_from_the_mask_untouched(state):
     out = repair_pair(state, 1, [(1, PNG_BYTES)], span_editor=_ok_editor,
                       qa_fn=_qa_ok, recon_fn=_recon)
     repaired = out["frames"][1]
-    # the mask covers rows/cols 8..20; a corner pixel is far outside even the
-    # padded crop, so it must still carry the original value.
+    # The mask covers rows/cols 80..200. A corner pixel is outside it, so even
+    # though the crop now grows to the model's 264 minimum it must keep its
+    # original value: the crop decides what the MODEL sees, the mask decides
+    # what is written back.
     assert repaired[0, 0].tolist() == [20, 20, 20]
-    assert repaired[14, 14].tolist() != [20, 20, 20]
+    assert repaired[140, 140].tolist() != [20, 20, 20]
 
 
 def test_repair_pair_hands_the_editor_real_neighbouring_frames(state):
@@ -290,9 +329,10 @@ def test_repair_pair_hands_the_editor_real_neighbouring_frames(state):
     repair_pair(state, 1, [(1, PNG_BYTES)], span_editor=recording_editor,
                 qa_fn=_qa_ok, recon_fn=_recon, seed=77, refinement_passes=5)
 
-    # The whole point of the span path: the cut is only 5 frames long, so it
-    # sends all 5 rather than padding one still to 22 copies.
-    assert len(seen["frames"]) == 5
+    # The whole point of the span path: REAL neighbouring frames. Painting cut
+    # frame 1 of a 25-frame cut widens forward to MIN_CONTEXT_FRAMES, so the
+    # model gets 22 genuine frames rather than 22 copies of one still.
+    assert len(seen["frames"]) == 22
     assert len({frame.tobytes() for frame in seen["frames"]}) > 1
     assert list(seen["masks"]) == [1]
     assert seen["seed"] == 77 and seen["passes"] == 5

@@ -21,6 +21,7 @@ from service.image_edit.span import (
     compose_frame,
     context_bounds,
     decode_mask,
+    grow_crop_to_model_minimum,
     process_size,
 )
 
@@ -93,6 +94,34 @@ def test_process_size_bounds_a_tall_narrow_crop_by_its_HEIGHT():
     # shape tested so far the WIDTH cap bound first, so raising
     # MAX_PROCESS_HEIGHT to 1080 also left the suite green.
     assert process_size(200, 1080) == (96, 536)
+
+
+def test_grow_crop_reaches_the_model_minimum_on_both_axes():
+    # DiffuEraser refuses <=256x256 outright. A small painted region produced a
+    # 248x200 crop on the box and came back 503; the artist was told the worker
+    # was unavailable when the region was simply too small.
+    x0, y0, x1, y1 = grow_crop_to_model_minimum((0, 0, 248, 200), 1920, 1080)
+    assert x1 - x0 >= 264 and y1 - y0 >= 264
+    assert (x1 - x0) % 8 == 0 and (y1 - y0) % 8 == 0
+
+
+def test_grow_crop_stays_inside_the_frame():
+    x0, y0, x1, y1 = grow_crop_to_model_minimum((1800, 900, 1900, 1000), 1920, 1080)
+    assert x0 >= 0 and y0 >= 0 and x1 <= 1920 and y1 <= 1080
+    assert x1 - x0 >= 264 and y1 - y0 >= 264
+
+
+def test_grow_crop_leaves_an_already_large_crop_alone():
+    # It must not shrink a crop that already clears the bar, nor nudge it off
+    # the region the artist actually painted.
+    assert grow_crop_to_model_minimum((0, 0, 640, 480), 1920, 1080) == (0, 0, 640, 480)
+
+
+def test_grow_crop_cannot_exceed_a_frame_smaller_than_the_minimum():
+    # Refusing this case is the caller's job; here it must simply not invent
+    # pixels outside the frame.
+    x0, y0, x1, y1 = grow_crop_to_model_minimum((0, 0, 64, 64), 128, 128)
+    assert (x1 - x0) <= 128 and (y1 - y0) <= 128
 
 
 def test_process_size_never_upscales():

@@ -24,10 +24,13 @@ from service.image_edit.span import (
     MAX_REFINEMENT_PASSES,
     MAX_REPAIR_FRAMES,
     MAX_REPAIR_SPAN,
+    MIN_MODEL_FRAMES,
+    MIN_MODEL_SIDE,
     aligned_crop,
     compose_frame,
     context_bounds,
     decode_mask,
+    grow_crop_to_model_minimum,
     process_size,
 )
 
@@ -96,6 +99,27 @@ def validate_repair_request(state: dict, index: int, masks, refinement_passes: i
         raise ValueError(f"pair {index} is outside this result")
     if str(pair.action) == "needs_key" or not pair.frames:
         raise ValueError(f"pair {index} has no generated frame to repair")
+
+    # A frame the model cannot process at ANY crop is refused here, with the
+    # reason, instead of reaching DiffuEraser and coming back as a 503 the
+    # artist would read as "the worker is down".
+    frame_height, frame_width = np.asarray(pair.frames[0]).shape[:2]
+    if frame_width < MIN_MODEL_SIDE or frame_height < MIN_MODEL_SIDE:
+        raise ValueError(
+            f"frames are {frame_width}x{frame_height}; in-session repair needs "
+            f"at least {MIN_MODEL_SIDE}x{MIN_MODEL_SIDE}"
+        )
+
+    # Same reasoning for the temporal axis. context_bounds deliberately stays
+    # short rather than fabricating frames, so a cut this short can never
+    # produce an acceptable span -- say that, instead of padding it with fiction
+    # the way the still-image path does.
+    cut_length = len(assembled_cut(state)[0])
+    if cut_length < MIN_MODEL_FRAMES:
+        raise ValueError(
+            f"this cut is {cut_length} frames; in-session repair needs at least "
+            f"{MIN_MODEL_FRAMES}"
+        )
 
     # position within pair.frames -> index into the reconstructed cut. A
     # position the assembler deduped away (a pair's shared leading key) is
@@ -269,7 +293,8 @@ def repair_frames(state: dict, index: int, decoded, *, span_editor,
     union = np.zeros((height, width), np.uint8)
     for mask in masks.values():
         union = np.maximum(union, mask)
-    crop = aligned_crop(union, width, height)
+    crop = grow_crop_to_model_minimum(
+        aligned_crop(union, width, height), width, height)
     x0, y0, x1, y1 = crop
     send_width, send_height = process_size(x1 - x0, y1 - y0)
 

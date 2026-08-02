@@ -26,12 +26,13 @@ from inbetween_copilot.pipeline.models import CopilotResult, PairResult
 from inbetween_copilot.qa.models import FrameQA
 
 
-HEIGHT = WIDTH = 32
+# Above span.MIN_MODEL_SIDE (the model refuses <=256x256).
+HEIGHT = WIDTH = 288
 
 
 def _mask_png() -> str:
     rgba = np.zeros((HEIGHT, WIDTH, 4), np.uint8)
-    rgba[8:20, 8:20] = (255, 255, 255, 255)
+    rgba[80:200, 80:200] = (255, 255, 255, 255)
     buffer = io.BytesIO()
     Image.fromarray(rgba, mode="RGBA").save(buffer, format="PNG")
     return "data:image/png;base64," + base64.b64encode(
@@ -86,14 +87,18 @@ def live():
     """A repository holding one real session directory and one real result."""
     repository = InMemorySessionRepository()
     sid, path = repository.create()
+    # Pairs 2..11 exist only so the reconstructed cut clears the model's
+    # 23-frame floor; pairs 0 and 1 keep the verdicts these tests assert on.
     pairs = [
         _pair(0, "filled", (10, 20, 30), qa_status="flag", artist_verdict="reject"),
         _pair(1, "filled", (30, 40, 50), qa_status="pass", artist_verdict="accept"),
+        *[_pair(k, "filled", (30 + 20 * (k - 1), 40 + 20 * (k - 1),
+                              50 + 20 * (k - 1))) for k in range(2, 12)],
     ]
     repository.save_state(sid, {
         "result": CopilotResult(pairs=pairs, keys_requested_total=0, flagged=[0],
                                 n_autopass=1),
-        "cfg": _Cfg(), "eng": _Eng(), "keys": [_frame(v) for v in (10, 30, 50)],
+        "cfg": _Cfg(), "eng": _Eng(), "keys": [_frame(10 + 20 * i) for i in range(13)],
         "rev": 3, "published_pid": "pid-1", "sampling": {}, "gt_frames": None,
     })
     (pathlib.Path(path) / "reconstructed.mp4").write_bytes(b"old")
@@ -241,7 +246,9 @@ def test_repair_recomputes_neighbours_when_qa_judges_a_shared_window(live):
     finally:
         state["eng"].qa_window = False
         state["eng"].qa_fn = _Eng.qa_fn
-    assert len(seen) == 2          # both pairs in the contiguous run
+    # Every pair in the contiguous run, not just the repaired one: with a shared
+    # window their verdicts were computed from pixels that have just changed.
+    assert len(seen) == 12
     assert set(seen) == {16}       # the calibrated window width, not a triplet
 
 
