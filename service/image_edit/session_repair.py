@@ -31,6 +31,9 @@ from service.image_edit.span import (
     process_size,
 )
 
+from inbetween_copilot.pipeline.copilot import _qa_for
+from inbetween_copilot.qa.window import windows_for_run
+
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 MAX_MASK_BYTES = 8 * 1024 * 1024
 # Above x2 the reconstructed cut carries frames synthesised by expand_pair that
@@ -114,8 +117,73 @@ def validate_repair_request(state: dict, index: int, masks, refinement_passes: i
     return sorted(decoded)
 
 
+def qa_blast_radius(pairs, repaired_index: int, *, qa_window: bool) -> list[int]:
+    """Which pairs' verdicts a repair of ``repaired_index`` invalidates.
+
+    With ``qa_window`` off, QA judges a pair's own triplet and only that pair is
+    affected. With it on — production — QA judges a 16-frame CENTERED window
+    built from the whole contiguous run (``qa/window.py``), so repairing one pair
+    changes the input to its neighbours' verdicts too. Recomputing only the
+    repaired pair would leave those neighbours certified against pixels that no
+    longer exist: the same defect this feature forbids, displaced one pair
+    sideways. At W=16 a window spans roughly the whole run, so the contiguous
+    run is the honest unit.
+    """
+    if not qa_window:
+        return [repaired_index]
+    fillable = sorted(
+        pair.index for pair in pairs
+        if str(pair.action) in ("filled", "generated") and pair.frames
+    )
+    run = [repaired_index]
+    for index in fillable:
+        if index < repaired_index and all(
+            neighbour in fillable for neighbour in range(index, repaired_index)
+        ):
+            run.append(index)
+        elif index > repaired_index and all(
+            neighbour in fillable for neighbour in range(repaired_index + 1, index + 1)
+        ):
+            run.append(index)
+    return sorted(set(run))
+
+
+def rerun_qa(pairs, indices, *, qa_fn, softness_fn, qa3_fn, tau_soft,
+             qa_window: bool) -> dict:
+    """Recompute the calibrated verdict for ``indices`` from the current frames.
+
+    Delegates to the pipeline's own ``_qa_for`` rather than restating the CSQ
+    deployment-swap contract (3-state when wired, binary OR-union otherwise) —
+    a second copy of that rule would drift away from the one the run used.
+    """
+    by_index = {pair.index: pair for pair in pairs}
+    windows = {}
+    if qa_window:
+        windows = windows_for_run([
+            (pair.index, pair.frames) for pair in pairs
+            if str(pair.action) in ("filled", "generated") and pair.frames
+        ])
+    verdicts = {}
+    for index in indices:
+        pair = by_index[index]
+        qa_input = windows.get(index, pair.frames) if qa_window else pair.frames
+        verdicts[index] = _qa_for(qa_input, qa_fn, softness_fn, qa3_fn, tau_soft)
+    return verdicts
+
+
+def assembled_cut(state: dict):
+    """The reconstructed cut and its per-frame provenance, as the renderer builds it."""
+    from service.media.artifacts import assemble_frames_with_provenance
+
+    return assemble_frames_with_provenance(
+        state["result"],
+        factor=getattr(state["cfg"], "smoothness", SUPPORTED_SMOOTHNESS),
+        mid_engine=getattr(state.get("eng"), "rife_engine", None),
+    )
+
+
 def _cut(state: dict, recon_fn):
-    frames, provenance = recon_fn(state)
+    frames, provenance = (recon_fn or assembled_cut)(state)
     if not frames:
         raise ValueError("this session has no reconstructed frames to repair")
     return frames, provenance
@@ -142,9 +210,27 @@ def _pair_frame_positions(state: dict, index: int, recon_fn=None) -> dict:
 
 
 def repair_pair(state: dict, index: int, decoded, *, span_editor, qa_fn,
-                recon_fn, model: str = "diffueraser", seed: int = 2026,
+                recon_fn=None, model: str = "diffueraser", seed: int = 2026,
                 refinement_passes: int = 1) -> dict:
-    """Repair one pair's painted frames and re-run QA. ``state`` is not touched.
+    """:func:`repair_frames` plus the pair's own re-run verdict. Pure.
+
+    QA runs on the repaired frames before anything is returned, so a caller that
+    publishes this dict can never publish pixels the verdict did not see.
+    """
+    frames = repair_frames(
+        state, index, decoded, span_editor=span_editor, recon_fn=recon_fn,
+        model=model, seed=seed, refinement_passes=refinement_passes)
+    return {
+        "frames": frames,
+        "qa": qa_fn(frames, _pairs_by_index(state)[index]),
+        "pair_index": index,
+    }
+
+
+def repair_frames(state: dict, index: int, decoded, *, span_editor,
+                  recon_fn=None, model: str = "diffueraser", seed: int = 2026,
+                  refinement_passes: int = 1) -> list:
+    """One pair's frames with the painted regions repaired. ``state`` is not touched.
 
     Temporal context is drawn from the reconstructed cut rather than the pair,
     because a pair exposes only its own handful of frames while the cut carries
@@ -202,10 +288,4 @@ def repair_pair(state: dict, index: int, decoded, *, span_editor, qa_fn,
             crop,
         )
 
-    # QA runs on the repaired frames BEFORE anything is returned. If it raises,
-    # the caller has nothing to publish and the session is untouched.
-    return {
-        "frames": new_frames,
-        "qa": qa_fn(new_frames, pair),
-        "pair_index": index,
-    }
+    return new_frames
