@@ -194,6 +194,26 @@ def qa_csq_agent(ctx: AgentContext, step) -> StepResult:
 # position, which silently ranked flag above needs_key while the `says` text
 # denied doing so. work_order is now positional across ALL actionable
 # buckets, full stop.
+#
+# THREE POPULATIONS, kept distinct (fix round 4, 2026-08-02). Rounds 2 and 3
+# each patched one symptom of the same defect: the body carried only two
+# lists and used the wrong one as a proxy for "evaluated".
+#
+#   1. HANDED IN   every object in `result.pairs`               -> n_pairs
+#   2. READ        its index coerced to an int                  -> n_pairs - unreadable
+#   3. EVALUATED   read AND placed in a known bucket            -> n_evaluated
+#
+# (3) is a strict subset of (2): a pair can have a perfectly good index and
+# still carry a verdict this agent does not recognise, in which case nothing
+# evaluated it. Round 3's `readable` was population (2) and the prose said
+# "all passed" about it — a claim only population (3) can license.
+#
+# So: every artist-facing sentence below counts what WAS evaluated. What was
+# not evaluated is derived by SUBTRACTING the evaluated from the handed-in,
+# never by adding up the failure modes we happen to know about. A fourth
+# reason for a pair going unevaluated therefore lands in `not_evaluated`
+# automatically — it cannot be silently absorbed into a pass claim, because
+# no pass claim is ever computed from a total minus known excuses.
 
 _BUCKETS = ("flag", "needs_key", "abstain", "pass")
 _ACTIONABLE = ("flag", "needs_key", "abstain")
@@ -202,6 +222,18 @@ _WHY = {
     "flag": "CSQ flagged the generated frames here.",
     "needs_key": "The gate refused this pair; it is waiting on a key from you.",
     "abstain": "CSQ could not decide; this one needs your eye.",
+}
+
+# Why a handed-in pair never reached a bucket. These are labels for the ARTIST;
+# the accounting does not depend on this map being complete — see `_UNATTRIBUTED`.
+_NO_INDEX = "no_usable_index"
+_NO_VERDICT = "no_recognised_verdict"
+_UNATTRIBUTED = "reason_not_recorded"
+
+_NOT_EVALUATED_WHY = {
+    _NO_INDEX: "had no usable index",
+    _NO_VERDICT: "carried no verdict I recognise",
+    _UNATTRIBUTED: "dropped out for a reason I did not record",
 }
 
 _WITHHELD = ("any severity ordering — within a bucket or across bucket types. "
@@ -217,6 +249,21 @@ def _bucket_for(pair) -> str:
     qa = getattr(pair, "qa", None)
     status = str(getattr(qa, "status", "") or "") if qa is not None else ""
     return status if status in ("flag", "abstain", "pass") else ""
+
+
+def _not_evaluated_clause(total: int, reasons: dict) -> str:
+    """The one sentence that owns population (1) minus population (3).
+
+    It never says "pass" and never says "clean": these pairs were handed in and
+    then not looked at. `reasons` is a breakdown for the artist, not the source
+    of `total` — an unlabelled reason still gets counted and still gets said."""
+    parts = ", ".join(
+        f"{n} {_NOT_EVALUATED_WHY.get(key, _NOT_EVALUATED_WHY[_UNATTRIBUTED])}"
+        for key, n in reasons.items() if n)
+    return (f"{total} pair(s) I could not evaluate at all"
+            + (f" ({parts})" if parts else "")
+            + " — that is NOT a pass, it is data I never read. They are "
+              "excluded from every count above.")
 
 
 def cut_survey_agent(ctx: AgentContext, step) -> StepResult:
@@ -239,28 +286,44 @@ def cut_survey_agent(ctx: AgentContext, step) -> StepResult:
             "sensible and mean nothing. Re-run the cut once the detector is back up.",
             payload={"qa_degraded": True}, started=started)
 
-    # A pair whose index is absent, or present but won't coerce to int, cannot
-    # be placed in a cut-position order; drop it from the order rather than
-    # let getattr/int() raise — this agent reports, it never propagates. The
-    # attribute read is defensive (getattr with a None default) so a bare
-    # object missing `.index` hits the same (TypeError, ValueError) clause as
-    # a bad value, instead of raising AttributeError past this guard. This is
-    # the only boundary this function crosses (attribute values it does not
-    # control), so it is the only place that gets a guard.
-    placed = []
+    # ONE pass over the handed-in pairs, and it produces population (3)
+    # directly: a pair is appended to `evaluated` only when its index was read
+    # AND a known bucket was found for it. Everything else is a `continue`
+    # with a recorded reason. Adding a future reason means adding one more
+    # branch here; it cannot make a pair count as evaluated by omission.
+    #
+    # Both reads are defensive. `getattr(pair, "index", None)` never raises
+    # even on an object with no attributes at all (round-2's AttributeError),
+    # so a bare object lands in (TypeError, ValueError) like a bad value does.
+    # `_bucket_for` reads `.action`/`.qa` through getattr for the same reason.
+    evaluated: list = []
+    reasons: dict = {}
     for pair in pairs:
         try:
             idx = int(getattr(pair, "index", None))
         except (TypeError, ValueError):
+            reasons[_NO_INDEX] = reasons.get(_NO_INDEX, 0) + 1
             continue
-        placed.append((idx, pair, _bucket_for(pair)))
-    placed.sort(key=lambda t: t[0])
+        bucket = _bucket_for(pair)
+        if not bucket:
+            reasons[_NO_VERDICT] = reasons.get(_NO_VERDICT, 0) + 1
+            continue
+        evaluated.append((idx, pair, bucket))
+    evaluated.sort(key=lambda t: t[0])
+
+    # The authoritative count of what was NOT evaluated is the total minus the
+    # evaluated — never the sum of `reasons`. If the two ever disagree (a
+    # future `continue` that forgets to record why), the difference is still
+    # reported, under a reason that says exactly that.
+    n_evaluated = len(evaluated)
+    n_not_evaluated = len(pairs) - n_evaluated
+    unattributed = n_not_evaluated - sum(reasons.values())
+    if unattributed > 0:
+        reasons[_UNATTRIBUTED] = unattributed
 
     buckets: dict = {name: [] for name in _BUCKETS}
     keys_outstanding = 0
-    for idx, pair, bucket in placed:
-        if not bucket:
-            continue
+    for idx, pair, bucket in evaluated:
         buckets[bucket].append(idx)
         if bucket == "needs_key":
             try:
@@ -272,31 +335,24 @@ def cut_survey_agent(ctx: AgentContext, step) -> StepResult:
     # not a priority tier. Choosing a single first_index IS a ranking, and the
     # only ranking this agent can defend is "the order you will draw them in."
     work_order = [{"index": idx, "bucket": bucket, "why": _WHY[bucket]}
-                  for idx, _pair, bucket in placed if bucket in _ACTIONABLE]
-
-    # A pair dropped above because its index could not be read is NOT a pair
-    # that was reviewed and found clean — it was never bucketed at all. Fold
-    # it into "all passed" and the artist closes the cut believing QA ran on
-    # data QA never saw. Surface it instead of collapsing it into silence,
-    # the same way `qa_degraded` above refuses to let a dead channel read as
-    # a clean verdict.
-    unreadable = len(pairs) - len(placed)
+                  for idx, _pair, bucket in evaluated if bucket in _ACTIONABLE]
 
     payload = {"work_order": work_order, "buckets": buckets,
                "keys_outstanding": keys_outstanding, "n_pairs": len(pairs),
-               "unreadable": unreadable, "withheld": _WITHHELD}
+               "n_evaluated": n_evaluated, "not_evaluated": n_not_evaluated,
+               "not_evaluated_reasons": dict(reasons),
+               "unreadable": reasons.get(_NO_INDEX, 0), "withheld": _WITHHELD}
 
     if not work_order:
-        if unreadable:
-            readable = len(placed)
-            who = (f"Of the {readable} pair(s) I could read, all passed."
-                   if readable else
-                   f"I could not read any of the {len(pairs)} pair(s) in this cut.")
-            says = (
-                f"{who} {unreadable} pair(s) had no usable index, so I could "
-                "not bucket or evaluate them at all — that is NOT a pass, it "
-                "is data I never saw. They are excluded from this verdict."
-            )
+        if n_not_evaluated:
+            # Note what this does NOT say. Not "all N passed", not "the rest
+            # passed" — only the evaluated pairs are inside the verdict, and
+            # when nothing was evaluated there is no verdict to give at all.
+            who = (f"Of the {n_evaluated} pair(s) I actually evaluated, all "
+                   "passed." if n_evaluated else
+                   f"I evaluated none of the {len(pairs)} pair(s) in this cut, "
+                   "so I have no verdict on this cut at all.")
+            says = f"{who} {_not_evaluated_clause(n_not_evaluated, reasons)}"
         else:
             says = (f"All {len(pairs)} pairs passed. There is nothing in this "
                     "cut that needs your attention.")
@@ -315,9 +371,8 @@ def cut_survey_agent(ctx: AgentContext, step) -> StepResult:
         "bucket is a label, not a priority."
         + (f" {keys_outstanding} key(s) are still outstanding."
            if keys_outstanding else "")
-        + (f" {unreadable} pair(s) had no usable index and could not be "
-           "evaluated at all — they are not counted above."
-           if unreadable else ""))
+        + (f" {_not_evaluated_clause(n_not_evaluated, reasons)}"
+           if n_not_evaluated else ""))
     return _result(step, "ok", says, payload=payload, started=started)
 
 

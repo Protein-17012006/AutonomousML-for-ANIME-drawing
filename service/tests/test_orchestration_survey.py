@@ -26,6 +26,17 @@ def _pair(index, action="filled", qa_status="pass", keys_requested=0):
     return p
 
 
+def _pair_without_qa(index, action="filled"):
+    """A pair whose index reads perfectly but which carries no QA verdict at
+    all, and whose action is not `needs_key` — so nothing evaluated it."""
+    p = MagicMock()
+    p.index = index
+    p.action = action
+    p.keys_requested = 0
+    p.qa = None
+    return p
+
+
 def _state(pairs, qa_degraded=False):
     result = MagicMock()
     result.pairs = pairs
@@ -121,12 +132,82 @@ def test_an_unreadable_pair_is_never_reported_as_having_passed():
 def test_the_has_work_reply_also_surfaces_unreadable_pairs():
     """An unreadable pair alongside real work must not be dropped silently —
     understating the count in a way the artist cannot detect is the same
-    failure as claiming a false pass, just on the has-work branch."""
-    out = _run(_state([_pair(0, qa_status="flag"), _Bare()]))
-    assert out.payload["unreadable"] == 1
-    assert out.payload["n_pairs"] == 2
-    assert "1" in out.says
+    failure as claiming a false pass, just on the has-work branch.
+
+    THREE unreadable pairs, not one, and one flag pair at index 0: the only
+    "3" anywhere in the reply is the unevaluated count, so asserting on it
+    cannot pass off some other number. (Round 3's version used one unreadable
+    pair and asserted `"1" in says` — but `says` already contains "1 flag" and
+    "pair 1", so that assertion held even if the count were dropped entirely.)"""
+    out = _run(_state([_pair(0, qa_status="flag"), _Bare(), _Bare(), _Bare()]))
+    assert out.payload["unreadable"] == 3
+    assert out.payload["not_evaluated"] == 3
+    assert out.payload["n_pairs"] == 4
+    assert out.payload["n_evaluated"] == 1
+    assert "3" in out.says
     assert "no usable index" in out.says.lower() or "unreadable" in out.says.lower()
+
+
+def test_a_pair_that_was_READ_but_never_BUCKETED_is_not_reported_as_passing():
+    """Round-4 Critical. `readable` is not `evaluated`.
+
+    Pair 1's index reads fine, so it survives the index guard — but its
+    qa.status matches no known bucket, so nothing ever evaluated it. Counting
+    it as "read" and then saying "of the pairs I could read, all passed" is a
+    pass verdict over a pair that was never looked at. Every bucket here is
+    empty; there is nothing that passed."""
+    out = _run(_state([_Bare(), _pair(1, qa_status="weird_unrecognized")]))
+    assert out.status == "ok"
+    assert out.payload["buckets"] == {"flag": [], "needs_key": [],
+                                      "abstain": [], "pass": []}
+    assert out.payload["n_pairs"] == 2
+    assert out.payload["n_evaluated"] == 0
+    assert out.payload["not_evaluated"] == 2
+    assert out.payload["unreadable"] == 1        # only the _Bare one
+    assert "passed" not in out.says.lower()
+    assert "all passed" not in out.says.lower()
+    assert "could not read" not in out.says.lower()   # it read one of them fine
+
+
+def test_an_unrecognised_verdict_alone_does_not_make_an_all_passing_cut():
+    """The same defect with the index guard entirely out of the picture: one
+    pair, index perfectly readable, verdict unrecognised. Nothing was
+    evaluated, so "All 1 pairs passed" is a claim with no data under it."""
+    out = _run(_state([_pair(0, qa_status="not_a_real_status")]))
+    assert out.payload["n_evaluated"] == 0
+    assert out.payload["not_evaluated"] == 1
+    assert out.payload["unreadable"] == 0
+    assert "passed" not in out.says.lower()
+
+
+def test_a_pair_with_no_qa_and_a_non_needs_key_action_is_counted_as_not_evaluated():
+    """The second deferred Minor, now legible: a pair the gate did not refuse
+    but which carries no QA verdict is in no bucket, and must therefore be
+    reported as not evaluated rather than vanishing inside n_pairs."""
+    out = _run(_state([_pair(0, qa_status="flag"), _pair_without_qa(1)]))
+    assert out.payload["n_pairs"] == 2
+    assert out.payload["n_evaluated"] == 1
+    assert out.payload["not_evaluated"] == 1
+    assert out.payload["unreadable"] == 0
+    assert out.payload["not_evaluated_reasons"] == {"no_recognised_verdict": 1}
+    assert "could not evaluate" in out.says.lower()
+
+
+def test_the_three_populations_always_account_for_every_handed_in_pair():
+    """n_pairs is what was handed in; n_evaluated is what reached a bucket;
+    not_evaluated is the remainder — derived by subtraction, so no reason for
+    a pair going unevaluated can leak out of the accounting. Every pair in
+    every bucket is an evaluated pair and vice versa."""
+    out = _run(_state([_pair(0, qa_status="flag"), _Bare(),
+                       _pair(2, qa_status="junk"), _pair_without_qa(3),
+                       _pair(4, action="needs_key", keys_requested=1),
+                       _pair(5, qa_status="pass")]))
+    p = out.payload
+    assert p["n_pairs"] == 6
+    assert p["n_evaluated"] + p["not_evaluated"] == p["n_pairs"]
+    assert p["n_evaluated"] == sum(len(v) for v in p["buckets"].values()) == 3
+    assert sum(p["not_evaluated_reasons"].values()) == p["not_evaluated"] == 3
+    assert p["unreadable"] == 1
 
 
 def test_it_says_WHY_it_orders_by_position_and_not_by_severity():
@@ -135,9 +216,13 @@ def test_it_says_WHY_it_orders_by_position_and_not_by_severity():
 
 
 def test_it_counts_the_keys_still_owed_by_the_artist():
+    """The passing pair carries keys_requested=5 deliberately. Summing over ALL
+    pairs would give 8; only summing over the needs_key bucket gives 3. With
+    the passing pair at 0 (as this test had through round 3) both sums give 3,
+    so it could not fail on the rule it is named for."""
     out = _run(_state([_pair(0, action="needs_key", keys_requested=2),
                        _pair(1, action="needs_key", keys_requested=1),
-                       _pair(2, qa_status="pass")]))
+                       _pair(2, qa_status="pass", keys_requested=5)]))
     assert out.payload["keys_outstanding"] == 3
 
 
@@ -162,6 +247,12 @@ def test_an_all_passing_cut_reports_nothing_to_do_and_offers_no_first_index():
     assert out.status == "ok"
     assert out.payload["work_order"] == []
     assert "first_index" not in out.payload
+    # The plain sentence, only ever earned when EVERY handed-in pair was
+    # actually evaluated and every one of them passed.
+    assert out.says == ("All 2 pairs passed. There is nothing in this cut "
+                        "that needs your attention.")
+    assert out.payload["n_evaluated"] == out.payload["n_pairs"] == 2
+    assert out.payload["not_evaluated"] == 0
 
 
 def test_the_payload_is_json_safe():
