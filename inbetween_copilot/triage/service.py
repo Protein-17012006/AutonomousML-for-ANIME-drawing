@@ -36,6 +36,13 @@ class TriagePair:
         diagnosis = classify_gap(
             a, b, gap=pair_plan.gap, regime=regime, has_cut=has_cut,
         )
+        tau = getattr(pair_plan, "tau_gate", None)
+        if tau is not None:
+            # gap without the threshold it was compared against is not a reason,
+            # and the deployed tau is not the one in thresholds.py — the box runs
+            # COPILOT_TAU_GATE=0.05 against a code default of 0.017.
+            diagnosis = replace(
+                diagnosis, evidence={**diagnosis.evidence, "tau_gate": tau})
         diagnosis = self._with_drawing_evidence(a, b, diagnosis)
         return TriageResult(diagnosis, self.brief_writer(diagnosis))
 
