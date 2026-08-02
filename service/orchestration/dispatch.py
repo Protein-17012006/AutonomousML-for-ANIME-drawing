@@ -104,17 +104,28 @@ def run_step(ctx, step, seq):
     return entries, result
 
 
-def dispatch(ctx, plan, on_entry=None) -> list:
-    """Execute `plan` against `ctx`. Returns one StepResult per step, in order.
-    Never raises: a handler that explodes becomes an `error` and the plan carries on."""
-    results: list = []
+def run_plan(ctx, plan):
+    """Generator: yields (entries, result) for each step actually run, in order.
+
+    The single owner of the step loop. `dispatch` drains it with a callback and
+    `run_goal_stream` drains it while yielding to SSE — they used to keep separate
+    copies of this loop, so anything added to one silently did nothing in the other.
+    Never raises."""
     if not plan.is_actionable():
-        return results
+        return
     seq = Seq()
     for step in plan.steps:
         entries, result = run_step(ctx, step, seq)
         if result is None:
             continue
+        yield entries, result
+
+
+def dispatch(ctx, plan, on_entry=None) -> list:
+    """Execute `plan` against `ctx`. Returns one StepResult per step, in order.
+    Never raises: a handler that explodes becomes an `error` and the plan carries on."""
+    results: list = []
+    for entries, result in run_plan(ctx, plan):
         if on_entry is not None:
             for entry in entries:
                 on_entry(entry)

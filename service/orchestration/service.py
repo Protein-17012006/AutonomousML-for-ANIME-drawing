@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from service.assistant.agent import decide_agent
 from service.orchestration.agents import AgentContext
-from service.orchestration.dispatch import Seq, run_step
+from service.orchestration.dispatch import run_plan
 from service.orchestration.planner import plan_goal
 from service.orchestration.transcript import append_entries
 
@@ -86,13 +86,9 @@ def run_goal_stream(state: dict, message: str, history: list, *, plan_ask_fn,
         return
 
     ctx = AgentContext(state=state, ask_fn=say_ask_fn, goal=message)
-    seq = Seq()
     entries: list = []
     results: list = []
-    for step in plan.steps:
-        step_entries, result = run_step(ctx, step, seq)
-        if result is None:
-            continue
+    for step_entries, result in run_plan(ctx, plan):
         for entry in step_entries:
             entries.append(entry)
             yield ("agent", entry)

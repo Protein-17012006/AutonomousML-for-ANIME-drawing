@@ -157,3 +157,26 @@ def test_a_rerun_that_changes_something_still_queues_on_the_orchestration_rail()
     ))
     result = dispatch(AgentContext(state), plan)[0]
     assert result.status == "queued"
+
+
+def test_run_plan_yields_one_pair_per_step_in_order():
+    from service.orchestration.dispatch import run_plan
+    produced = list(run_plan(AgentContext(_state()), _demo_plan()))
+    assert [r.target for _entries, r in produced] == [
+        "triage", "open_board", "rerun_session"]
+    assert all(entries for entries, _r in produced)
+
+
+def test_dispatch_and_run_plan_agree_step_for_step():
+    """They must not drift: dispatch is now a thin drain of the same generator."""
+    from service.orchestration.dispatch import run_plan
+    ctx, plan = AgentContext(_state()), _demo_plan()
+    via_generator = [r for _entries, r in run_plan(ctx, plan)]
+    via_dispatch = dispatch(AgentContext(_state()), _demo_plan())
+    assert [(r.target, r.status) for r in via_generator] == \
+           [(r.target, r.status) for r in via_dispatch]
+
+
+def test_run_plan_yields_nothing_for_an_empty_plan():
+    from service.orchestration.dispatch import run_plan
+    assert list(run_plan(AgentContext(_state()), Plan(goal="hi", steps=()))) == []
