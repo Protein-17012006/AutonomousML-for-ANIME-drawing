@@ -1,5 +1,20 @@
+import re
+
 from service.assistant.agent import TOOLS
 from service.orchestration import registry
+
+
+def _identifier_tokens(line: str) -> set:
+    """Field names as whole tokens, not substrings.
+
+    A plain `"not_evaluated" in line` check is satisfied by the literal text
+    "not_evaluated_reasons" — "not_evaluated" is a PREFIX of it — so a test
+    built on substring membership cannot tell "the standalone field is named"
+    apart from "only its longer sibling is named". Tokenizing on identifier
+    boundaries (`\\b` around a run of word characters) makes the two
+    distinguishable: "not_evaluated_reasons" tokenizes to one identifier, not
+    two, so it can never stand in for "not_evaluated" being present."""
+    return set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", line))
 
 
 def test_every_assistant_tool_is_addressable_as_a_tool():
@@ -100,33 +115,44 @@ def test_cut_survey_is_addressable():
 
 
 def test_the_prompt_names_every_cut_survey_payload_key():
-    """cut_survey_agent (service/orchestration/agents.py) returns nine payload
-    keys unconditionally plus `first_index` only when there is actionable work.
-    A field named here that the agent never returns produces a step the server
-    rejects at runtime; a field the agent returns but this text omits is one the
-    planner can never learn to reference."""
+    """cut_survey_agent (service/orchestration/agents.py:290-424) has FOUR
+    payload shapes, not one: when ctx.state["qa_degraded"] is true it returns
+    ONLY {"qa_degraded": True} (agents.py:304-311) — none of the accounting
+    fields; otherwise it returns nine accounting keys always, plus
+    `first_index` only when there is actionable work. This text must name all
+    ten field identifiers so a planner can reference whichever branch fired.
+
+    Field names are compared as whole tokens (see `_identifier_tokens`), not
+    substrings: `not_evaluated` is a prefix of `not_evaluated_reasons`, so a
+    naive `"not_evaluated" in outputs_line` check is satisfied even when only
+    the _reasons field is named and the standalone field is missing."""
     text = registry.describe_for_prompt()
     # cut_survey's OUTPUTS line is the one right after its args line.
     lines = text.splitlines()
     idx = [i for i, ln in enumerate(lines)
            if ln.strip().startswith("cut_survey")][0]
-    outputs_line = lines[idx + 1]
-    for field in ("work_order", "buckets", "keys_outstanding", "n_pairs",
-                  "n_evaluated", "not_evaluated", "not_evaluated_reasons",
-                  "unreadable", "withheld", "first_index"):
-        assert field in outputs_line, field
+    tokens = _identifier_tokens(lines[idx + 1])
+    for field in ("qa_degraded", "work_order", "buckets", "keys_outstanding",
+                  "n_pairs", "n_evaluated", "not_evaluated",
+                  "not_evaluated_reasons", "unreadable", "withheld",
+                  "first_index"):
+        assert field in tokens, field
 
 
 def test_the_prompt_names_every_triage_payload_key():
     """triage_agent returns cls/confidence/evidence always, plus either
     keys_suggested+brief (gate-refused pair) or out_of_population+withheld
     (gate-accepted pair) — never all seven at once, but the text must still
-    name all seven so a planner can reference whichever branch fired."""
+    name all seven so a planner can reference whichever branch fired.
+
+    Token comparison (not substring) for the same reason as the cut_survey
+    version above — defensive here even though no current triage field name
+    is a prefix of another."""
     text = registry.describe_for_prompt()
     lines = text.splitlines()
     idx = [i for i, ln in enumerate(lines)
            if ln.strip().startswith("triage")][0]
-    outputs_line = lines[idx + 1]
+    tokens = _identifier_tokens(lines[idx + 1])
     for field in ("cls", "confidence", "evidence", "keys_suggested", "brief",
                   "out_of_population", "withheld"):
-        assert field in outputs_line, field
+        assert field in tokens, field

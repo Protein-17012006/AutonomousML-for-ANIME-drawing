@@ -35,6 +35,16 @@ class Target:
 # named here that the agent never returns produces a step the server rejects at
 # runtime, and a field the agent returns but this text omits is one the planner
 # can never learn to reference.
+#
+# Some agents have more than one payload SHAPE, not one shape with optional
+# extras. cut_survey_agent is the sharp case: when the QA channel was down for
+# the run (ctx.state["qa_degraded"]) it returns ONLY {"qa_degraded": True} —
+# none of its usual accounting fields, because those verdicts would not be
+# about the drawings at all. That is a different condition from "nothing was
+# evaluated" (which DOES carry the full accounting payload) — see
+# agents.py:290-424. Describing the accounting fields as unconditional here
+# would tell the planner something untrue about a real path, not just an
+# unlikely one.
 _AGENT_SPECS = {
     "triage": ("Triage",
                "diagnoses why a pair was refused and how many keys to draw, and where",
@@ -56,9 +66,12 @@ _AGENT_SPECS = {
                    "orders the WHOLE cut into work buckets from the calibrated "
                    "verdicts; ask it FIRST when the artist has not named a pair",
                    "{}",
-                   "work_order, buckets, keys_outstanding, n_pairs, n_evaluated, "
-                   "not_evaluated, not_evaluated_reasons, unreadable, withheld; "
-                   "first_index ONLY when there is actionable work"),
+                   "qa_degraded (true) ONLY when the QA channel was down for "
+                   "this run — no other field is present on that path; "
+                   "otherwise ALWAYS: work_order, buckets, keys_outstanding, "
+                   "n_pairs, n_evaluated, not_evaluated, not_evaluated_reasons, "
+                   "unreadable, withheld; plus first_index ONLY when there is "
+                   "actionable work"),
 }
 
 # The planner must be told each tool's ARGUMENT SHAPE, not just its name. Without
