@@ -188,7 +188,25 @@ def _assemble_frames(result: CopilotResult, *, factor: int = 2,
     ``factor=2`` is the historical behaviour (pair frames unchanged) and is kept
     on the cheap path (no call into ``expand_pair``) so today's output is
     reproduced byte-for-byte."""
+    return assemble_frames_with_provenance(
+        result, factor=factor, mid_engine=mid_engine)[0]
+
+
+def assemble_frames_with_provenance(
+    result: CopilotResult, *, factor: int = 2, mid_engine=None,
+) -> "tuple[List[np.ndarray], List[tuple[int, int]]]":
+    """``_assemble_frames`` plus, per emitted frame, where it came from.
+
+    Returns ``(frames, provenance)`` where ``provenance[i]`` is
+    ``(pair.index, position)`` — the position being an offset into that pair's
+    ``frames`` list at ``factor == 2``, and into its EXPANDED list above that.
+
+    In-session frame repair paints in this sequence's coordinates but must write
+    back into ``PairResult.frames``, so it needs the inverse of the boundary
+    dedup documented above. Deriving it here rather than re-deriving it at the
+    call site keeps exactly one copy of that rule."""
     out: List[np.ndarray] = []
+    provenance: List[tuple[int, int]] = []
     for p in result.pairs:
         if p.action not in ("filled", "generated") or not p.frames:
             continue
@@ -197,7 +215,9 @@ def _assemble_frames(result: CopilotResult, *, factor: int = 2,
                   for fr in raw]
         start = 1 if (out and np.array_equal(out[-1], frames[0])) else 0
         out.extend(frames[start:])
-    return out
+        provenance.extend((p.index, position)
+                          for position in range(start, len(frames)))
+    return out, provenance
 
 
 def build_video(result: CopilotResult, out_dir: str, fps: int = 24, *,

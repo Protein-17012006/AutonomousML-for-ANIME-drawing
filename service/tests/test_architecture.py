@@ -73,6 +73,19 @@ def test_orchestration_router_is_registered_after_the_assistant_router():
     assert source.index(orchestration) < source.index(static_mount)
 
 
+def test_the_chat_specialist_runner_is_bound_at_the_composition_root():
+    """Ordinary chat can only ASK triage if something binds the handler, and only
+    app.py may: assistant must not import orchestration (above), so the binding
+    lives nowhere either package's own tests would exercise. Unbound, chat
+    silently degrades to answering from the facts alone — which is precisely the
+    behaviour Spec 5 removed."""
+    source = (SERVICE_ROOT / "app.py").read_text(encoding="utf-8")
+    assert 'set_specialist_runner("triage", run_triage_for_chat)' in source
+    imports = _imports("app.py")
+    assert "service.assistant.delegation" in imports
+    assert "service.orchestration.agents" in imports
+
+
 def test_application_services_do_not_depend_on_fastapi():
     for module in ("sessions/service.py", "review/service.py"):
         assert not any(name.startswith("fastapi") for name in _imports(module)), module
@@ -141,3 +154,31 @@ def test_in_memory_repository_owns_state_and_bounded_paths(tmp_path):
     assert repository.state_for(1) is None
     assert not first.exists()
     assert repository.path_for(2) == str(second)
+
+
+def test_binding_is_pure_of_the_rest_of_the_service():
+    """The resolver is a value transform; it must not reach for state or I/O."""
+    for name in _imports("orchestration/binding.py"):
+        assert not name.startswith("service.assistant"), name
+        assert not name.startswith("service.sessions"), name
+        assert not name.startswith("service.infrastructure"), name
+        assert not name.startswith("fastapi"), name
+
+
+def test_the_orchestration_loop_lives_in_exactly_one_place():
+    """dispatch() and run_goal_stream() used to keep separate copies of the step
+    loop; anything added to one silently did nothing in the other. Structural,
+    not textual: a plain substring check on "for step in plan.steps" is defeated
+    by renaming the loop variable (confirmed by mutation — see task-9-report.md),
+    so this walks the AST for any `for`/comprehension whose iterable is a
+    `.steps` attribute access, regardless of what the loop variable is called,
+    how the line is wrapped, or how it is spaced."""
+    source = (SERVICE_ROOT / "orchestration" / "service.py").read_text(encoding="utf-8")
+    assert "run_plan" in source
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
+        iterable = getattr(node, "iter", None)
+        if isinstance(iterable, ast.Attribute) and iterable.attr == "steps":
+            raise AssertionError(
+                f"a loop over `.steps` was reintroduced at line {node.lineno}: "
+                f"{ast.dump(node)}")

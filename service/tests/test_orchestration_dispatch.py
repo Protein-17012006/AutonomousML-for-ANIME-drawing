@@ -157,3 +157,192 @@ def test_a_rerun_that_changes_something_still_queues_on_the_orchestration_rail()
     ))
     result = dispatch(AgentContext(state), plan)[0]
     assert result.status == "queued"
+
+
+def test_run_plan_yields_one_pair_per_step_in_order():
+    from service.orchestration.dispatch import run_plan
+    produced = list(run_plan(AgentContext(_state()), _demo_plan()))
+    assert [r.target for _entries, r in produced] == [
+        "triage", "open_board", "rerun_session"]
+    assert all(entries for entries, _r in produced)
+
+
+def test_dispatch_and_run_plan_agree_step_for_step():
+    """They must not drift: dispatch is now a thin drain of the same generator."""
+    from service.orchestration.dispatch import run_plan
+    ctx, plan = AgentContext(_state()), _demo_plan()
+    via_generator = [r for _entries, r in run_plan(ctx, plan)]
+    via_dispatch = dispatch(AgentContext(_state()), _demo_plan())
+    assert [(r.target, r.status) for r in via_generator] == \
+           [(r.target, r.status) for r in via_dispatch]
+
+
+def test_run_plan_yields_nothing_for_an_empty_plan():
+    from service.orchestration.dispatch import run_plan
+    assert list(run_plan(AgentContext(_state()), Plan(goal="hi", steps=()))) == []
+
+
+def _survey_state():
+    """Pair 0 passed — no work, not actionable. Pair 1 is filled and flagged: the
+    ONLY actionable pair in this cut, so first_index resolves to 1 purely by
+    POSITION (it is the first, and only, actionable pair). cut_survey_agent sorts
+    strictly by pair index, never by bucket type — do not make pair 0 `needs_key`
+    to "test" a flag-outranks-needs_key ordering; that ordering was removed by
+    Task 3 (see agents.py's Fix round 1) and asserting it here would reintroduce
+    the exact bug those fixes exist to keep out."""
+    result = MagicMock()
+    result.pairs = [_pair(0, action="filled", qa_status="pass"),
+                    _pair(1, action="filled", qa_status="flag")]
+    result.n_autopass = 1
+    result.n_corrected = 0
+    result.flagged = [1]
+    result.abstained = []
+    result.keys_requested_total = 0
+    return {"result": result, "keys": [], "chat": [], "explanations": {},
+            "qa_degraded": False}
+
+
+def test_a_later_step_reads_an_earlier_AGENTS_answer():
+    from service.orchestration.dispatch import run_plan
+    plan = Plan(goal="where do I start?", steps=(
+        Step(1, "cut_survey", "agent", ask="order the cut", args={}),
+        Step(2, "qa_csq", "agent", ask="verdict?", args={"index": "$1.first_index"}),
+    ))
+    results = [r for _e, r in run_plan(AgentContext(_survey_state()), plan)]
+    assert results[0].status == "ok"
+    # pair 0 passed (no work); the first ACTIONABLE pair is 1 — positional, not
+    # ranked by bucket type.
+    assert results[0].payload["first_index"] == 1
+    assert results[1].status == "ok"
+    assert results[1].payload["status"] == "flag"
+
+
+def test_the_transcript_shows_BOTH_the_reference_and_what_it_resolved_to():
+    """What is not rendered is indistinguishable from what did not happen."""
+    from service.orchestration.dispatch import run_plan
+    plan = Plan(goal="where do I start?", steps=(
+        Step(1, "cut_survey", "agent", ask="order the cut", args={}),
+        Step(2, "qa_csq", "agent", ask="verdict?", args={"index": "$1.first_index"}),
+    ))
+    produced = list(run_plan(AgentContext(_survey_state()), plan))
+    ask_entry = produced[1][0][0]
+    assert ask_entry.kind == "ask"
+    assert ask_entry.data["index"] == 1
+    assert ask_entry.data["_bound"] == {"index": "$1.first_index"}
+
+
+def test_an_unresolvable_reference_REJECTS_the_step_and_the_plan_carries_on():
+    from service.orchestration.dispatch import run_plan
+    plan = Plan(goal="x", steps=(
+        Step(1, "qa_csq", "agent", ask="verdict?", args={"index": "$9.first_index"}),
+        Step(2, "qa_csq", "agent", ask="verdict?", args={"index": 0}),
+    ))
+    results = [r for _e, r in run_plan(AgentContext(_survey_state()), plan)]
+    assert results[0].status == "rejected"
+    assert "has not run" in results[0].says
+    assert results[1].status == "ok"
+
+
+def test_a_reference_to_a_field_the_agent_withheld_is_rejected():
+    """cut_survey omits first_index when nothing needs work — a reference to it
+    must fail loudly, not resolve to something invented."""
+    from service.orchestration.dispatch import run_plan
+    state = _survey_state()
+    state["result"].pairs = [_pair(0, action="filled", qa_status="pass")]
+    plan = Plan(goal="x", steps=(
+        Step(1, "cut_survey", "agent", ask="order the cut", args={}),
+        Step(2, "qa_csq", "agent", ask="verdict?", args={"index": "$1.first_index"}),
+    ))
+    results = [r for _e, r in run_plan(AgentContext(state), plan)]
+    assert results[0].status == "ok"
+    assert results[1].status == "rejected"
+    # Pin the CAUSE, not just the status: "rejected" is also what a forward
+    # reference to a step that never ran produces (see the previous test), and
+    # a mis-keyed `sources` lookup can turn THIS failure into THAT one while
+    # leaving the status unchanged. The withheld-field message says "did not
+    # report"; the never-ran message says "has not run" — they must not be
+    # interchangeable here.
+    assert "did not report" in results[1].says
+
+
+def test_a_resolved_value_still_passes_through_the_normal_tool_validator():
+    """Binding opens no new trust boundary."""
+    from service.orchestration.dispatch import run_plan
+    plan = Plan(goal="x", steps=(
+        Step(1, "cut_survey", "agent", ask="order the cut", args={}),
+        Step(2, "open_board", "tool", args={"index": "$1.n_pairs"}),
+    ))
+    results = [r for _e, r in run_plan(AgentContext(_survey_state()), plan)]
+    # n_pairs is 2 for a 2-pair session; valid indices are 0..n_pairs-1, so
+    # n_pairs itself is out of range BY CONSTRUCTION — unlike keys_outstanding,
+    # this does not depend on which pairs happen to be needs_key.
+    assert results[1].status == "rejected"
+    # The reference must actually have been RESOLVED before the validator saw
+    # it — not merely "some value, rejected either way". An unresolved literal
+    # "$1.n_pairs" is also not an int and would ALSO be rejected by
+    # _valid_index, so a bare status check here cannot tell a real resolution
+    # from a broken one that skips resolve_args entirely. Pin the concrete
+    # resolved value the validator was actually handed.
+    assert results[1].payload["args"] == {"index": 2}
+
+
+def test_a_handoff_on_a_fast_synchronous_result_survives_the_ms_rebuild():
+    """CARRIED FINDING from Task 2's review, deferred to here: `run_step` used to
+    rebuild a StepResult by hand-listing seven positional fields whenever
+    `result.ms` was falsy (the fast synchronous path every early-return refusal
+    takes). `StepResult` gained `handoff` after that reconstruction was written,
+    so the hand-written version silently dropped it. Task 7 is the first task
+    that actually sets `handoff` — if this regresses, Task 7's tests fail for a
+    reason that looks unrelated to handoff.
+
+    `dataclasses.replace` is the fix; this test pins it directly at `run_step`,
+    not through `run_plan`, and forces the falsy-`ms` branch by leaving `ms`
+    at its dataclass default (0)."""
+    from service.orchestration.dispatch import Seq, run_step
+
+    def handing_off(ctx, step):
+        from service.orchestration.models import StepResult
+        return StepResult(step_id=step.id, target="perception", kind="agent",
+                          status="refused", says="not mine to answer",
+                          handoff={"to": "qa_csq", "reason": "wrong agent"})
+        # ms left at its default, 0 -- falsy, so run_step's timing rebuild fires.
+
+    from service.orchestration import registry
+    original = registry._AGENT_HANDLERS["perception"]
+    registry.register_agent("perception", handing_off)
+    try:
+        step = Step(1, "perception", "agent", ask="?", args={"index": 0})
+        _entries, result = run_step(AgentContext(_state()), step, Seq())
+    finally:
+        registry.register_agent("perception", original)
+
+    assert result.handoff == {"to": "qa_csq", "reason": "wrong agent"}
+    assert result.ms >= 0    # the rebuild DID fire (ms was 0 going in)
+
+
+def test_a_resolver_crash_is_caught_and_REJECTS_the_step_not_raised():
+    """Reviewer-proven escape: Design §7 commits 'binding.py raises -> caught in
+    run_step -> rejected; never escapes', but `resolve_args` was called bare.
+    An agent payload with a non-string key (an int, say) plus a LATER step's
+    reference to a field that payload does not have makes binding.py's own
+    error-message construction do `sorted(payload)` over mixed int/str keys,
+    which raises TypeError — escaping run_step, run_plan AND dispatch, all
+    three documented "Never raises", and would 500 the SSE route."""
+    from service.orchestration.dispatch import Seq, run_step
+    sources = {1: {"kind": "agent", "payload": {1: "int-keyed", "b": "y"}}}
+    step = Step(2, "qa_csq", "agent", ask="verdict?",
+               args={"index": "$1.missing_field"})
+    entries, result = run_step(AgentContext(_state()), step, Seq(), sources)
+    assert result.status == "rejected"
+    assert entries, "a rejected step must still produce a transcript entry"
+
+
+def test_a_plan_with_no_references_and_no_handoffs_behaves_exactly_as_before():
+    """If the new layer does not fire, what runs is what ran yesterday."""
+    results = dispatch(AgentContext(_state()), _demo_plan())
+    assert [(r.target, r.kind, r.status) for r in results] == [
+        ("triage", "agent", "ok"),
+        ("open_board", "tool", "ok"),
+        ("rerun_session", "tool", "queued"),
+    ]
+    assert all(r.handoff is None for r in results)

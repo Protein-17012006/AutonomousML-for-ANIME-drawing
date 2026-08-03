@@ -14,6 +14,7 @@ import {
   rememberMemory,
   submitReplacementKeys,
   submitVerdicts,
+  submitRepair,
   runOrchestration,
   type AgentAction,
   type TranscriptEntry,
@@ -54,6 +55,7 @@ import {
   getMySessionWorkspace,
   listMySessions,
   renameMySession,
+  resumeMySession,
   type PublishedSessionSummary,
 } from "@/lib/sessionApi";
 import { discardActiveWorkspace, getActiveWorkspace, retryActiveWorkspacePublish, subscribeActiveWorkspace, type ActiveWorkspace } from "@/lib/activeWorkspace";
@@ -110,7 +112,7 @@ export default function App() {
   );
   const [stagedRefills, setStagedRefills] = useState<Record<number, { file: File; url: string }>>({});
   const stagedRefillsRef = useRef<Record<number, { file: File; url: string }>>({});
-  const [reviewSubmit, setReviewSubmit] = useState<{ kind: "verdicts" | "keys"; phase: string; error?: string } | null>(null);
+  const [reviewSubmit, setReviewSubmit] = useState<{ kind: "verdicts" | "keys" | "repair"; phase: string; error?: string } | null>(null);
   const setVerdict = (idx: number, v: "accept" | "reject") => {
     // Staged only. The artist's keep/redraw IS the per-show calibration signal
     // the QA thresholds are refit against, but it reaches the feedback store
@@ -148,7 +150,30 @@ export default function App() {
 
   // chat-first surface state (vault 'Chat-First Copilot Surface')
   const [view, setView] = useState<"chat" | "board">("chat");
+  // Opening the board is a navigation as far as the artist is concerned, but it
+  // changed no URL — so Back left the app entirely and the remount lost the
+  // conversation. Push one history entry when the board opens and treat Back as
+  // "return to the chat", so nothing unmounts.
+  useEffect(() => {
+    const onPop = () => setView("chat");
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+  useEffect(() => {
+    if (view !== "board") return;
+    const current = window.history.state as Record<string, unknown> | null;
+    if (current?.copilotView === "board") return;   // already pushed
+    // Spread the router's own state: replacing it wholesale would strip what
+    // Next.js keeps there and break client-side navigation.
+    window.history.pushState({ ...(current ?? {}), copilotView: "board" }, "");
+  }, [view]);
   const [boardFocus, setBoardFocus] = useState<number | null>(null);
+  // The pair whose burnt-in QA mark the agent was asked to show. The nonce makes
+  // a second request for the SAME pair a distinct event, so asking again after
+  // the artist toggled the mark off turns it back on.
+  const [boardMark, setBoardMark] = useState<{ index: number; nonce: number } | null>(null);
+  // Pair whose paint surface an accepted `image_edit` proposal asked to open.
+  const [boardRepair, setBoardRepair] = useState<{ index: number; nonce: number } | null>(null);
   const [upload, setUpload] = useState<UserTurn | null>(null);
   const [qaTurns, setQaTurns] = useState<QaTurn[]>([]);
   const [actionBusy, setActionBusy] = useState(false);
@@ -162,6 +187,9 @@ export default function App() {
   const [ownerSub, setOwnerSub] = useState<string | null>(null);
   const [liveSid, setLiveSid] = useState<string | null>(null);
   const [durablePid, setDurablePid] = useState<string | null>(null);
+  // Why a reopened session stayed read-only. Null means it did not — either it
+  // resumed, or nothing has been reopened.
+  const [resumeRefusal, setResumeRefusal] = useState<string | null>(null);
   const [history, setHistory] = useState<PublishedSessionSummary[]>([]);
   const [historyCursor, setHistoryCursor] = useState<string | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -177,6 +205,10 @@ export default function App() {
   const [pendingRun, setPendingRun] = useState<PendingRun | null>(null);
   const cacheWritesEnabled = useRef(false);
   const activeStreamStop = useRef<(() => void) | null>(null);
+  // The session hydration currently in flight. Resume is an await inside that
+  // hydration, so a second click during it must not let the first one install a
+  // live id belonging to the cut the artist just navigated away from.
+  const hydratingPid = useRef<string | null>(null);
   const activeStreamSequence = useRef(0);
 
   const loadHistory = useCallback(async () => {
@@ -231,19 +263,49 @@ export default function App() {
     });
     setLog(workspace.pairs);
     setResult(workspace.result);
-    // Durable history is read-only. Older workspace snapshots can contain a
-    // runtime SID, but that ID must not turn the composer into a permanently
-    // disabled "Saving session…" control after recovery.
-    if (!retainLiveSession) setLiveSid(null);
+    // A snapshot's own SID is dead: it names a runtime session in a process that
+    // has since restarted or evicted it. Clear it, then ask the service to build
+    // a NEW one from this snapshot — that is what makes the reopened workbench
+    // editable instead of a read-only record of a session the artist can no
+    // longer touch.
+    if (!retainLiveSession) {
+      setLiveSid(null);
+      setResumeRefusal(null);
+      hydratingPid.current = selected.pid;
+    }
     setDurablePid(selected.pid);
     setQaTurns(workspace.qa.map((turn) => ({
       q: turn.question,
       answer: turn.answer,
       grounded: turn.grounded,
+      // A reopened agent turn brings its multi-agent exchange back with it —
+      // the planner/triage/perception lines the artist watched. Without this the
+      // session reopened as a flat Q&A and the cooperation was invisible.
+      transcript: turn.transcript as QaTurn["transcript"],
+      // The proposal is replayed as ALREADY DECIDED. Re-offering a button on a
+      // saved turn would invite the artist to accept an action a second time,
+      // against a session whose state has since moved on.
+      action: null,
+      actionDone: !!turn.action,
+      actionNote: turn.action
+        ? `Proposed ${String((turn.action as { tool?: string }).tool ?? "an action")}.`
+        : null,
+      rejectedTool: turn.rejected_tool ?? undefined,
     })));
     setVerdicts({});
     setRunning(false);
     setView("chat");
+
+    if (retainLiveSession || selected.status !== "complete") return;
+    try {
+      const resumed = await resumeMySession(selected.pid);
+      if (hydratingPid.current !== selected.pid) return;
+      setLiveSid(resumed.sid);
+      setResumeRefusal(resumed.reason);
+    } catch {
+      if (hydratingPid.current !== selected.pid) return;
+      setResumeRefusal("This session could not be reopened for editing just now.");
+    }
   }, [keys, stagedKeys]);
 
   const finishRecoveredPublication = useCallback(async (pid: string) => {
@@ -401,6 +463,7 @@ export default function App() {
     setView("chat");
     setLiveSid(null);
     setDurablePid(null);
+    setResumeRefusal(null);
   };
 
   const restoreActiveInputs = async (workspace: ActiveWorkspace) => {
@@ -448,11 +511,12 @@ export default function App() {
       result,
       verdicts,
       activeDraftPid,
+      qaTurns,
     };
     void saveState(ownerSub, state).catch((error) =>
       console.warn("could not cache active workspace state", error),
     );
-  }, [activeDraftPid, activeWorkspace, log, ownerSub, recoverableWorkspace, result, running, sessionMode, upload, verdicts]);
+  }, [activeDraftPid, activeWorkspace, log, ownerSub, qaTurns, recoverableWorkspace, result, running, sessionMode, upload, verdicts]);
 
   const selectHistorySession = async (session: PublishedSessionSummary) => {
     setSelectedPid(session.pid);
@@ -818,6 +882,19 @@ export default function App() {
     });
   };
 
+  const submitPairRepair = (pairIndex: number, maskPng: string) => {
+    if (!liveSid || !durablePid) return;
+    setReviewSubmit({ kind: "repair", phase: "Sending the painted region" });
+    // frame 1 is the pair's generated middle -- the frame the workbench shows
+    // and the only one the canvas can paint. Positions are pair-local.
+    void submitRepair(liveSid, pairIndex, [{ frame: 1, png: maskPng }], {
+      onPair: () => undefined,
+      onResult: () => finalizeDurableReview(),
+      onProgress: (phase) => setReviewSubmit({ kind: "repair", phase }),
+      onError: (error) => setReviewSubmit({ kind: "repair", phase: "Could not repair", error }),
+    });
+  };
+
   const submitReviewKeys = () => {
     if (!liveSid || !durablePid) return;
     const needs = log.filter((pair) => pair.action === "needs_key");
@@ -963,6 +1040,14 @@ export default function App() {
         case "open_board":
           if (index === null) throw new Error("That pair is no longer available.");
           setBoardFocus(index);
+          // show_annotated used to be byte-identical to open_board: it navigated,
+          // said "Showing the marked frame for pair N", and showed an ordinary
+          // in-between, because nothing in the client read `annotated_url`. The
+          // note was the only thing that differed, which is how a tool that
+          // displayed nothing read as success.
+          if (action.tool === "show_annotated") {
+            setBoardMark({ index, nonce: Date.now() });
+          }
           setView("board");
           noteTurn(turn, {
             actionDone: true,
@@ -1006,6 +1091,21 @@ export default function App() {
                 setResult(r);
                 setLiveSid(sidFromResult(r));
               },
+              // The re-run publishes a new revision of THIS saved session, so the
+              // sidebar row is stale the moment it lands: its counts and time now
+              // describe frames that no longer exist. Without this the artist saw
+              // the old summary until they reloaded the page.
+              onPublish: (published) => {
+                if (published.published && published.pid) {
+                  setDurablePid(published.pid);
+                  void loadHistory();
+                  return;
+                }
+                setBanner(
+                  published.error ??
+                    "The re-run finished, but saving it to your history needs a retry.",
+                );
+              },
               onError: (m) => setBanner(m),
             },
           );
@@ -1017,6 +1117,32 @@ export default function App() {
           await rememberMemory(action.args);
           noteTurn(turn, { actionDone: true, actionNote: "Saved for next time." });
           break;
+        case "image_edit":
+          if (index === null) throw new Error("That pair is no longer available.");
+          // The server's `_valid_repairable` already refused a needs_key pair and
+          // one with no rendered mid, so what arrives here has a frame to paint
+          // on. What the server cannot see is whether THIS client can still write
+          // to the session: a reopened read-only session renders the same button.
+          if (!liveSid || !durablePid)
+            throw new Error(
+              "This session is read-only, so it cannot be repaired. Re-run it to make changes.",
+            );
+          setBoardFocus(index);
+          setBoardRepair({ index, nonce: Date.now() });
+          setView("board");
+          noteTurn(turn, {
+            actionDone: true,
+            actionNote: `Opened the paint surface for pair ${index}. Paint over the region that is wrong, then send it.`,
+          });
+          break;
+        // A tool the server offers and this client cannot carry out must SAY so.
+        // Without this branch the press fell through, `finally` cleared the busy
+        // flag, and the artist saw a spinner stop and nothing happen — which is
+        // how `image_edit` shipped as a Confirm button that did nothing at all.
+        default:
+          throw new Error(
+            `This build cannot carry out "${action.tool}" yet — the server proposed it but it is not wired here.`,
+          );
       }
     } catch (err) {
       // Kept on the turn rather than raised as a banner: the artist pressed a
@@ -1097,6 +1223,10 @@ export default function App() {
         setResult(cached.state.result);
         setVerdicts(cached.state.verdicts);
         setActiveDraftPid(cached.state.activeDraftPid);
+        // Restore the conversation too. The run card used to come back on its
+        // own and the chat came back empty, which reads as "the co-pilot forgot
+        // everything" even though the service still had the turns.
+        if (cached.state.qaTurns?.length) setQaTurns(cached.state.qaTurns);
       } else {
         if (ownerSub) await clearCache(ownerSub);
         clearAll();
@@ -1277,15 +1407,19 @@ export default function App() {
                 onRefill={refillKey}
                 stagedRefills={stagedRefills}
                 canEdit={!!liveSid && !!durablePid}
+                readOnlyReason={resumeRefusal}
                 onSubmitVerdicts={submitReviewVerdicts}
                 onSubmitRefills={submitReviewKeys}
                 onDiscardStaged={discardStagedRefills}
+                onRepair={submitPairRepair}
                 fps={
                   result?.sampling?.output_fps ||
                   Number(cadence) * Number(smoothness) ||
                   24
                 }
                 initialFocus={boardFocus}
+                markPair={boardMark}
+                repairPair={boardRepair}
               />
             </>
           )}
@@ -1310,7 +1444,7 @@ export default function App() {
           }}>
             <DialogContent showCloseButton={false} onEscapeKeyDown={(event) => event.preventDefault()} onPointerDownOutside={(event) => event.preventDefault()}>
               <DialogHeader className="items-center text-center">
-                <DialogTitle>{reviewSubmit?.kind === "keys" ? "Applying replacement keys" : "Submitting verdicts"}</DialogTitle>
+                <DialogTitle>{reviewSubmit?.kind === "keys" ? "Applying replacement keys" : reviewSubmit?.kind === "repair" ? "Repairing the frame" : "Submitting verdicts"}</DialogTitle>
                 <DialogDescription className="flex items-center justify-center gap-2 text-center">
                   {!reviewSubmit?.error && <LoaderCircle className="size-4 shrink-0 animate-spin" aria-label="Working" />}
                   <span>{reviewSubmit?.error ?? reviewSubmit?.phase}</span>

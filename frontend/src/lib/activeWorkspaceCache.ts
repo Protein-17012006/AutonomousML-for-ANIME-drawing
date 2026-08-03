@@ -1,6 +1,7 @@
 "use client";
 
 import type { PairEvent, ResultEvent } from "@/components/copilot/types";
+import type { QaTurn } from "@/components/copilot/lib/chatModel";
 
 const DB_NAME = "copilot-active-workspace";
 const ASSETS = "assets";
@@ -30,6 +31,16 @@ export interface CachedState {
   result: ResultEvent | null;
   verdicts: Record<number, "accept" | "reject">;
   activeDraftPid: string | null;
+  /** The conversation itself.
+   *
+   * Only `/ask` turns are written to the durable transcript; an agent or
+   * orchestrated turn lives in the service's in-process session state, which the
+   * UI has no route to read back. So without this the run card returned from
+   * cache after a remount and the chat came back EMPTY — the artist's questions,
+   * the agent's answers and the whole planner/triage/perception transcript gone
+   * from the screen while the server still remembered them.
+   */
+  qaTurns?: QaTurn[];
 }
 
 export interface CachedAssets { expiresAt: number; workspaceId: string | null; keys: File[]; video: File | null }

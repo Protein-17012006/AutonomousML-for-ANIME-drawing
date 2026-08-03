@@ -13,7 +13,11 @@ from urllib.parse import urlsplit
 
 from service.core.auth import auth_required
 from service.core.config import PublisherSettings
-from service.session_history.models import WorkspaceSnapshot, WorkspaceUpload
+from service.session_history.models import (
+    ResumeState,
+    WorkspaceSnapshot,
+    WorkspaceUpload,
+)
 from service.sessions.schemas import PairEvent, ResultEvent
 
 _ARTIFACT_SUFFIXES = {".png", ".md", ".mp4"}
@@ -51,6 +55,11 @@ def _workspace_snapshot(outcome, uploaded_names: set[str], workspace_input) -> W
         for index, value in (getattr(outcome, "key_urls", {}) or {}).items()
         if (name := available(value)) is not None
     }
+    pair_keys = {
+        str(index): name
+        for index, value in (getattr(outcome, "pair_keys", {}) or {}).items()
+        if (name := available(value)) is not None
+    }
     explanations = json.loads(json.dumps(getattr(outcome, "explanations", {}) or {}))
     for explanation in explanations.values():
         if isinstance(explanation, dict) and "annotated_url" in explanation:
@@ -85,6 +94,7 @@ def _workspace_snapshot(outcome, uploaded_names: set[str], workspace_input) -> W
         explanations=explanations,
         pair_mids=pair_mids,
         key_urls=key_urls,
+        pair_keys=pair_keys,
         sampling=dict(getattr(outcome, "sampling", {}) or {}),
         csq=getattr(outcome, "csq", None),
         qa_degraded=bool(getattr(outcome, "qa_degraded", False)),
@@ -98,7 +108,22 @@ def _workspace_snapshot(outcome, uploaded_names: set[str], workspace_input) -> W
         upload=upload,
         pairs=pairs,
         result=final,
+        resume=_resume_state(outcome),
     )
+
+
+def _resume_state(outcome) -> ResumeState | None:
+    """The configuration a reopened session has to be rebuilt with.
+
+    None when the producer had no cfg to give — resume then derives what it can
+    from `result.sampling`, so an absent block degrades the fidelity of a resume
+    rather than preventing one.
+    """
+    cfg = getattr(outcome, "cfg", None)
+    dump = getattr(cfg, "model_dump", None)
+    if dump is None:
+        return None
+    return ResumeState(cfg=dump(mode="json"), rev=int(getattr(outcome, "rev", 0) or 0))
 
 
 def publish_session(

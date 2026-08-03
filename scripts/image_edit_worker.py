@@ -31,6 +31,10 @@ CONTEXT_FPS = 4
 MAX_BODY_BYTES = 48 * 1024 * 1024
 MAX_PIXELS = 16_777_216
 MAX_SIDE = 8192
+# Duplicated from service/image_edit/span.py on purpose: this worker runs in its
+# own venv on the box and must never import `service`.
+MAX_SPAN_FRAMES = 480
+MAX_REFINEMENT_PASSES = 20
 
 
 class ImageEditRequest(BaseModel):
@@ -38,6 +42,14 @@ class ImageEditRequest(BaseModel):
     image: str
     mask: str
     seed: int = Field(default=2026, ge=0, le=2_147_483_647)
+
+
+class SpanEditRequest(BaseModel):
+    model: str = MODEL
+    frames: list[str]
+    masks: dict[str, str]
+    seed: int = Field(default=2026, ge=0, le=2_147_483_647)
+    refinement_passes: int = Field(default=1, ge=1, le=MAX_REFINEMENT_PASSES)
 
 
 def _decode_png(payload: str, *, grayscale: bool) -> np.ndarray:
@@ -303,6 +315,134 @@ class DiffuEraserRunner:
             output[selected] = repaired[selected]
             return output
 
+    def run_span(
+        self,
+        frames: list[np.ndarray],
+        masks: dict[int, np.ndarray],
+        *,
+        seed: int,
+        refinement_passes: int,
+    ) -> list[np.ndarray]:
+        """Repair a span of real frames.
+
+        Unlike run(), the temporal neighbours are genuine, which is the entire
+        reason this path exists: run() pads ONE still to CONTEXT_FRAMES copies
+        and so hands a video inpainting model no motion at all. Frames the
+        artist did not paint get an all-black mask, so the model reads them as
+        context it must preserve.
+        """
+        if not frames:
+            raise ValueError("span is empty")
+        height, width = frames[0].shape[:2]
+        if any(frame.shape[:2] != (height, width) for frame in frames):
+            raise ValueError("every frame in a span must share one size")
+        if any(mask.shape != (height, width) for mask in masks.values()):
+            raise ValueError("mask dimensions must match the frame")
+        if not any(np.any(mask > 8) for mask in masks.values()):
+            raise ValueError("mask is empty")
+        if not self.available():
+            raise RuntimeError(
+                "DiffuEraser checkout, venv, or ffmpeg is unavailable"
+            )
+
+        timeout = self._timeout_seconds()
+        root = self._root()
+        blank = np.zeros((height, width), np.uint8)
+        with self._lock, tempfile.TemporaryDirectory(
+            prefix="copilot_span_edit_"
+        ) as temporary:
+            work = Path(temporary)
+            frames_dir = work / "frames"
+            masks_dir = work / "masks"
+            output_dir = work / "output"
+            for directory in (frames_dir, masks_dir, output_dir):
+                directory.mkdir()
+
+            for index, frame in enumerate(frames):
+                Image.fromarray(frame).save(frames_dir / f"{index:04d}.png")
+                mask = masks.get(index, blank)
+                Image.fromarray(
+                    np.where(mask > 8, 255, 0).astype(np.uint8)
+                ).save(masks_dir / f"{index:04d}.png")
+
+            input_video = work / "input.mp4"
+            mask_video = work / "mask.mp4"
+            self._encode_sequence(frames_dir, input_video, timeout=timeout)
+            self._encode_sequence(masks_dir, mask_video, timeout=timeout)
+
+            duration = len(frames) / CONTEXT_FPS
+            self._run(
+                [
+                    str(self._python()),
+                    "-u",
+                    str(root / "run_diffueraser.py"),
+                    "--input_video",
+                    str(input_video),
+                    "--input_mask",
+                    str(mask_video),
+                    "--video_length",
+                    f"{duration:.3f}",
+                    "--save_path",
+                    str(output_dir),
+                    "--max_img_size",
+                    "960",
+                    "--mask_dilation_iter",
+                    "2",
+                    "--neighbor_length",
+                    "10",
+                    "--ref_stride",
+                    "5",
+                    "--subvideo_length",
+                    "60",
+                    "--seed",
+                    str(seed),
+                    "--nframes",
+                    str(len(frames)),
+                    "--refinement_passes",
+                    str(refinement_passes),
+                ],
+                cwd=root,
+                timeout=timeout,
+            )
+
+            result_video = output_dir / "diffueraser_result.mp4"
+            if not result_video.is_file():
+                raise RuntimeError("DiffuEraser did not create a result video")
+            extracted = work / "out"
+            extracted.mkdir()
+            self._run(
+                [
+                    self._ffmpeg(),
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-y",
+                    "-i",
+                    str(result_video),
+                    str(extracted / "%04d.png"),
+                ],
+                cwd=work,
+                timeout=120,
+            )
+
+            repaired: list[np.ndarray] = []
+            for index in range(len(frames)):
+                path = extracted / f"{index + 1:04d}.png"
+                if not path.is_file():
+                    raise RuntimeError(
+                        f"DiffuEraser did not return frame {index}"
+                    )
+                with Image.open(path) as image:
+                    image.load()
+                    if image.size != (width, height):
+                        image = image.resize(
+                            (width, height), Image.Resampling.BICUBIC
+                        )
+                    repaired.append(
+                        np.array(image.convert("RGB"), dtype=np.uint8, copy=True)
+                    )
+            return repaired
+
 
 app = FastAPI(title="Box Image Edit Worker")
 _runner = DiffuEraserRunner()
@@ -350,6 +490,55 @@ def edit(request: ImageEditRequest):
         return {
             "model": MODEL,
             "image": _png_b64(output),
+            "elapsed_seconds": round(time.monotonic() - started, 3),
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.post("/edit-span")
+def edit_span(request: SpanEditRequest):
+    if request.model.strip().lower() != MODEL:
+        raise HTTPException(
+            status_code=422,
+            detail=f"unsupported image-edit model: {request.model}",
+        )
+    if not request.frames or len(request.frames) > MAX_SPAN_FRAMES:
+        raise HTTPException(
+            status_code=422, detail="span frame count out of range"
+        )
+    if not request.masks:
+        raise HTTPException(status_code=422, detail="paint at least one frame")
+    try:
+        indices = {int(key) for key in request.masks}
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422, detail="mask keys must be integers"
+        ) from exc
+    if any(index < 0 or index >= len(request.frames) for index in indices):
+        raise HTTPException(
+            status_code=422, detail="a mask index is outside the span"
+        )
+    try:
+        frames = [
+            _decode_png(item, grayscale=False) for item in request.frames
+        ]
+        masks = {
+            int(key): _decode_png(value, grayscale=True)
+            for key, value in request.masks.items()
+        }
+        started = time.monotonic()
+        output = _runner.run_span(
+            frames,
+            masks,
+            seed=request.seed,
+            refinement_passes=request.refinement_passes,
+        )
+        return {
+            "model": MODEL,
+            "frames": [_png_b64(frame) for frame in output],
             "elapsed_seconds": round(time.monotonic() - started, 3),
         }
     except ValueError as exc:

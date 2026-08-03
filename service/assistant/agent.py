@@ -29,7 +29,12 @@ def append_chat(state: dict, role: str, text: str) -> None:
     del chat[:-MAX_CHAT_TURNS]
 
 def _valid_index(args: dict, n_pairs: int, state=None) -> bool:
-    return isinstance(args.get("index"), int) and 0 <= args["index"] < n_pairs
+    # `bool` is a subclass of `int`, and a pair lookup keyed by index answers
+    # `{0: p0, 1: p1}.get(True)` with pair 1 — so a model emitting JSON `true`
+    # would address a pair it never named. Every index tool shares this check.
+    index = args.get("index")
+    return (isinstance(index, int) and not isinstance(index, bool)
+            and 0 <= index < n_pairs)
 
 
 def _explanation_for(state, index: int) -> dict:
@@ -67,6 +72,48 @@ def _valid_annotated(args: dict, n_pairs: int, state=None) -> bool:
     if state is None:
         return True
     return bool(_explanation_for(state, args["index"]).get("annotated_url"))
+
+
+def _valid_repairable(args: dict, n_pairs: int, state=None) -> bool:
+    """`image_edit` opens the paint surface over a GENERATED frame.
+
+    A needs_key pair was refused by the gate before interpolation, so no frame
+    exists to paint on and the proposal would promise a missing artefact — the
+    same trap `_valid_annotated` already learned. A pair that carries no
+    rendered mid is refused for the same reason even when it was fillable."""
+    if not _valid_index(args, n_pairs, state):
+        return False
+    if state is None:
+        return True
+    pairs = {pair.index: pair for pair in state["result"].pairs}
+    pair = pairs.get(args["index"])
+    if pair is None or str(getattr(pair, "action", "")) == "needs_key":
+        return False
+    mids = state.get("pair_mids") or {}
+    return bool(getattr(pair, "mid_url", None)
+                or mids.get(args["index"]) or mids.get(str(args["index"])))
+
+
+def _valid_specialist_pair(args: dict, n_pairs: int, state=None) -> bool:
+    """`triage` fetches the gate diagnosis, which exists only for a pair the gate
+    REFUSED. Proposing it on a filled pair would promise an artefact that was
+    never produced — the trap `_valid_annotated` already learned — and would send
+    classify_gap off the population it was fitted on."""
+    if not _valid_index(args, n_pairs, state):
+        return False
+    if state is None:                    # no state to check against; see _valid_rerun
+        return True
+    pair = {p.index: p for p in state["result"].pairs}.get(args["index"])
+    return pair is not None and str(getattr(pair, "action", "")) == "needs_key"
+
+
+# Specialists are NOT tools. A tool is an artist-facing proposal that runs only
+# on confirmation; a specialist is a colleague the director ASKS, and its answer
+# is data. Keeping them in separate tables is what stops `triage` — already an
+# orchestration AGENT — from being resolvable as a tool, and keeps the
+# assistant -> orchestration edge from existing at all: the handler is injected
+# at composition time (see delegation.set_specialist_runner).
+SPECIALISTS = {"triage": _valid_specialist_pair}
 
 
 # proposal key -> the SessionCfg attribute it would change
@@ -115,6 +162,8 @@ TOOLS = {
                       "validate": lambda a, n, c=None: a in ({}, None),
                       "label": "Export bundle"},
     "rerun_session": {"needs_confirm": True,  "validate": _valid_rerun,  "label": "Re-run session"},
+    "image_edit":    {"needs_confirm": True,  "validate": _valid_repairable,
+                      "label": "Repair a frame"},
     "remember_memory":{"needs_confirm": True,  "validate": _valid_memory, "label": "Remember this"},
 }
 
@@ -149,27 +198,43 @@ def _prompt(ctx: str, hist: str, q: str, memories: list[MemoryItem] | None = Non
         # Without this the model offers "the detailed gate triage and annotated
         # frame" for exactly those pairs — the one case where neither exists.
         '  A pair whose action is needs_key has NO vlm finding and NO annotated '
-        'image. Never offer explain_pair or show_annotated for one: say the gate '
-        'reason inline from the facts, and use open_board if the artist wants to '
-        'draw the key it asked for.\n'
+        'image. Never offer explain_pair or show_annotated for one: propose '
+        '`triage`, which is the ONLY way to get its gate diagnosis, key budget '
+        'and drawing brief — the session facts do not contain them. Use '
+        'open_board if the artist wants to draw the key it asked for.\n'
         '  export_bundle args {}\n'
         '  rerun_session args {"cadence": 24|12|8|null, "smoothness": 1|2|null, '
         '"interpolator": "rife"|"gimm"|null}  (interpolator is the frame-generation '
-        'model — use it when the artist is unhappy with the generated motion itself)\n'
+        'model — use it when the artist is unhappy with the generated motion itself. '
+        'A cadence-only change returns IDENTICAL drawings: never say it redraws or '
+        'adds drawings)\n'
+        '  image_edit    args {"index": int}   (opens the paint surface over that '
+        "pair's generated frame so the ARTIST marks the wrong region; you never "
+        'choose the region and you never repair anything yourself. Only pairs that '
+        'have a generated frame — never a needs_key pair)\n'
         '  remember_memory args {"kind": "preference"|"show_context", "key": <one of the '
         'keys listed below>, "value": <short value>}\n'
         + _MEMORY_KEY_HELP
+        + 'Specialists you may ASK (not artist-facing actions; their answer is '
+        'data you then report):\n'
+        '  triage  {"name": "triage", "index": int}   (why a needs_key pair was '
+        'refused, what to draw and how many keys — the ONLY way to get that; the '
+        'session facts do NOT contain it)\n'
         + 'Reply STRICT JSON only: {"say": "<=100 words", "tool": <name or null>, '
-        '"args": <object or null>, "followups": [<=3 short suggested next questions]}\n'
+        '"args": <object or null>, "ask": <specialist object or null>, '
+        '"followups": [<=3 short suggested next questions]}\n'
         "Rules: reply in the language of the user's LATEST message (ignore the "
         "language of earlier turns); propose a tool ONLY when the user's request "
         "calls for one — otherwise tool=null. Propose remember_memory ONLY when the "
         "user explicitly asks to remember/save something for future sessions; it "
         "always requires user confirmation.\n"
-        "  When the user asks WHY a pair was flagged, abstained, refused or "
-        "corrected, propose explain_pair for that pair instead of saying the facts "
-        "do not explain it — explain_pair is what retrieves the per-pair evidence, "
-        "including the annotated image the run already rendered.\n"
+        "  When the user asks WHY a pair was flagged, abstained or corrected, "
+        "propose explain_pair for that pair instead of saying the facts do not "
+        "explain it — explain_pair is what retrieves the per-pair evidence, "
+        "including the annotated image the run already rendered. When they ask "
+        "why a pair was REFUSED (action needs_key), propose triage instead: "
+        "explain_pair has nothing to read out for a pair that was never "
+        "interpolated.\n"
         "  The `settings:` fact line states the cadence, smoothness and "
         "interpolator the session is already running. Never propose "
         "rerun_session with those same values — it re-renders the whole cut and "
@@ -195,6 +260,45 @@ def _followups(doc: dict) -> list[str]:
     return [str(x).strip()[:120] for x in f if isinstance(x, str) and x.strip()][:3]
 
 
+def _specialist_ask(state: dict, doc: dict) -> dict | None:
+    """Whitelist a proposed specialist question. Returns {"name", "index"} or None.
+
+    Kept off `action` on purpose: `action` is what the client renders as a button
+    the artist may accept, and asking a colleague is not that. A malformed ask is
+    dropped silently — the director simply answers without it, which is the same
+    degradation as an unreachable specialist."""
+    ask = doc.get("ask")
+    if not isinstance(ask, dict):
+        return None
+    name = ask.get("name")
+    validate = SPECIALISTS.get(name)
+    if validate is None or not validate(ask, len(state["result"].pairs), state):
+        return None
+    return {"name": name, "index": ask["index"]}
+
+
+def _unwrap_envelope(say: str) -> str:
+    """Undo a double-encoded reply: a `say` that is itself the JSON envelope.
+
+    Seen live 2026-08-03 — the artist's chat bubble rendered the whole
+    `{"say": ..., "tool": null, ...}` document as prose. The model answered with
+    an envelope whose `say` held a stringified copy of that same envelope, and
+    nothing here asked whether `say` was prose at all.
+
+    Unwraps ONCE and only when the inner object carries a `say` key, so a JSON
+    snippet the artist legitimately asked to see is left as written.
+    """
+    if not say.lstrip().startswith("{"):
+        return say
+    try:
+        inner = json.loads(say)
+    except (ValueError, TypeError):
+        return say
+    if not isinstance(inner, dict) or "say" not in inner:
+        return say
+    return str(inner.get("say") or "").strip()
+
+
 def _decide_from_raw(state: dict, raw: str, ctx: str) -> dict:
     """Parse + whitelist one raw LLM reply into the response dict. Never raises.
     Shared by the blocking route and the SSE stream's final decision."""
@@ -205,7 +309,7 @@ def _decide_from_raw(state: dict, raw: str, ctx: str) -> dict:
         doc = first_json_object(raw)
         if doc is None:
             raise ValueError("model reply contains no JSON object")
-        say  = str(doc.get("say") or "").strip()
+        say  = _unwrap_envelope(str(doc.get("say") or "").strip())
         tool = doc.get("tool")
         args = doc.get("args") or {}
     except (ValueError, TypeError):
@@ -213,6 +317,19 @@ def _decide_from_raw(state: dict, raw: str, ctx: str) -> dict:
                 "followups": []}
 
     fups = _followups(doc)
+    asked = _specialist_ask(state, doc)
+    # A specialist named in `tool` is a MISROUTE, not a bad request. Live
+    # 2026-08-03: asked for the marked image of a gate-refused pair, the agent
+    # correctly offered `triage` — the ONLY route to that pair's diagnosis
+    # (ADR-0015) — put it in `tool`, and the artist was told "the server would
+    # not accept it. Try asking a different way." A dead end on exactly the case
+    # the specialist exists for. Route it instead: `_specialist_ask` applies the
+    # same whitelist and the same per-pair check either way, and a specialist's
+    # answer is data the director reports, never an artist-facing action.
+    if asked is None and isinstance(tool, str) and tool in SPECIALISTS:
+        asked = _specialist_ask(state, {"ask": {"name": tool, **args}})
+        if asked is not None:
+            tool, args = None, {}
     spec = TOOLS.get(tool)
     n_pairs = len(state["result"].pairs)
     # Validators take the whole state, not just cfg. This signature has now been
@@ -224,7 +341,7 @@ def _decide_from_raw(state: dict, raw: str, ctx: str) -> dict:
         # ("confirm and I'll save it"), so the artist reads a promise with no button
         # anywhere. Report the rejection so the client can say so instead.
         out = {"say": say or fallback_answer(ctx), "grounded": True, "action": None,
-               "followups": fups}
+               "followups": fups, "specialist": asked}
         if isinstance(tool, str) and tool:
             out["rejected_tool"] = tool     # present only when there is one to report
         return out
@@ -239,6 +356,7 @@ def _decide_from_raw(state: dict, raw: str, ctx: str) -> dict:
             "label": spec["label"],
         },
         "followups": fups,
+        "specialist": asked,
     }
 
 

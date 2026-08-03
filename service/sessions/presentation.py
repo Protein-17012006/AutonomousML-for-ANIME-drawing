@@ -11,6 +11,8 @@ class RenderMetadata:
     explanations: dict
     pair_mids: dict
     key_urls: dict
+    # {pair_index(str): overlay url} for GATE-REFUSED pairs only.
+    pair_keys: dict
     sampling: dict
     qa_degraded: bool
     csq: dict | None
@@ -40,6 +42,10 @@ def build_render_metadata(
         str(key_index): f"/session/{sid}/{filename}{suffix}"
         for key_index, filename in rendered.key_files.items()
     }
+    pair_keys = {
+        str(pair_index): f"/session/{sid}/{filename}{suffix}"
+        for pair_index, filename in getattr(rendered, "key_overlay_files", {}).items()
+    }
     sampling = dict(base_sampling or {})
     sampling.update({
         "cadence_fps": cfg.cadence_fps,
@@ -60,6 +66,7 @@ def build_render_metadata(
         explanations=explanations,
         pair_mids=pair_mids,
         key_urls=key_urls,
+        pair_keys=pair_keys,
         sampling=sampling,
         qa_degraded=bool(eng.vlm_status.get("degraded")),
         csq=eng.csq_calibrator,

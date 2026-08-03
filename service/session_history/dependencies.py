@@ -50,3 +50,14 @@ def get_history_transcripts(request: Request):
     if store is None:
         raise HTTPException(status_code=503, detail="session history is not configured")
     return store
+
+
+def get_optional_history_transcripts(request: Request):
+    """The transcript store when there is one, otherwise None.
+
+    `/ask` needs the strict version: it refuses to answer at all if it cannot
+    record the turn. The agent routes must NOT — recording an agent turn is
+    valuable, but making the agent unavailable whenever durable history is off
+    would put the whole conversation behind AWS, and would 503 every local run.
+    """
+    return getattr(request.app.state, "history_transcripts", None)

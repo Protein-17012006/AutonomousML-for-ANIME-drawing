@@ -44,8 +44,11 @@ def test_degrades_without_ask_fn():
 def test_plain_answer_no_tool():
     fn = lambda p: '{"say": "Pair 1 ghosted.", "tool": null, "args": null}'
     out = decide_agent(_state(), "why flagged?", [], ask_fn=fn)
+    # `specialist` is part of the reply contract since 2026-08-03: the director
+    # may ask a colleague, and that is reported separately from `action` because
+    # asking is not something the artist confirms.
     assert out == {"say": "Pair 1 ghosted.", "grounded": True, "action": None,
-                   "followups": []}
+                   "followups": [], "specialist": None}
 
 
 def test_valid_rerun_proposal_needs_confirm():
@@ -59,6 +62,94 @@ def test_x4_rejected_server_side():
     fn = lambda p: '{"say": "ok", "tool": "rerun_session", "args": {"smoothness": 4}}'
     out = decide_agent(_state(), "give me x4", [], ask_fn=fn)
     assert out["action"] is None
+
+
+def _repair_state(action="fill", *, mid_url="/session/1/mid_000.png", frames=True):
+    state = _state()
+    pair = state["result"].pairs[0]
+    pair.action = action
+    pair.mid_url = mid_url
+    pair.frames = [b"a", b"m", b"b"] if frames else None
+    state["pair_mids"] = {"0": mid_url} if mid_url else {}
+    return state
+
+
+def _validate_image_edit(state, index=0):
+    from service.assistant.agent import TOOLS
+    return TOOLS["image_edit"]["validate"](
+        {"index": index}, len(state["result"].pairs), state)
+
+
+def test_image_edit_is_refused_for_a_needs_key_pair():
+    # The gate refused this pair BEFORE interpolation, so there is nothing to
+    # paint on. The mid_url is left PRESENT on purpose: a pair the artist just
+    # rejected becomes needs_key while a stale mid is still listed, and without
+    # that the no-rendered-frame guard would answer this test instead and the
+    # needs_key rule itself would be pinned by nothing.
+    assert _validate_image_edit(
+        _repair_state("needs_key", frames=False)) is False
+
+
+def test_image_edit_refuses_an_index_that_is_not_an_integer():
+    # The args come from an LLM. `true` is JSON-legal and `{0: ...}.get(True)`
+    # returns pair 1, so a dropped type check silently repairs the wrong pair.
+    state = _repair_state("fill")
+    n = len(state["result"].pairs)
+    from service.assistant.agent import TOOLS
+    validate = TOOLS["image_edit"]["validate"]
+    assert validate({"index": True}, n, state) is False
+    assert validate({"index": "0"}, n, state) is False
+    assert validate({"index": 1.0}, n, state) is False
+
+
+def test_image_edit_is_refused_when_a_filled_pair_has_no_rendered_frame():
+    assert _validate_image_edit(
+        _repair_state("fill", mid_url=None, frames=False)) is False
+
+
+def test_image_edit_is_allowed_for_a_filled_pair_with_a_frame():
+    assert _validate_image_edit(_repair_state("fill")) is True
+
+
+def test_image_edit_requires_confirmation():
+    from service.assistant.agent import TOOLS
+    assert TOOLS["image_edit"]["needs_confirm"] is True
+
+
+def test_image_edit_rejects_an_index_outside_the_result():
+    assert _validate_image_edit(_repair_state("fill"), index=99) is False
+
+
+def test_image_edit_proposal_survives_decide_agent_and_needs_confirm():
+    fn = lambda p: '{"say": "Mark the wrong area.", "tool": "image_edit", "args": {"index": 0}}'
+    out = decide_agent(_repair_state("fill"), "pair 0 sai chỗ tay", [], ask_fn=fn)
+    assert out["action"]["tool"] == "image_edit"
+    assert out["action"]["needs_confirm"] is True
+
+
+def test_image_edit_proposal_for_a_needs_key_pair_is_dropped():
+    fn = lambda p: '{"say": "I will fix it.", "tool": "image_edit", "args": {"index": 0}}'
+    out = decide_agent(
+        _repair_state("needs_key", mid_url=None, frames=False),
+        "sửa pair 0", [], ask_fn=fn)
+    assert out["action"] is None
+
+
+def test_prompt_tells_the_agent_it_does_not_choose_the_region_or_repair():
+    # The agent proposes the surface; the ARTIST marks the region. Without this
+    # the model narrates having repaired something, which it cannot do.
+    from service.assistant.agent import decide_agent as _decide
+    seen = {}
+
+    def capture(prompt):
+        seen["prompt"] = prompt
+        return '{"say": "ok", "tool": null, "args": null}'
+
+    _decide(_repair_state("fill"), "hi", [], ask_fn=capture)
+    prompt = seen["prompt"]
+    assert "image_edit" in prompt
+    assert "never choose the region" in prompt
+    assert "never repair anything yourself" in prompt
 
 
 def test_unknown_tool_dropped():
@@ -251,7 +342,33 @@ def test_user_message_is_capped():
     # circle. The server rail now refuses both tools there; this text stops the
     # offer being MADE, which is the difference between a refusal the artist
     # reads and a promise that quietly does nothing.
-    assert len(empty["p"]) < 5_200, "static prompt has ballooned"
+    # 2026-08-02: 5_200 -> 5_450. One purchase, ~200, for the image_edit tool
+    # line. Two thirds of it is not the tool's shape but its LIMITS: the artist
+    # marks the region, the agent never does, and it never repairs anything
+    # itself. A model that has a repair tool and no such sentence narrates
+    # having used it — the same failure the needs_key rule above was bought to
+    # stop, on a tool that now writes pixels.
+    # 2026-08-03: 5_450 -> 6_250. Three purchases, ~680 together — and note the
+    # REFUND that did not arrive: taking cls/evidence/brief out of the fact rows
+    # shortens a session with many refused pairs, but not this fixture, which has
+    # none. Bought: (a) the `settings:` line now naming tau_gate and stating that
+    # the gate decision IS gap-vs-tau and that the class is written afterwards;
+    # (b) the rule sending a needs_key "why" to triage rather than explain_pair;
+    # (c) the SPECIALISTS block and the "ask" field in the reply contract. All
+    # three exist because one live answer said the gate "saw a pose snap" — a
+    # residual bucket reported as a cause — and returned that same text for two
+    # different questions.
+    # 2026-08-03 (later): 6_250 -> 6_400. One purchase, ~205, after an artist
+    # confirmed a cadence-only re-run, waited out a full re-render and said
+    # "nothing changed". Nothing HAD: cadence never reaches run_copilot — the
+    # runner maps only tau_gate and tau_soft into CopilotCfg — so it sets the
+    # recon video's fps and the report header and leaves every drawing identical.
+    # The agent had promised "24 unique drawings", faithfully repeating the old
+    # glossary line "24, 12, or 8 fps of unique drawings". Bought: a glossary
+    # entry saying cadence is timing metadata that redraws nothing, and one
+    # clause on the rerun_session line forbidding the claim. A first draft cost
+    # ~600 and was cut to ~205 by removing what the smoothness entry already says.
+    assert len(empty["p"]) < 6_400, "static prompt has ballooned"
 
 
 def test_agent_route_keeps_history_server_side(monkeypatch):
@@ -448,18 +565,24 @@ def _needs_key_pair(index: int = 1):
     return pair
 
 
-def test_context_carries_the_triage_brief_for_a_refused_pair():
-    """R2. The gate computes an animator-grade instruction for every refused pair
-    and the agent was never shown it, so "where do I draw?" got a generic answer."""
+def test_context_points_at_triage_instead_of_copying_its_answer():
+    """R2 was "the agent was never shown the gate's instruction", and copying the
+    whole diagnosis into the facts was the first fix. It cost more than it paid:
+    with a literal already in front of it the director never delegated (audit
+    2026-08-02 — routed 13/14, cooperated 0/14), and the brief in this row is the
+    exact string that got replayed verbatim to every question about the pair.
+
+    R2 is now met by delegation. What must survive here is the MEASUREMENT, so
+    two pairs can still be compared, and a pointer naming who holds the rest."""
     from service.assistant.ask import build_session_context
 
     state = _state()
     state["result"].pairs = [_needs_key_pair(1)]
     ctx = build_session_context(state)
 
-    assert "pose_snap" in ctx
-    assert "0.043" in ctx
-    assert "overshoot extreme" in ctx
+    assert "pose_snap" not in ctx
+    assert "overshoot extreme" not in ctx
+    assert "held by triage" in ctx
 
 
 def test_glossary_defines_genga_and_douga():

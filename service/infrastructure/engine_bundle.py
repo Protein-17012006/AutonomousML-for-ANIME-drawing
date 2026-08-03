@@ -15,7 +15,8 @@ import dataclasses
 from inbetween_copilot.pipeline.ports import CopilotPorts
 
 # The fields run_copilot() accepts as kwargs — everything else is service-only.
-_SERVICE_ONLY = ("rife_engine", "vlm_struct_fn", "csq_calibrator", "vlm_status")
+_SERVICE_ONLY = ("rife_engine", "vlm_struct_fn", "csq_calibrator", "vlm_status",
+                 "key_vlm_fn")
 
 
 @dataclasses.dataclass
@@ -27,6 +28,11 @@ class EngineBundle(CopilotPorts):
     vlm_struct_fn: "object | None" = None    # explainability layer
     csq_calibrator: "dict | None" = None       # UI trust dial (box only)
     vlm_status: dict = dataclasses.field(default_factory=dict)  # degraded-QA flag
+    # (prompt, frames) -> dict. Reads the two KEY drawings of a refused pair.
+    # Carried here as well as wired into the pipeline so the triage AGENT can
+    # diagnose a pair on demand with the same eyes the run had; without it that
+    # path stayed scalar-only and silently disagreed with the stored diagnosis.
+    key_vlm_fn: "object | None" = None
 
     @classmethod
     def from_ports(cls, ports: CopilotPorts, **service_fields) -> "EngineBundle":

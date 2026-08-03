@@ -7,11 +7,14 @@ exactly as in single-turn chat. Nothing in this module runs a tool's effect.
 from __future__ import annotations
 
 import time
+from dataclasses import replace
 
 from service.assistant.agent import TOOLS
 from service.orchestration import agents as _agents      # noqa: F401 — binds handlers
 from service.orchestration import registry
-from service.orchestration.models import StepResult, TranscriptEntry
+from service.orchestration.binding import is_reference, resolve_args
+from service.orchestration.models import (MAX_PLAN_STEPS, Step, StepResult,
+                                          TranscriptEntry)
 
 ORCHESTRATOR = "orchestrator"
 
@@ -66,17 +69,44 @@ def _run_tool(step, n_pairs: int, state=None) -> StepResult:
                  "label": spec["label"]})
 
 
-def run_step(ctx, step, seq):
+def run_step(ctx, step, seq, sources=None, asker=ORCHESTRATOR):
     """Run ONE step. Returns (entries, result) — the caller decides what to do with
-    the entries, which is what lets the SSE route stream them as they happen."""
+    the entries, which is what lets the SSE route stream them as they happen.
+
+    `sources` holds the payloads of steps that have already run, so this step's
+    args may name one. `asker` is who addressed this step: the orchestrator, or
+    the AGENT that handed the work over."""
     target = registry.resolve(step.target)
     if target is None:                  # unreachable via the planner; defensive
         return [], None
 
-    entries = [_entry(seq, ORCHESTRATOR, step.target, "ask",
-                      step.ask or f"{step.target} {step.args}",
-                      data=dict(step.args))]
+    try:
+        resolved, bound, error = resolve_args(step.args, sources)
+    except Exception as exc:            # noqa: BLE001 — the resolver itself
+        # must not escape: Design §7 commits binding.py raises -> caught here
+        # -> rejected, never past run_step/run_plan/dispatch. A malformed
+        # source payload (e.g. non-string keys) can make binding.py's own
+        # error-message construction raise before it ever returns a tuple.
+        resolved, bound, error = None, {}, (
+            f"the argument resolver itself failed while resolving "
+            f"{step.target}'s arguments: {exc}")
+    ask_data = dict(step.args) if resolved is None else dict(resolved)
+    if bound:
+        # Both ends, or the mechanism is invisible.
+        ask_data["_bound"] = dict(bound)
+    entries = [_entry(seq, asker, step.target, "ask",
+                      step.ask or f"{step.target} {ask_data}", data=ask_data)]
     started = time.monotonic()
+
+    if error:
+        # The server refused these arguments before anyone was asked. Same status
+        # a tool gets for a failed validation, and it reaches synthesis the same way.
+        result = StepResult(step.id, step.target, target.kind, "rejected", says=error)
+        entries.append(_entry(seq, step.target, asker, "error", error,
+                              data={"status": "rejected"}))
+        return entries, result
+
+    step = replace(step, args=resolved)
 
     if target.kind == "agent":
         handler = target.handler
@@ -93,28 +123,179 @@ def run_step(ctx, step, seq):
         result = _run_tool(step, len(ctx.state["result"].pairs), ctx.state)
 
     if not result.ms:
-        result = StepResult(result.step_id, result.target, result.kind,
-                            result.status, result.says, result.payload,
-                            int((time.monotonic() - started) * 1000))
+        result = replace(result, ms=int((time.monotonic() - started) * 1000))
 
-    entries.append(_entry(seq, step.target, ORCHESTRATOR,
+    entries.append(_entry(seq, step.target, asker,
                           _ENTRY_KIND_FOR.get(result.status, "reply"), result.says,
                           data={"status": result.status, **result.payload},
                           ms=result.ms))
     return entries, result
 
 
-def dispatch(ctx, plan, on_entry=None) -> list:
+def _handoff_refusal(result, is_born: bool, handed_to: set, planned: int) -> str | None:
+    """Whether an offered handoff must NOT run, and why. Never raises.
+
+    Three outcomes, and the empty string is not one of the "nothing to run"
+    cases:
+      None   nothing was offered — there is no handoff to report on at all.
+      ""     a handoff WAS offered and it is valid — run it.
+      str    a handoff was offered but must NOT run — this is why.
+
+    None and "" must stay distinguishable: collapsing them (e.g. a caller
+    testing `if not refusal:`) makes an ordinary step with no handoff at all
+    take the "run it" branch, and `handoff["to"]` then raises on `None`.
+
+    A handoff is an agent choosing the next specialist. It is honoured only from a
+    refusal ("I cannot help, but X can"), never toward a tool (that would queue an
+    action the planner never proposed and the artist never saw in the plan), and
+    never past the caps that keep one turn finite."""
+    handoff = getattr(result, "handoff", None)
+    if not isinstance(handoff, dict) or not handoff:
+        return None                     # nothing offered; nothing to report
+    if result.status != "refused":
+        return "a handoff is only honoured from a refusal"
+    if is_born:
+        return "handoff depth is 1: a handoff-born step may not hand off again"
+    to = handoff.get("to")
+    target = registry.resolve(to) if isinstance(to, str) else None
+    if target is None:
+        return f"handoff to unknown target {to!r}"
+    if target.kind != "agent":
+        return (f"handoff to '{to}' refused: it is a tool, and an agent may not "
+                "queue an action the planner never proposed")
+    if to in handed_to:
+        return f"{to} already received a handoff this turn"
+    if planned >= MAX_PLAN_STEPS:
+        return f"the {MAX_PLAN_STEPS}-step budget for this turn is spent"
+    args = handoff.get("args")
+    if not isinstance(args, dict) or any(is_reference(v) for v in args.values()):
+        return "handoff args must be plain values"
+    return ""
+
+
+def _replanned_tail(replan, result, queue, allowed_tools, budget_left):
+    """The tail the planner wants instead, or None to keep what is queued.
+
+    Constraints live HERE rather than in the planner's prompt, because a prompt
+    is a request and this is a rule:
+
+      * a replan may not introduce a TOOL the original plan never proposed. That
+        is the rule handoff already enforces, for the same reason — a tool step
+        queues a button the artist never saw in the plan they were shown.
+      * it cannot outspend the turn's remaining budget.
+      * an unusable answer keeps the original tail. "I could not re-plan" and
+        "do less" are different answers and only one of them is safe to assume;
+        silently deleting planned work is exactly the silent drop the rest of
+        this module goes to trouble to avoid.
+    """
+    situation = (f"The step '{result.target}' was REFUSED and its answer is: "
+                 f"{result.says}")
+    remaining = tuple(step for step, _, _ in queue)
+    try:
+        steps = replan(situation, remaining)
+    except Exception:                   # noqa: BLE001 — a port must not break the turn
+        return None
+    if not steps:
+        return None
+    kept = [s for s in steps
+            if s.kind != "tool" or s.target in allowed_tools][:max(budget_left, 0)]
+    return kept or None
+
+
+def run_plan(ctx, plan, replan=None):
+    """Generator: yields (entries, result) for each step actually run, in order.
+
+    Owns the work queue, late binding, handoff and — once per turn — the replan.
+    A handoff-born step spends the SAME budget as a planned one; there is no
+    separate allowance. Never raises.
+
+    `replan` is an injected port, `(situation, remaining_steps) -> steps | None`,
+    so this module keeps knowing nothing about the planner or its LLM."""
+    if not plan.is_actionable():
+        return
+    seq = Seq()
+    queue = [(step, ORCHESTRATOR, False) for step in plan.steps]
+    sources: dict = {}
+    handed_to: set = set()
+    ran = 0
+    replanned = False
+    planned_tools = {step.target for step in plan.steps if step.kind == "tool"}
+    next_id = max((step.id for step in plan.steps), default=0)
+
+    while queue and ran < MAX_PLAN_STEPS:
+        step, asker, is_born = queue.pop(0)
+        entries, result = run_step(ctx, step, seq, sources, asker)
+        if result is None:
+            continue
+        ran += 1
+        sources[step.id] = {"kind": result.kind, "payload": dict(result.payload)}
+
+        # `refusal is None` means nothing was offered — the single place that
+        # decides whether a handoff runs. Do not re-test `result.handoff` here;
+        # that duplicated the decision `_handoff_refusal` already made and let
+        # `if not refusal:` collapse "nothing offered" into "run it".
+        refusal = _handoff_refusal(result, is_born, handed_to, ran + len(queue))
+        if refusal is not None:
+            handoff = result.handoff
+            if refusal:
+                # Dropped, never swallowed: a mechanism nobody can see is a
+                # mechanism nobody can trust.
+                entries.append(_entry(seq, step.target, ORCHESTRATOR, "error",
+                                      f"handoff to {handoff.get('to')!r} not run: "
+                                      f"{refusal}",
+                                      data={"status": "handoff_dropped"}))
+            else:
+                next_id += 1
+                handed_to.add(handoff["to"])
+                queue.append((Step(next_id, handoff["to"], "agent",
+                                   ask=str(handoff.get("why") or "")[:300],
+                                   args=dict(handoff.get("args") or {})),
+                              step.target, True))
+
+        # Observe, then re-plan — once. `refusal is None` means the agent offered
+        # no handoff; when it DID offer one, its own choice of who to ask next
+        # wins and this stays out of the way. Two adaptation mechanisms in one
+        # turn are hard to reason about and harder to test.
+        if (replan is not None and not replanned and queue
+                and result.status == "refused" and refusal is None):
+            replanned = True
+            tail = _replanned_tail(replan, result, queue, planned_tools,
+                                   MAX_PLAN_STEPS - ran)
+            if tail is not None:
+                dropped = len(queue)
+                for i, new_step in enumerate(tail):
+                    next_id += 1
+                    tail[i] = replace(new_step, id=next_id)
+                queue = [(s, ORCHESTRATOR, False) for s in tail]
+                sources = dict(sources)     # a replanned step may not name a
+                                            # step from the plan it replaced
+                entries.append(_entry(
+                    seq, ORCHESTRATOR, ORCHESTRATOR, "replan",
+                    f"{result.target} refused, so the {dropped} remaining step(s) "
+                    f"were replaced by {len(tail)}: "
+                    f"{', '.join(s.target for s in tail)}",
+                    data={"status": "replanned", "dropped": dropped}))
+
+        if ran >= MAX_PLAN_STEPS and queue:
+            # The cap just closed the loop with work still queued (planned steps
+            # beyond MAX_PLAN_STEPS, or a handoff accepted too late to run). The
+            # old `for step in plan.steps` loop ran every step; this cap silently
+            # drops the rest unless it says so here — the same silent-drop this
+            # task went to trouble to avoid for handoffs.
+            entries.append(_entry(seq, ORCHESTRATOR, ORCHESTRATOR, "error",
+                                  f"{len(queue)} step(s) not run: the "
+                                  f"{MAX_PLAN_STEPS}-step budget for this turn "
+                                  "is spent",
+                                  data={"status": "plan_truncated",
+                                       "not_run": len(queue)}))
+        yield entries, result
+
+
+def dispatch(ctx, plan, on_entry=None, replan=None) -> list:
     """Execute `plan` against `ctx`. Returns one StepResult per step, in order.
     Never raises: a handler that explodes becomes an `error` and the plan carries on."""
     results: list = []
-    if not plan.is_actionable():
-        return results
-    seq = Seq()
-    for step in plan.steps:
-        entries, result = run_step(ctx, step, seq)
-        if result is None:
-            continue
+    for entries, result in run_plan(ctx, plan, replan=replan):
         if on_entry is not None:
             for entry in entries:
                 on_entry(entry)

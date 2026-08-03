@@ -172,6 +172,17 @@ def post_rerun(sid: int, request: Request, engines: str | None = Form(None),
     except SessionNotFound as exc:
         raise HTTPException(status_code=404, detail="Unknown session (or no result yet)") from exc
     cfg = state["cfg"]
+    # A re-run REPLACES the frames of a cut the artist already has, so it is a new
+    # revision of that saved session — not a second one. Publishing without a pid
+    # mints a fresh uuid, which put an unasked-for "Untitled session" in History
+    # (visible only after a reload) and left the artist's title behind on the old
+    # row. `/keys`, `/feedback/batch` and the repair route all republish into this
+    # same `published_pid`; they 409 without one because a review revision has
+    # nowhere else to land. A re-run does: with publishing off, or before the
+    # parent's own publish has landed, it still re-renders and simply stays
+    # unpublished, exactly as it did before.
+    published_pid = state.get("published_pid")
+    history_pid = published_pid if isinstance(published_pid, str) and published_pid else None
     return session_runtime.stream_session(
         state["keys"],
         engines if engines is not None else cfg.engines,
@@ -184,6 +195,13 @@ def post_rerun(sid: int, request: Request, engines: str | None = Form(None),
         show=cfg.show,
         repository=sessions,
         owner_sub=request_user_sub(request),
+        history_pid=history_pid,
+        # The parent entry is already complete; the publisher's write is guarded on
+        # that status and would drop the revision if this said "draft".
+        history_pid_is_complete=True,
+        # Without the parent's upload record the republished snapshot falls back to
+        # zero filenames, and the reopened workbench forgets what was uploaded.
+        workspace_input=dict(state.get("workspace_input") or {}),
     )
 
 

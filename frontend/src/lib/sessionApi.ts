@@ -49,6 +49,13 @@ export interface SessionWorkspaceSnapshot {
     answer: string;
     grounded: boolean;
     answered_at: string;
+    /** "ask" for a grounded Q&A turn, "agent" when specialists were involved.
+     *  Absent on sessions saved before agent turns were durable. */
+    kind?: "ask" | "agent";
+    /** Who said what, in order — the planner/triage/perception exchange. */
+    transcript?: Array<Record<string, unknown>>;
+    action?: Record<string, unknown> | null;
+    rejected_tool?: string | null;
   }>;
 }
 
@@ -165,6 +172,35 @@ export async function getMySessionWorkspace(pid: string): Promise<SessionWorkspa
   const value: unknown = await response.json();
   if (!isWorkspaceSnapshot(value)) throw new Error("Invalid session workspace.");
   return value;
+}
+
+export interface ResumeOutcome {
+  /** The live session id, or null when this saved session cannot be resumed. */
+  sid: string | null;
+  /** Why not — shown to the artist instead of a bare read-only banner. */
+  reason: string | null;
+}
+
+/** Turn a saved session back into a working one.
+ *
+ * A refusal is an ANSWER, not a failure: sessions published before their source
+ * keys were durable simply cannot be resumed, and the workbench then stays
+ * read-only with the reason on screen. Only an unexpected status throws.
+ */
+export async function resumeMySession(pid: string): Promise<ResumeOutcome> {
+  const response = await authenticatedFetch(
+    `/session/resume/${encodeURIComponent(pid)}`,
+    { method: "POST" },
+  );
+  if (response.status === 409 || response.status === 404) {
+    const body: unknown = await response.json().catch(() => null);
+    const detail = isRecord(body) && typeof body.detail === "string" ? body.detail : null;
+    return { sid: null, reason: detail ?? "This saved session cannot be reopened for editing." };
+  }
+  if (!response.ok) throw new Error(`Could not reopen this session (${response.status}).`);
+  const value: unknown = await response.json();
+  if (!isRecord(value) || value.sid == null) throw new Error("Invalid resume response.");
+  return { sid: String(value.sid), reason: null };
 }
 
 export async function createMySession(title: string): Promise<PublishedSessionSummary> {

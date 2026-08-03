@@ -75,3 +75,67 @@ def make_worker_editor(base_url: str, timeout_seconds: float):
             ) from exc
 
     return edit
+
+
+def make_worker_span_editor(base_url: str, timeout_seconds: float):
+    """Return span_edit(frames, masks, model, seed, refinement_passes).
+
+    A span that does not come back whole is reported as the worker being
+    unavailable rather than as a partial result: half a repaired span written
+    into a session is the one outcome this feature must never produce. The
+    mismatch carries its own message so it is diagnosable apart from a dead
+    socket, which raises the same class.
+    """
+    endpoint = base_url.rstrip("/") + "/edit-span"
+
+    def span_edit(
+        frames,
+        masks,
+        *,
+        model: str,
+        seed: int,
+        refinement_passes: int,
+    ) -> list[np.ndarray]:
+        payload = {
+            "model": model,
+            "frames": [
+                _png_b64(np.asarray(frame, dtype=np.uint8)) for frame in frames
+            ],
+            "masks": {
+                str(index): _png_b64(
+                    np.asarray(mask, dtype=np.uint8), grayscale=True
+                )
+                for index, mask in masks.items()
+            },
+            "seed": seed,
+            "refinement_passes": refinement_passes,
+        }
+        try:
+            response = _post_json(endpoint, payload, timeout_seconds)
+            if not isinstance(response, dict):
+                raise ValueError("malformed reply")
+            if response.get("model") != model:
+                raise ImageEditUnavailable(
+                    "image-edit worker answered with model "
+                    f"{response.get('model')!r}, not {model!r}"
+                )
+            returned = response.get("frames")
+            if not isinstance(returned, list) or len(returned) != len(payload["frames"]):
+                count = len(returned) if isinstance(returned, list) else 0
+                raise ImageEditUnavailable(
+                    f"image-edit worker returned {count} frames for a span of "
+                    f"{len(payload['frames'])}"
+                )
+            return [_decode_png(item) for item in returned]
+        except ImageEditUnavailable:
+            raise
+        except urllib.error.HTTPError as exc:
+            raise ImageEditUnavailable(
+                f"image-edit worker rejected the span (HTTP {exc.code})"
+            ) from exc
+        except (OSError, TimeoutError, ValueError, TypeError, json.JSONDecodeError) as exc:
+            raise ImageEditUnavailable(
+                "image-edit worker is unavailable or returned invalid data"
+            ) from exc
+
+    return span_edit

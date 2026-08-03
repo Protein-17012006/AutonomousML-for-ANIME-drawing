@@ -159,7 +159,7 @@ def get_workspace(
         for name, basename in result.get("artifacts", {}).items()
         if (url := _workspace_artifact_url(pid, session, basename)) is not None
     }
-    for field in ("pair_mids", "key_urls"):
+    for field in ("pair_mids", "key_urls", "pair_keys"):
         result[field] = {
             index: url
             for index, basename in result.get(field, {}).items()

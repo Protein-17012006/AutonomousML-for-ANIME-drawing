@@ -7,7 +7,7 @@ composition layer.
 from __future__ import annotations
 
 import copy
-from dataclasses import dataclass
+from dataclasses import dataclass, field as dataclasses_field
 from typing import Any, Callable
 
 from service.sessions.presentation import build_render_metadata
@@ -36,6 +36,17 @@ class SessionOutcome:
     sampling: dict
     csq: dict | None
     qa_degraded: bool
+    # The session's own configuration and revision, carried so the publisher can
+    # write a resume block. `sampling` records cadence/smoothness/fps but never
+    # `engines` or the taus, and without those a reopened session cannot be
+    # rebuilt into a working one. Optional: not every producer of an outcome has
+    # them, and a missing block only costs the resume path a derivation.
+    # Overlay urls for GATE-REFUSED pairs (see RenderMetadata.pair_keys).
+    # Defaulted and last: SessionOutcome is built positionally elsewhere, so a
+    # field inserted mid-list silently shifts every argument after it.
+    pair_keys: dict = dataclasses_field(default_factory=dict)
+    cfg: Any = None
+    rev: int = 0
 
 
 class RunSession:
@@ -77,6 +88,18 @@ class RunSession:
             "result": result,
             "rev": 0,
             "explanations": persisted_explanations,
+            # The key-travel overlay for each GATE-REFUSED pair. It was returned
+            # to the client and never persisted, so no agent could see it: asked
+            # "where in the image?", triage answered "there is nothing to point
+            # at" while pair_1_keys.png sat in this very directory.
+            "pair_keys": dict(metadata.pair_keys or {}),
+            # The rendered in-between for each FILLED pair, and the same trap one
+            # line up: it was returned to the client and never persisted, so
+            # `_valid_repairable` — which reads state["pair_mids"], and whose only
+            # other source `PairResult.mid_url` does not exist as a field — was
+            # False for every pair of every session. `image_edit` could be
+            # proposed by the agent and was refused by the server, always.
+            "pair_mids": dict(metadata.pair_mids or {}),
             "qa_degraded": metadata.qa_degraded,
             "sampling": persisted_sampling,
             # per-gap real GT (video flow; None for PNG uploads) — the compare
@@ -90,9 +113,12 @@ class RunSession:
             explanations=metadata.explanations,
             pair_mids=metadata.pair_mids,
             key_urls=metadata.key_urls,
+            pair_keys=metadata.pair_keys,
             sampling=metadata.sampling,
             csq=metadata.csq,
             qa_degraded=metadata.qa_degraded,
+            cfg=cfg,
+            rev=0,
         )
 
     def publish(
@@ -103,10 +129,18 @@ class RunSession:
         *,
         history_pid: str | None = None,
         workspace_input: dict | None = None,
+        update_complete: bool = False,
     ) -> dict:
+        # `update_complete` names the status the target entry is expected to be in:
+        # False completes a DRAFT (the first run of a session the artist created),
+        # True revises an entry that is already complete (a re-run of a finished
+        # cut). The publisher guards the write with that condition, so getting it
+        # wrong does not raise — it returns published=False and the revision is
+        # silently dropped.
         return self.adapters.publish_session(
             sid, session_dir, outcome,
             owner_sub=self.repository.owner_for(sid),
             pid=history_pid,
             workspace_input=workspace_input,
+            update_complete=update_complete,
         ) or {}

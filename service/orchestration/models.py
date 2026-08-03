@@ -48,6 +48,9 @@ class StepResult:
     says: str = ""
     payload: dict = field(default_factory=dict)
     ms: int = 0
+    # An agent may route work it refuses to another agent. Validated in dispatch,
+    # not here: this module is types only.
+    handoff: dict | None = None
 
     def __post_init__(self) -> None:
         if self.status not in STATUSES:

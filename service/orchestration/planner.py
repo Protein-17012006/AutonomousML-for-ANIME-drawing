@@ -17,7 +17,18 @@ _MAX_TURN_CHARS = 400
 _MAX_ASK_CHARS = 300
 
 
-def _prompt(ctx: str, hist: str, goal: str) -> str:
+def _prompt(ctx: str, hist: str, goal: str, situation: str = "") -> str:
+    # A re-plan is the SAME decomposition problem with one more fact in it, so it
+    # reuses this prompt rather than introducing a second one whose rails would
+    # all be new. What it may return is constrained in dispatch.py, not here: a
+    # prompt is a request, and "never queue a tool the artist has not seen" is a
+    # rule.
+    replanning = (
+        "\n\nWHAT HAS ALREADY HAPPENED THIS TURN — you are re-planning only what "
+        "is LEFT. Reply with the steps that should run INSTEAD of the ones still "
+        "queued; an empty list means the rest is no longer worth running.\n"
+        + situation
+    ) if situation else ""
     return (
         "You are the In-Between Co-pilot's ORCHESTRATOR. Decompose the artist's "
         "goal into an ordered plan of steps. Emit NO prose and NO explanation — "
@@ -26,6 +37,14 @@ def _prompt(ctx: str, hist: str, goal: str) -> str:
         "wants a judgement or a diagnosis; call a TOOL when they want an action.\n"
         'An agent may answer "no"; plan the step anyway and let it answer.\n\n'
         + registry.describe_for_prompt() +
+        "\n\nA step's argument may NAME AN EARLIER STEP'S ANSWER instead of a "
+        'literal, written "$<step number>.<output field>" — for example '
+        '{"index": "$1.first_index"}. Use it when you do not know the value yet: '
+        "ask cut_survey first, then point the next step at what it answered. "
+        "Only fields listed under OUTPUTS above exist, and only steps BEFORE this "
+        "one may be named. The named field's value must itself be a single number, "
+        "string, or boolean — never a list or an object — or the step is rejected. "
+        "Prefer a literal whenever the artist already told you the number.\n"
         "\n\nReply STRICT JSON only: "
         '{"steps": [{"target": <name>, "kind": "agent"|"tool", '
         '"ask": <short question, agents only>, "args": <object>}]}\n'
@@ -34,7 +53,7 @@ def _prompt(ctx: str, hist: str, goal: str) -> str:
         "decompose).\n\n"
         "SESSION FACTS:\n" + ctx +
         "\n\nCHAT SO FAR:\n" + (hist or "(none)") +
-        "\n\nARTIST GOAL: " + goal + "\nJSON:"
+        "\n\nARTIST GOAL: " + goal + replanning + "\nJSON:"
     )
 
 
@@ -63,8 +82,12 @@ def _steps_from(doc: dict) -> tuple:
     return tuple(steps)
 
 
-def plan_goal(state: dict, goal: str, history: list, ask_fn) -> Plan:
-    """Decompose `goal` into a Plan. Never raises."""
+def plan_goal(state: dict, goal: str, history: list, ask_fn,
+              situation: str = "") -> Plan:
+    """Decompose `goal` into a Plan. Never raises.
+
+    `situation` re-enters this planner mid-turn, after a specialist refused: the
+    same goal, plus what has happened, asking only for the steps that are left."""
     goal = str(goal or "")[:_MAX_GOAL_CHARS]
     if ask_fn is None:
         return Plan(goal=goal, steps=(), reason="planner unavailable (no LLM configured)")
@@ -73,7 +96,7 @@ def plan_goal(state: dict, goal: str, history: list, ask_fn) -> Plan:
         hist = "\n".join(
             f"{t.get('role', 'user')}: {t.get('text', '')[:_MAX_TURN_CHARS]}"
             for t in (history or [])[-8:])
-        raw = ask_fn(_prompt(ctx, hist, goal))
+        raw = ask_fn(_prompt(ctx, hist, goal, str(situation or "")[:_MAX_GOAL_CHARS]))
     except Exception as exc:            # noqa: BLE001 — by contract this never raises
         return Plan(goal=goal, steps=(), reason=f"planner call failed: {exc}")
 

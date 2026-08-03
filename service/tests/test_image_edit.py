@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import io
+import urllib.error
 
 import numpy as np
 import pytest
@@ -141,6 +142,148 @@ def test_worker_client_fail_closed_on_invalid_reply(monkeypatch):
     editor = image_edit_client.make_worker_editor("http://box:8002", 1)
     with pytest.raises(ImageEditUnavailable):
         editor(source, mask[:, :, 0], "diffueraser", 1)
+
+
+def _span_frames(count: int) -> list[np.ndarray]:
+    return [np.full((8, 8, 3), index * 5, np.uint8) for index in range(count)]
+
+
+def test_span_editor_round_trip_preserves_frame_order(monkeypatch):
+    # The whole point of the span path is that the frames are DISTINCT and in
+    # order. A client that returned them shuffled, or returned the first one N
+    # times, would satisfy a bare count check.
+    seen = {}
+
+    def fake_post(url, payload, timeout):
+        seen.update(url=url, payload=payload, timeout=timeout)
+        returned = [
+            image_edit_client._decode_png(item) for item in payload["frames"]
+        ]
+        return {
+            "model": "diffueraser",
+            "frames": [_png_b64(frame + 1) for frame in returned],
+        }
+
+    monkeypatch.setattr(image_edit_client, "_post_json", fake_post)
+    editor = image_edit_client.make_worker_span_editor("http://box:8002/", 30.0)
+    output = editor(
+        _span_frames(4),
+        {2: np.full((8, 8), 255, np.uint8)},
+        model="diffueraser",
+        seed=11,
+        refinement_passes=3,
+    )
+
+    assert [int(frame[0, 0, 0]) for frame in output] == [1, 6, 11, 16]
+    assert seen["url"] == "http://box:8002/edit-span"
+    assert seen["timeout"] == 30.0
+    assert set(seen["payload"]) == {
+        "model", "frames", "masks", "seed", "refinement_passes",
+    }
+    assert seen["payload"]["seed"] == 11
+    assert seen["payload"]["refinement_passes"] == 3
+    # The worker's SpanEditRequest.masks is dict[str, str]; an int key would be
+    # coerced by json.dumps, so pin the coordinate the client is responsible for.
+    assert list(seen["payload"]["masks"]) == ["2"]
+    with Image.open(
+        io.BytesIO(base64.b64decode(seen["payload"]["masks"]["2"]))
+    ) as sent_mask:
+        assert sent_mask.mode == "L"
+
+
+def test_span_editor_names_a_frame_count_mismatch(monkeypatch):
+    # Half a repaired span written into a session is the one outcome this
+    # feature must never produce, so a short reply is treated as the worker
+    # being unavailable -- but it must SAY so, or it is indistinguishable from
+    # a dead socket and nobody can diagnose it.
+    monkeypatch.setattr(
+        image_edit_client,
+        "_post_json",
+        lambda url, payload, timeout: {"model": "diffueraser", "frames": []},
+    )
+    editor = image_edit_client.make_worker_span_editor("http://box:8002", 5.0)
+    with pytest.raises(ImageEditUnavailable, match="0 frames for a span of 3"):
+        editor(
+            _span_frames(3),
+            {0: np.full((8, 8), 255, np.uint8)},
+            model="diffueraser",
+            seed=1,
+            refinement_passes=1,
+        )
+
+
+def test_span_editor_raises_image_edit_unavailable_when_the_worker_is_down(
+    monkeypatch,
+):
+    def boom(url, payload, timeout):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(image_edit_client, "_post_json", boom)
+    editor = image_edit_client.make_worker_span_editor("http://box:8002", 5.0)
+    with pytest.raises(ImageEditUnavailable, match="unavailable or returned"):
+        editor(
+            _span_frames(1),
+            {0: np.full((8, 8), 255, np.uint8)},
+            model="diffueraser",
+            seed=1,
+            refinement_passes=1,
+        )
+
+
+def test_span_editor_reports_the_status_of_an_http_rejection(monkeypatch):
+    def rejected(url, payload, timeout):
+        raise urllib.error.HTTPError(url, 422, "unprocessable", {}, None)
+
+    monkeypatch.setattr(image_edit_client, "_post_json", rejected)
+    editor = image_edit_client.make_worker_span_editor("http://box:8002", 5.0)
+    with pytest.raises(ImageEditUnavailable, match="HTTP 422"):
+        editor(
+            _span_frames(1),
+            {0: np.full((8, 8), 255, np.uint8)},
+            model="diffueraser",
+            seed=1,
+            refinement_passes=1,
+        )
+
+
+def test_span_editor_refuses_a_model_it_did_not_ask_for(monkeypatch):
+    monkeypatch.setattr(
+        image_edit_client,
+        "_post_json",
+        lambda url, payload, timeout: {
+            "model": "something-else",
+            "frames": [_png_b64(np.zeros((8, 8, 3), np.uint8))],
+        },
+    )
+    editor = image_edit_client.make_worker_span_editor("http://box:8002", 5.0)
+    with pytest.raises(ImageEditUnavailable, match="model"):
+        editor(
+            _span_frames(1),
+            {0: np.full((8, 8), 255, np.uint8)},
+            model="diffueraser",
+            seed=1,
+            refinement_passes=1,
+        )
+
+
+def test_span_editor_fails_closed_on_an_invalid_png(monkeypatch):
+    monkeypatch.setattr(
+        image_edit_client,
+        "_post_json",
+        lambda url, payload, timeout: {
+            "model": "diffueraser",
+            "frames": ["not-base64"],
+        },
+    )
+    editor = image_edit_client.make_worker_span_editor("http://box:8002", 5.0)
+    with pytest.raises(ImageEditUnavailable, match="invalid PNG"):
+        editor(
+            _span_frames(1),
+            {0: np.full((8, 8), 255, np.uint8)},
+            model="diffueraser",
+            seed=1,
+            refinement_passes=1,
+        )
 
 
 class _Lease:

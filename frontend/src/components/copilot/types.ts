@@ -54,6 +54,10 @@ export interface ResultEvent {
   explanations?: Record<string, Explanation>;
   pair_mids?: Record<string, string>;
   key_urls?: Record<string, string>;
+  /** The two keys of a GATE-REFUSED pair overlaid, with the measured region
+   *  marked. Such a pair has no in-between, so this is the only image of it
+   *  that can honestly exist. */
+  pair_keys?: Record<string, string>;
   sampling?: {
     source_frames?: number;
     requested_stride?: number;

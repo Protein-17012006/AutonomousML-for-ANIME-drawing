@@ -32,6 +32,18 @@ def _ask(raw):
     return lambda prompt: raw
 
 
+def _result_stub():
+    from unittest.mock import MagicMock
+    result = MagicMock()
+    result.pairs = []
+    result.n_autopass = 0
+    result.n_corrected = 0
+    result.flagged = []
+    result.abstained = []
+    result.keys_requested_total = 0
+    return result
+
+
 def test_a_three_step_plan_parses():
     raw = """{"steps": [
         {"target": "triage", "kind": "agent", "ask": "why was pair 0 refused?", "args": {"index": 0}},
@@ -124,3 +136,30 @@ def test_a_planner_that_raises_is_contained():
     plan = plan_goal(_state(), "g", [], ask)
     assert plan.steps == ()
     assert plan.reason
+
+
+def test_the_prompt_teaches_the_reference_syntax_with_a_worked_example():
+    from service.orchestration.planner import _prompt
+    text = _prompt("facts", "", "where do I start?")
+    assert "$1.first_index" in text
+    # "cut_survey" alone is already in the registry's agent listing and would
+    # survive deleting this instruction entirely — this phrase is not.
+    assert "ask cut_survey first" in text
+
+
+def test_the_prompt_states_the_reference_must_resolve_to_a_scalar():
+    from service.orchestration.planner import _prompt
+    text = _prompt("facts", "", "where do I start?")
+    assert "never a list or an object" in text
+
+
+def test_a_plan_carrying_a_reference_parses_and_keeps_it_verbatim():
+    from service.orchestration.planner import plan_goal
+    raw = ('{"steps": ['
+           '{"target": "cut_survey", "kind": "agent", "ask": "order it", "args": {}},'
+           '{"target": "triage", "kind": "agent", "ask": "diagnose", '
+           '"args": {"index": "$1.first_index"}}]}')
+    plan = plan_goal({"result": _result_stub(), "chat": []},
+                     "where do I start?", [], lambda _p: raw)
+    assert len(plan.steps) == 2
+    assert plan.steps[1].args == {"index": "$1.first_index"}

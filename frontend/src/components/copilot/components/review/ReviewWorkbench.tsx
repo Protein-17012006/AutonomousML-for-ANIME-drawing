@@ -7,6 +7,7 @@ import { QAPanel } from "./QAPanel";
 import { RunLoader } from "./RunLoader";
 import { ReconPlayer } from "./ReconPlayer";
 import { ComparePlayer } from "./ComparePlayer";
+import { RepairCanvas } from "./RepairCanvas";
 import { FrameCard } from "./FrameCard";
 import { ReviewPairRow } from "./ReviewPairRow";
 import { cn } from "@/lib/utils";
@@ -16,8 +17,9 @@ import { Download, Film, PanelsTopLeft } from "lucide-react";
 type MainFilter = "filled" | "needs_key";
 type FilledFilter = "pass" | "abstain";
 type SelectionSource = "left" | "right";
-// OUTPUT view: the filled cut, or the box-style original-vs-RIFE loop.
-type OutputTab = "recon" | "compare";
+// OUTPUT view: the filled cut, the box-style original-vs-RIFE loop, or the
+// paint surface for repairing the focused pair's generated frame.
+type OutputTab = "recon" | "compare" | "repair";
 
 export function ReviewWorkbench({
   log,
@@ -29,11 +31,15 @@ export function ReviewWorkbench({
   onRefill,
   stagedRefills,
   canEdit,
+  readOnlyReason,
   onSubmitVerdicts,
   onSubmitRefills,
   onDiscardStaged,
+  onRepair,
   fps,
   initialFocus,
+  markPair,
+  repairPair,
 }: {
   log: PairEvent[];
   result: ResultEvent | null;
@@ -44,11 +50,18 @@ export function ReviewWorkbench({
   onRefill: (index: number, file: File) => void;
   stagedRefills: Record<number, { file: File; url: string }>;
   canEdit: boolean;
+  readOnlyReason?: string | null;
   onSubmitVerdicts: () => void;
   onSubmitRefills: () => void;
   onDiscardStaged: () => void;
+  /** Absent on a read-only history session; the Repair tab hides with it. */
+  onRepair?: (pairIndex: number, maskPng: string) => void;
   fps: number;
   initialFocus?: number | null;
+  /** Pair whose burnt-in QA mark the agent was asked to show. */
+  markPair?: { index: number; nonce: number } | null;
+  /** Pair whose paint surface the agent was asked to open. */
+  repairPair?: { index: number; nonce: number } | null;
 }) {
   const [filter, setFilter] = useState<MainFilter>("filled");
   const [filledFilter, setFilledFilter] = useState<FilledFilter>("abstain");
@@ -89,6 +102,7 @@ export function ReviewWorkbench({
   const compareUrl = result?.artifacts?.compare;
   const explanations = result?.explanations;
   const mids = result?.pair_mids;
+  const keyOverlays = result?.pair_keys;
   const loadingPreview = running && !result;
   const reconFailed = video != null && failedReconUrl === video;
   const compareFailed = compareUrl != null && failedCompareUrl === compareUrl;
@@ -96,6 +110,14 @@ export function ReviewWorkbench({
     focused != null && shown.some((pair) => pair.index === focused)
       ? focused
       : (shown[0]?.index ?? null);
+  // Keyed off selectedIndex, NOT `focused`: `focused` is null until the artist
+  // clicks a row, so gating on it hid the Repair tab on exactly the common case
+  // of opening the board and going straight to the output.
+  // A needs_key pair was refused before interpolation and has no generated frame
+  // to paint on, so it has no entry here and the tab correctly stays hidden.
+  const repairFrameUrl =
+    selectedIndex != null && mids ? (mids[String(selectedIndex)] ?? null) : null;
+  const canRepair = Boolean(canEdit && onRepair && repairFrameUrl && !running);
   // Pair events arrive before the rendered result. Keep the QA panel aligned
   // with both review columns: before that result boundary there is no reviewable
   // pair, even though the progress log already contains entries.
@@ -112,6 +134,55 @@ export function ReviewWorkbench({
     const frame = requestAnimationFrame(() => setFocused(initialFocus));
     return () => cancelAnimationFrame(frame);
   }, [initialFocus]);
+
+  // Which pairs are showing the burnt-in QA mark instead of the clean
+  // in-between. A set, not one index: the artist can leave several open while
+  // comparing, and the agent's "show the marked image" only adds to it.
+  const [markedPairs, setMarkedPairs] = useState<Set<number>>(new Set());
+  const toggleMarked = (index: number) =>
+    setMarkedPairs((current) => {
+      const next = new Set(current);
+      if (!next.delete(index)) next.add(index);
+      return next;
+    });
+  // Adjusted during render rather than in an effect (React's own "adjusting
+  // state when a prop changes" pattern) — an effect here fires a second render
+  // pass and shows the clean frame for one frame first. Keyed by the NONCE, not
+  // the index: asking for the same pair again after toggling the mark off has to
+  // turn it back on, and an unchanged index would look like nothing happened.
+  const [seenMarkNonce, setSeenMarkNonce] = useState<number | null>(null);
+  if (markPair && markPair.nonce !== seenMarkNonce) {
+    setSeenMarkNonce(markPair.nonce);
+    setMarkedPairs((current) =>
+      current.has(markPair.index) ? current : new Set(current).add(markPair.index));
+  }
+
+  // Same render-time adjustment and same nonce reasoning as markPair above.
+  //
+  // The filter switch is not optional. `shown` defaults to the ABSTAIN queue
+  // (see the useMemo above), so on a run where every pair passed — which is
+  // exactly what a clean cut produces — `shown` is empty, `selectedIndex` falls
+  // back to null, `repairFrameUrl` is null and `canRepair` is false. Focusing
+  // the pair without moving the filter would reproduce the very defect this
+  // change exists to fix: a confirmed action that does nothing visible.
+  const [seenRepairNonce, setSeenRepairNonce] = useState<number | null>(null);
+  if (repairPair && repairPair.nonce !== seenRepairNonce) {
+    setSeenRepairNonce(repairPair.nonce);
+    setFocused(repairPair.index);
+    setFilter("filled");
+    setFilledFilter(
+      passed.some((pair) => pair.index === repairPair.index) ? "pass" : "abstain",
+    );
+    // THREE pieces of state, and every one of them is load-bearing. The paint
+    // surface lives inside the `reconOpen` branch below, so setting outTab alone
+    // selects a tab on a panel that is not on screen: the artist confirmed
+    // "Repair a frame", the chat said "Opened the paint surface", the board
+    // focused the right pair — and there was no paint surface anywhere.
+    // Selecting a leaf without opening its container is the same defect as
+    // focusing a pair the filter hides, one level up.
+    setReconOpen(true);
+    setOutTab("repair");
+  }
 
   const scrollPair = (container: HTMLElement | null, index: number) => {
     container
@@ -276,7 +347,7 @@ export function ReviewWorkbench({
             <div className={cn("recon-output", compareUrl && "is-tabbed")}>
               {/* the compare loop only exists once the server rendered one, so
                   the switch appears with it rather than sitting dead */}
-              {compareUrl && (
+              {(compareUrl || canRepair) && (
                 <div
                   className="recon-mode-tabs review-subfilters"
                   role="tablist"
@@ -292,20 +363,47 @@ export function ReviewWorkbench({
                   >
                     Reconstructed
                   </Button>
-                  <Button
-                    variant="ghost"
-                    type="button"
-                    role="tab"
-                    aria-selected={outTab === "compare"}
-                    className={cn(outTab === "compare" && "is-active")}
-                    onClick={() => setOutTab("compare")}
-                  >
-                    Original vs RIFE
-                  </Button>
+                  {compareUrl && (
+                    <Button
+                      variant="ghost"
+                      type="button"
+                      role="tab"
+                      aria-selected={outTab === "compare"}
+                      className={cn(outTab === "compare" && "is-active")}
+                      onClick={() => setOutTab("compare")}
+                    >
+                      Original vs RIFE
+                    </Button>
+                  )}
+                  {canRepair && (
+                    <Button
+                      variant="ghost"
+                      type="button"
+                      role="tab"
+                      aria-selected={outTab === "repair"}
+                      className={cn(outTab === "repair" && "is-active")}
+                      onClick={() => setOutTab("repair")}
+                    >
+                      Repair pair {selectedIndex}
+                    </Button>
+                  )}
                 </div>
               )}
               <div className="recon-media">
-                {compareUrl && outTab === "compare" ? (
+                {outTab === "repair" && canRepair ? (
+                  <RepairCanvas
+                    // Remount on a pair change: a canvas carrying the previous
+                    // pair's strokes would submit them against this frame.
+                    key={`${selectedIndex}-${repairFrameUrl}`}
+                    frameUrl={repairFrameUrl!}
+                    disabled={running}
+                    onSubmit={(maskPng) => {
+                      onRepair!(selectedIndex!, maskPng);
+                      setOutTab("recon");
+                    }}
+                    onCancel={() => setOutTab("recon")}
+                  />
+                ) : compareUrl && outTab === "compare" ? (
                   compareFailed ? (
                     <RunLoader message="The comparison could not be played. Try reopening the preview." />
                   ) : (
@@ -365,7 +463,14 @@ export function ReviewWorkbench({
             )}
             {!running && (
               <div className="review-submit">
-                {!canEdit ? <p className="review-readonly">This saved session is read-only.</p> : filter === "needs_key" ? (
+                {!canEdit ? (
+                  // A reopened session normally resumes; when it cannot, the
+                  // service says why, and that reason beats a bare "read-only"
+                  // the artist can only guess at.
+                  <p className="review-readonly">
+                    {readOnlyReason ?? "This saved session is read-only."}
+                  </p>
+                ) : filter === "needs_key" ? (
                   <>
                     <Button type="button" onClick={onSubmitRefills} disabled={gaps.length === 0 || gaps.some((pair) => !stagedRefills[pair.index])}>
                       Submit replacement keys
@@ -399,9 +504,12 @@ export function ReviewWorkbench({
                     a={keyUrls[pair.index]}
                     b={keyUrls[pair.index + 1]}
                     mid={pair.mid_url ?? mids?.[String(pair.index)]}
+                    keyOverlay={keyOverlays?.[String(pair.index)]}
                     ex={explanations?.[String(pair.index)]}
                     i={index}
                     focused={selectedIndex === pair.index}
+                    marked={markedPairs.has(pair.index)}
+                    onToggleMarked={toggleMarked}
                     onFocus={() => selectPair(pair.index, "right")}
                     onRefill={(index, file) => { if (canEdit) onRefill(index, file); }}
                     pendingKeyUrl={stagedRefills[pair.index]?.url}

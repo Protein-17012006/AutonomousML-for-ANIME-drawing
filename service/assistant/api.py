@@ -14,7 +14,10 @@ from service.core.auth import CurrentUser, require_current_user
 from service.core.config import AgentRateLimitSettings
 from service.memory.dependencies import memory_store_for
 from service.session_history.adapters import TranscriptStoreError
-from service.session_history.dependencies import get_history_transcripts
+from service.session_history.dependencies import (
+    get_history_transcripts,
+    get_optional_history_transcripts,
+)
 from service.sessions.repository import SessionRepository
 from service.sessions.http_dependencies import get_session_repository
 
@@ -144,14 +147,50 @@ def post_ask(
     return {**answer, "turn": turn.model_dump()}
 
 
+def record_turn(transcripts, state: dict, question: str, output: dict,
+                *, owner_sub: str | None, kind: str = "agent", entries=None) -> None:
+    """Persist one agent turn to the durable transcript. BEST EFFORT.
+
+    `/ask` refuses with 503 when it cannot store a turn, and that is right: it
+    has not answered yet. Here the answer already exists — and in the streaming
+    routes has already been sent — so failing now would turn a good answer into
+    an error and lose it anyway. A dropped turn costs the artist the record of
+    the conversation, not the conversation itself.
+    """
+    if transcripts is None:
+        return
+    pid = (state or {}).get("published_pid")
+    if not isinstance(pid, str) or not pid or not owner_sub:
+        # Not published yet, or no recorded owner: there is nothing to attach the
+        # turn to. The owner comes from the REPOSITORY, not from state — state
+        # never carried it, and passing None here made append_turn refuse every
+        # write while this function swallowed the error.
+        return
+    try:
+        transcripts.append_turn(
+            pid, owner_sub,
+            question=question,
+            answer=str((output or {}).get("say") or ""),
+            grounded=True,
+            kind=kind,
+            transcript=entries or [],
+            action=(output or {}).get("action"),
+            rejected_tool=(output or {}).get("rejected_tool"),
+        )
+    except Exception as exc:        # noqa: BLE001 - deliberately swallowed
+        print(f"[transcript] could not persist an agent turn: {exc}", flush=True)
+
+
 @router.post("/session/{sid}/agent")
 def post_agent(sid: int, req: AgentReq, request: Request,
-               sessions: SessionRepository = Depends(get_session_repository)):
+               sessions: SessionRepository = Depends(get_session_repository),
+               transcripts=Depends(get_optional_history_transcripts)):
     if sessions.state_for(sid) is None:
         raise HTTPException(status_code=404, detail="Unknown session (or no result yet)")
     if not _agent_rate_ok(request, sid):
         raise HTTPException(status_code=429, detail="Agent rate limit reached; retry shortly")
     from service.assistant.agent import append_chat, decide_agent
+    from service.assistant.delegation import resolve_specialist
     from service.infrastructure.director_llm import make_ask_fn
 
     try:
@@ -168,19 +207,26 @@ def post_agent(sid: int, req: AgentReq, request: Request,
                 if not chat or chat[-1]["role"] != "user":
                     raise HTTPException(
                         status_code=422, detail="Nothing to regenerate yet")
+                ask_fn, memories = make_ask_fn(), _user_memories(request)
                 output = decide_agent(
-                    state, chat[-1]["text"], chat[:-1], make_ask_fn(),
-                    _user_memories(request),
-                )
+                    state, chat[-1]["text"], chat[:-1], ask_fn, memories)
+                output = resolve_specialist(state, chat[-1]["text"], output,
+                                            ask_fn, memories, chat[:-1])
                 append_chat(state, "assistant", output["say"])
                 sessions.save_state(sid, state)
+                record_turn(transcripts, state, chat[-1]["text"], output,
+                            owner_sub=sessions.owner_for(sid))
                 return output
 
-            output = decide_agent(
-                state, req.message, chat, make_ask_fn(), _user_memories(request))
+            ask_fn, memories = make_ask_fn(), _user_memories(request)
+            output = decide_agent(state, req.message, chat, ask_fn, memories)
+            output = resolve_specialist(state, req.message, output, ask_fn,
+                                        memories, chat)
             append_chat(state, "user", req.message)
             append_chat(state, "assistant", output["say"])
             sessions.save_state(sid, state)
+            record_turn(transcripts, state, req.message, output,
+                        owner_sub=sessions.owner_for(sid))
             return output
     except KeyError as exc:
         raise HTTPException(
@@ -189,7 +235,8 @@ def post_agent(sid: int, req: AgentReq, request: Request,
 
 @router.post("/session/{sid}/agent/stream")
 def post_agent_stream(sid: int, req: AgentReq, request: Request,
-                      sessions: SessionRepository = Depends(get_session_repository)):
+                      sessions: SessionRepository = Depends(get_session_repository),
+                      transcripts=Depends(get_optional_history_transcripts)):
     stored = sessions.state_for(sid)
     if stored is None:
         raise HTTPException(status_code=404, detail="Unknown session (or no result yet)")
@@ -262,6 +309,9 @@ def post_agent_stream(sid: int, req: AgentReq, request: Request,
                 "data: {\"message\": \"could not persist chat; retry\"}\n\n"
             )
             return
+
+        record_turn(transcripts, updated, message, final or {},
+                    owner_sub=sessions.owner_for(sid))
 
         if decision_event is not None:
             yield (

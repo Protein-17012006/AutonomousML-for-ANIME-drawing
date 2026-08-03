@@ -30,10 +30,12 @@ def build_key_plan(gaps: list[float], regimes: list[str], *,
     pairs: list[PairPlan] = []
     for i, (g, r) in enumerate(zip(gaps, regimes)):
         if g < tau_gate:
-            pairs.append(PairPlan(index=i, gap=g, regime=r, action=PlanAction.FILL, keys_to_request=0))
+            pairs.append(PairPlan(index=i, gap=g, regime=r, action=PlanAction.FILL,
+                                  keys_to_request=0, tau_gate=tau_gate))
         else:
             pairs.append(PairPlan(index=i, gap=g, regime=r, action=PlanAction.NEEDS_KEY,
-                                  keys_to_request=int(keys_needed_fn(g))))
+                                  keys_to_request=int(keys_needed_fn(g)),
+                                  tau_gate=tau_gate))
     total = sum(p.keys_to_request for p in pairs)
     n_fillable = sum(1 for p in pairs if p.action == PlanAction.FILL)
     return KeyPlan(pairs=pairs, total_keys_requested=total, n_fillable=n_fillable)

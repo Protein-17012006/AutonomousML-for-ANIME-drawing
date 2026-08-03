@@ -184,6 +184,45 @@ export async function submitReplacementKeys(
   }
 }
 
+/** Submit painted masks for one pair and stream the repair revision.
+ *
+ * `stopAfterResult` for the same reason the other two revision submitters use
+ * it: the repair's result event is emitted only once the durable revision has
+ * committed, so a transport close afterwards must not overwrite that success
+ * with a browser network error. */
+export async function submitRepair(
+  sid: string,
+  pairIndex: number,
+  masks: { frame: number; png: string }[],
+  h: SessionHandlers,
+  refinementPasses = 1,
+): Promise<void> {
+  try {
+    const resp = await authenticatedFetch(
+      `/session/${sid}/pair/${pairIndex}/repair`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ masks, refinement_passes: refinementPasses }),
+      },
+    );
+    if (!resp.ok || !resp.body) {
+      // The service names which rule refused a 422; showing its own sentence
+      // beats a status code the artist cannot act on.
+      let detail = "";
+      try {
+        const body = await resp.clone().json();
+        if (isRecord(body) && typeof body.detail === "string") detail = body.detail;
+      } catch { /* not a JSON body */ }
+      h.onError(detail || `Repair failed: ${resp.status}`);
+      return;
+    }
+    await pumpSSE(resp.body, h, { stopAfterResult: true });
+  } catch (error) {
+    h.onError(error instanceof Error ? `Repair failed: ${error.message}` : "Repair failed.");
+  }
+}
+
 /** POST keyframes, stream the SSE decision-log, dispatch each event to handlers. */
 export async function runSession(
   files: File[],
@@ -289,7 +328,8 @@ export type AgentToolName =
   | "open_board"
   | "export_bundle"
   | "rerun_session"
-  | "remember_memory";
+  | "remember_memory"
+  | "image_edit";
 
 export interface AgentAction {
   tool: AgentToolName;
@@ -317,6 +357,12 @@ export interface AgentReply {
   plan_reason?: string;
 }
 
+// This list is the REAL gate on whether a proposal reaches the artist: asAction
+// below returns null for anything absent here, and `rejected_tool` is only set
+// when the SERVER refuses — so a tool missing from this array produces no card,
+// no button and no refusal line. The agent's sentence describes an action that
+// has silently ceased to exist. `image_edit` was missing here, which is why it
+// never reached the executor switch at all.
 const TOOL_NAMES: AgentToolName[] = [
   "explain_pair",
   "show_annotated",
@@ -324,6 +370,7 @@ const TOOL_NAMES: AgentToolName[] = [
   "export_bundle",
   "rerun_session",
   "remember_memory",
+  "image_edit",
 ];
 
 function asAction(value: unknown): AgentAction | null {

@@ -360,7 +360,14 @@ def test_workspace_hydrates_the_versioned_qa_transcript(history_runtime):
 
     response = _login("user-a").get("/sessions/snapshot/workspace")
     assert response.status_code == 200
-    assert response.json()["qa"] == transcript["turns"]
+    served = response.json()["qa"]
+    stored_fields = set(transcript["turns"][0])
+    assert [{k: v for k, v in turn.items() if k in stored_fields}
+            for turn in served] == transcript["turns"]
+    # A turn saved before agent turns became durable must come back as a plain
+    # Q&A turn, not as an agent turn with an empty exchange.
+    assert served[0]["kind"] == "ask"
+    assert served[0]["transcript"] == [] and served[0]["action"] is None
 
 
 def test_transcript_turns_are_versioned_and_owned(history_runtime):

@@ -33,7 +33,12 @@ class CorrectionCommands:
         return CommandOutcome(self.refill_fn(frames, a, b, action.region))
 
     def _escalate(self, action, frames, a, b) -> CommandOutcome:
-        return CommandOutcome(self.escalate_fn(a, b))
+        # None means "there is no stronger generator here". Keep what we have:
+        # this branch used to adopt whatever came back, and with no generative
+        # stage [C] in production that was `[a, a, b]` — the in-between replaced
+        # by a copy of key A. Measured live 2026-08-03 on four pairs at once.
+        stronger = self.escalate_fn(a, b)
+        return CommandOutcome(frames if stronger is None else stronger)
 
     def _ask_key(self, action, frames, a, b) -> CommandOutcome:
         middle = self.askkey_fn(a, b)

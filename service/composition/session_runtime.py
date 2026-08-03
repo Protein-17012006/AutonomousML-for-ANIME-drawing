@@ -7,12 +7,18 @@ from service.infrastructure.admission import engine_admission
 from service.infrastructure.engines import resolve
 from service.infrastructure.publisher import publish_session
 from service.media.artifacts import save_pair_mid
-from service.media.ingest import _load_frames_from_video, _load_keys, load_image_upload
+from service.media.ingest import (
+    _load_frames_from_video,
+    _load_keys,
+    load_image_upload,
+    load_stored_keys,
+)
 from service.media.rendering import render_session_artifacts
 from service.review.http_dependencies import ReviewHttpRuntime
 from service.review.service import ReviewSession
 from service.sessions.http_dependencies import SessionHttpRuntime
 from service.sessions.repository import SessionRepository
+from service.sessions.resume import ResumeSession
 from service.sessions.runner import run_session
 from service.sessions.service import RunSession, SessionWorkflowAdapters
 from service.sessions.streaming import SessionStreamPorts, stream_session
@@ -42,6 +48,8 @@ def build_session_http_runtime() -> SessionHttpRuntime:
         load_keys=_load_keys,
         load_video_keys=_load_frames_from_video,
         stream_session=partial(stream_session, ports=ports),
+        load_stored_keys=load_stored_keys,
+        resume_for=lambda repository: ResumeSession(repository, resolve),
     )
 
 

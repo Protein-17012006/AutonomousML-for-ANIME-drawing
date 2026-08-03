@@ -30,6 +30,12 @@ class PairResult:
     # Artist decision is deliberately separate from the calibrated QA result.
     # A later key submission re-runs QA and clears this live-only review state.
     artist_verdict: str | None = None
+    # The number the gate compared against tau_gate — for EVERY pair, not only
+    # refused ones. An accepted pair's gap used to be computed in run_copilot and
+    # discarded, so two pairs could not be compared at all ("pair 5's gap looks
+    # bigger and it was not refused" had no answer). Defaulted and LAST on
+    # purpose: PairResult is constructed positionally across the repo and tests.
+    gap: float | None = None
 
     def __post_init__(self) -> None:
         self.action = PairAction(self.action)

@@ -14,6 +14,12 @@ import numpy as np
 from PIL import Image
 
 from service.core.errors import InvalidGapIndex, InvalidKeyImage, SessionNotFound
+from service.image_edit.session_repair import (
+    qa_blast_radius,
+    repair_frames,
+    rerun_qa,
+    validate_repair_request,
+)
 from service.sessions.presentation import build_render_metadata
 from service.sessions.repository import SessionRepository
 from service.sessions.runner import recompute_result, run_session
@@ -170,6 +176,10 @@ class ReviewSession:
                 "keys": new_keys,
                 "result": new_result,
                 "gt_frames": new_gt,
+                # This ran the pipeline, so the frames a reopened session lacked
+                # now exist. Leaving the flag set would refuse repair forever on
+                # a session that is no longer missing anything.
+                "resumed": False,
                 "explanations": copy.deepcopy(metadata.explanations),
                 "qa_degraded": metadata.qa_degraded,
                 "sampling": dict(metadata.sampling),
@@ -201,10 +211,103 @@ class ReviewSession:
             explanations=metadata.explanations,
             pair_mids=metadata.pair_mids,
             key_urls=metadata.key_urls,
+            pair_keys=metadata.pair_keys,
             sampling=metadata.sampling,
             csq=metadata.csq,
             qa_degraded=metadata.qa_degraded,
+            cfg=cfg,
+            rev=revision,
         )
+
+    def repair_pair(self, sid: int, index: int, masks, *, span_editor,
+                    model: str = "diffueraser", seed: int = 2026,
+                    refinement_passes: int = 1,
+                    cancelled: Callable[[], bool] | None = None) -> SessionOutcome:
+        """Repair one pair's painted frames and commit it as one revision.
+
+        Shaped like :meth:`apply_verdicts` on purpose: repaired pixels, the
+        re-run calibrated verdict and the cleared ``artist_verdict`` install
+        together or not at all. Publishing to the durable store without this
+        local commit would leave a reopened session showing the old frames.
+        """
+        with self.repository.session_transaction(sid):
+            if cancelled and cancelled():
+                raise RuntimeError("Repair was cancelled")
+            state = self.state(sid)
+            decoded = validate_repair_request(
+                state, index, masks, refinement_passes)
+
+            # Everything expensive happens before anything is installed: the
+            # GPU repair, then QA. A failure in either leaves live state and the
+            # artifact directory exactly as they were.
+            frames = repair_frames(
+                state, index, decoded, span_editor=span_editor,
+                model=model, seed=seed, refinement_passes=refinement_passes,
+            )
+
+            result = copy.deepcopy(state["result"])
+            by_index = {pair.index: pair for pair in result.pairs}
+            by_index[index].frames = frames
+            by_index[index].artist_verdict = None
+
+            eng, cfg = state["eng"], state["cfg"]
+            affected = qa_blast_radius(
+                result.pairs, index, qa_window=getattr(eng, "qa_window", False))
+            verdicts = rerun_qa(
+                result.pairs, affected,
+                qa_fn=eng.qa_fn, softness_fn=eng.softness_fn,
+                qa3_fn=getattr(eng, "qa3_fn", None), tau_soft=cfg.tau_soft,
+                qa_window=getattr(eng, "qa_window", False),
+            )
+            for pair_index, verdict in verdicts.items():
+                by_index[pair_index].qa = verdict
+            new_result = recompute_result(result.pairs)
+
+            session_path = self.artifact_dir(sid)
+            stage_path = pathlib.Path(tempfile.mkdtemp(
+                prefix=f".{session_path.name}.repair-", dir=session_path.parent))
+            try:
+                rendered = self.render_artifacts(
+                    new_result, state["keys"], str(stage_path),
+                    cadence_fps=cfg.cadence_fps, smoothness=cfg.smoothness,
+                    output_fps=cfg.fps, mid_engine=eng.rife_engine,
+                    vlm_struct_fn=eng.vlm_struct_fn, softness_fn=eng.softness_fn,
+                    gt_frames=state.get("gt_frames"))
+                revision = state.get("rev", 0) + 1
+                metadata = build_render_metadata(
+                    sid, rendered, cfg, eng, base_sampling=state.get("sampling"),
+                    revision=revision)
+                if cancelled and cancelled():
+                    raise RuntimeError("Repair was cancelled")
+                backup_path = session_path.with_name(
+                    f".{session_path.name}.backup-{uuid.uuid4().hex}")
+                session_path.rename(backup_path)
+                try:
+                    stage_path.rename(session_path)
+                except Exception:
+                    backup_path.rename(session_path)
+                    raise
+                try:
+                    self.repository.save_state(sid, {
+                        **state, "result": new_result,
+                        "explanations": copy.deepcopy(metadata.explanations),
+                        "qa_degraded": metadata.qa_degraded,
+                        "sampling": dict(metadata.sampling), "rev": revision})
+                except Exception:
+                    failed_path = session_path.with_name(
+                        f".{session_path.name}.failed-{uuid.uuid4().hex}")
+                    session_path.rename(failed_path)
+                    backup_path.rename(session_path)
+                    shutil.rmtree(failed_path, ignore_errors=True)
+                    raise
+                shutil.rmtree(backup_path, ignore_errors=True)
+            except Exception:
+                shutil.rmtree(stage_path, ignore_errors=True)
+                raise
+            return SessionOutcome(
+                new_result, sid, metadata.artifact_urls, metadata.explanations,
+                metadata.pair_mids, metadata.key_urls, metadata.sampling,
+                metadata.csq, metadata.qa_degraded)
 
     def apply_verdicts(self, sid: int, verdicts: dict[int, str],
                        *, cancelled: Callable[[], bool] | None = None) -> SessionOutcome:
