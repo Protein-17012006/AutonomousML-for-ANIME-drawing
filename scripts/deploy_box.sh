@@ -40,8 +40,15 @@ if command -v rsync >/dev/null 2>&1; then
         --exclude='suites/' --exclude='results/' \
         "${PATHS[@]}" "${DEST}:${BOX_DIR}/"
 else
-  echo "   (rsync not found, falling back to scp -r)"
-  scp -r "${PATHS[@]}" "${DEST}:${BOX_DIR}/"
+  # `scp -r` cannot exclude anything, so it shipped benchmark/suites + results —
+  # the 1.3 GB of PNGs the rsync branch above deliberately skips. On 2026-08-03
+  # that reset the connection mid-transfer and the deploy died before --restart,
+  # leaving the box serving code from before the copy. tar-over-ssh takes the
+  # same exclusions as rsync, so both paths ship the same tree.
+  echo "   (rsync not found, falling back to tar over ssh)"
+  tar czf - --exclude='__pycache__' --exclude='*.pyc' \
+      --exclude='benchmark/suites' --exclude='benchmark/results' \
+      "${PATHS[@]}" | ssh "${DEST}" "mkdir -p ${BOX_DIR} && tar xzf - -C ${BOX_DIR}"
 fi
 
 if [[ "${1:-}" == "--restart" ]]; then
