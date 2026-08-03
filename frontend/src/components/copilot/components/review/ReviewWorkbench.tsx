@@ -39,6 +39,7 @@ export function ReviewWorkbench({
   fps,
   initialFocus,
   markPair,
+  repairPair,
 }: {
   log: PairEvent[];
   result: ResultEvent | null;
@@ -59,6 +60,8 @@ export function ReviewWorkbench({
   initialFocus?: number | null;
   /** Pair whose burnt-in QA mark the agent was asked to show. */
   markPair?: { index: number; nonce: number } | null;
+  /** Pair whose paint surface the agent was asked to open. */
+  repairPair?: { index: number; nonce: number } | null;
 }) {
   const [filter, setFilter] = useState<MainFilter>("filled");
   const [filledFilter, setFilledFilter] = useState<FilledFilter>("abstain");
@@ -152,6 +155,25 @@ export function ReviewWorkbench({
     setSeenMarkNonce(markPair.nonce);
     setMarkedPairs((current) =>
       current.has(markPair.index) ? current : new Set(current).add(markPair.index));
+  }
+
+  // Same render-time adjustment and same nonce reasoning as markPair above.
+  //
+  // The filter switch is not optional. `shown` defaults to the ABSTAIN queue
+  // (see the useMemo above), so on a run where every pair passed — which is
+  // exactly what a clean cut produces — `shown` is empty, `selectedIndex` falls
+  // back to null, `repairFrameUrl` is null and `canRepair` is false. Focusing
+  // the pair without moving the filter would reproduce the very defect this
+  // change exists to fix: a confirmed action that does nothing visible.
+  const [seenRepairNonce, setSeenRepairNonce] = useState<number | null>(null);
+  if (repairPair && repairPair.nonce !== seenRepairNonce) {
+    setSeenRepairNonce(repairPair.nonce);
+    setFocused(repairPair.index);
+    setFilter("filled");
+    setFilledFilter(
+      passed.some((pair) => pair.index === repairPair.index) ? "pass" : "abstain",
+    );
+    setOutTab("repair");
   }
 
   const scrollPair = (container: HTMLElement | null, index: number) => {

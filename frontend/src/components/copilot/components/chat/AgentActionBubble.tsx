@@ -35,6 +35,8 @@ function describe(action: AgentAction): string {
     }
     case "remember_memory":
       return `Remember for future sessions — ${String(args.key)}: ${String(args.value)}.`;
+    case "image_edit":
+      return `Open pair ${args.index} so you can paint over the region that is wrong. You choose the region — the co-pilot never picks it for you.`;
     default:
       return action.label;
   }

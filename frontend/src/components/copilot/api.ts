@@ -328,7 +328,8 @@ export type AgentToolName =
   | "open_board"
   | "export_bundle"
   | "rerun_session"
-  | "remember_memory";
+  | "remember_memory"
+  | "image_edit";
 
 export interface AgentAction {
   tool: AgentToolName;
@@ -356,6 +357,12 @@ export interface AgentReply {
   plan_reason?: string;
 }
 
+// This list is the REAL gate on whether a proposal reaches the artist: asAction
+// below returns null for anything absent here, and `rejected_tool` is only set
+// when the SERVER refuses — so a tool missing from this array produces no card,
+// no button and no refusal line. The agent's sentence describes an action that
+// has silently ceased to exist. `image_edit` was missing here, which is why it
+// never reached the executor switch at all.
 const TOOL_NAMES: AgentToolName[] = [
   "explain_pair",
   "show_annotated",
@@ -363,6 +370,7 @@ const TOOL_NAMES: AgentToolName[] = [
   "export_bundle",
   "rerun_session",
   "remember_memory",
+  "image_edit",
 ];
 
 function asAction(value: unknown): AgentAction | null {

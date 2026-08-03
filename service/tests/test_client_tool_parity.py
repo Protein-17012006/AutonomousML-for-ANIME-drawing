@@ -36,3 +36,43 @@ def test_the_executor_switch_has_a_default_branch(executor_source: str):
         "acceptAction's switch has no `default:`; a server tool with no client "
         "case will silently do nothing when the artist confirms it"
     )
+
+
+def test_every_server_tool_has_a_client_case(executor_source: str):
+    from service.assistant.agent import TOOLS
+
+    missing = [name for name in TOOLS
+               if not re.search(rf'case\s+"{re.escape(name)}"\s*:', executor_source)]
+    assert not missing, (
+        f"registered on the server with no client case: {missing}. The artist gets "
+        f"a Confirm button that reaches the default branch and reports failure."
+    )
+
+
+def test_every_server_tool_survives_the_client_parser():
+    """`TOOL_NAMES` is the real gate, and it fails EARLIER and more quietly.
+
+    `asAction` (api.ts) returns null for a tool absent from this array, and
+    `rejected_tool` is only set when the SERVER refuses — so a missing name
+    yields no card, no button and no refusal line at all, while the agent's
+    reply still describes the action. A `case` in the executor is unreachable
+    dead code without this list.
+    """
+    from service.assistant.agent import TOOLS
+
+    api = _REPO / "frontend" / "src" / "components" / "copilot" / "api.ts"
+    if not api.exists():
+        pytest.skip(f"canonical frontend not present at {api}")
+    source = api.read_text(encoding="utf-8")
+    # Anchor on the "= [" that opens the array, not on the declaration: the type
+    # annotation `AgentToolName[]` contains a `]` and truncated the slice to
+    # nothing, which made this test fail listing every tool as missing.
+    decl = source.index("const TOOL_NAMES")
+    open_bracket = source.index("[", source.index("=", decl))
+    block = source[open_bracket:source.index("]", open_bracket)]
+
+    missing = [name for name in TOOLS if f'"{name}"' not in block]
+    assert not missing, (
+        f"absent from TOOL_NAMES, so the client drops the proposal before it can "
+        f"be rendered: {missing}"
+    )

@@ -172,6 +172,8 @@ export default function App() {
   // a second request for the SAME pair a distinct event, so asking again after
   // the artist toggled the mark off turns it back on.
   const [boardMark, setBoardMark] = useState<{ index: number; nonce: number } | null>(null);
+  // Pair whose paint surface an accepted `image_edit` proposal asked to open.
+  const [boardRepair, setBoardRepair] = useState<{ index: number; nonce: number } | null>(null);
   const [upload, setUpload] = useState<UserTurn | null>(null);
   const [qaTurns, setQaTurns] = useState<QaTurn[]>([]);
   const [actionBusy, setActionBusy] = useState(false);
@@ -1100,6 +1102,24 @@ export default function App() {
           await rememberMemory(action.args);
           noteTurn(turn, { actionDone: true, actionNote: "Saved for next time." });
           break;
+        case "image_edit":
+          if (index === null) throw new Error("That pair is no longer available.");
+          // The server's `_valid_repairable` already refused a needs_key pair and
+          // one with no rendered mid, so what arrives here has a frame to paint
+          // on. What the server cannot see is whether THIS client can still write
+          // to the session: a reopened read-only session renders the same button.
+          if (!liveSid || !durablePid)
+            throw new Error(
+              "This session is read-only, so it cannot be repaired. Re-run it to make changes.",
+            );
+          setBoardFocus(index);
+          setBoardRepair({ index, nonce: Date.now() });
+          setView("board");
+          noteTurn(turn, {
+            actionDone: true,
+            actionNote: `Opened the paint surface for pair ${index}. Paint over the region that is wrong, then send it.`,
+          });
+          break;
         // A tool the server offers and this client cannot carry out must SAY so.
         // Without this branch the press fell through, `finally` cleared the busy
         // flag, and the artist saw a spinner stop and nothing happen — which is
@@ -1384,6 +1404,7 @@ export default function App() {
                 }
                 initialFocus={boardFocus}
                 markPair={boardMark}
+                repairPair={boardRepair}
               />
             </>
           )}
