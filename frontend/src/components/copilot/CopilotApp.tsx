@@ -1100,6 +1100,14 @@ export default function App() {
           await rememberMemory(action.args);
           noteTurn(turn, { actionDone: true, actionNote: "Saved for next time." });
           break;
+        // A tool the server offers and this client cannot carry out must SAY so.
+        // Without this branch the press fell through, `finally` cleared the busy
+        // flag, and the artist saw a spinner stop and nothing happen — which is
+        // how `image_edit` shipped as a Confirm button that did nothing at all.
+        default:
+          throw new Error(
+            `This build cannot carry out "${action.tool}" yet — the server proposed it but it is not wired here.`,
+          );
       }
     } catch (err) {
       // Kept on the turn rather than raised as a banner: the artist pressed a
