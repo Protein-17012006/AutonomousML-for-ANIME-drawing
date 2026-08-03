@@ -172,6 +172,158 @@ def test_an_ok_TOOL_is_never_described_to_synthesis_as_already_done():
     assert "NOTHING in this list has been executed" in prompt
 
 
+def test_the_specialists_MEASUREMENTS_reach_the_writer_not_only_its_prose():
+    """The numbers reached the SCREEN and not the writer.
+
+    `_findings_block` concatenated `r.says` alone, so the whole payload — the
+    class, the key budget, the gap, a tool's arguments — was dropped before
+    synthesis. It rides in the transcript entry's `data`, so the artist could
+    read `gap 0.043` on screen while the model writing the answer had only
+    prose to paraphrase. That is the SPEC 5 defect one level down: the facts
+    must point at the measurement, not restate a sentence about it.
+    """
+    seen = {}
+
+    def say(prompt):
+        seen["p"] = prompt
+        return '{"say": "ok", "tool": null}'
+
+    run_goal(_state(), "g", [], plan_ask_fn=lambda p: _PLAN, say_ask_fn=say)
+    prompt = seen["p"]
+    assert "cls=pose_snap" in prompt
+    assert "keys_suggested=2" in prompt
+    assert "gap=0.043" in prompt              # one level into `evidence`
+    assert "index=0" in prompt                # a tool step's own arguments
+
+
+def test_prose_already_in_says_is_not_repeated_as_a_measurement():
+    """`brief`, `explanation` and `withheld` are sentences the specialist has
+    already spoken through `says`. Repeating them under `measured:` would pad
+    the context with a second copy of the same words and push the actual
+    numbers further from the model's attention."""
+    from service.orchestration.models import StepResult
+    from service.orchestration.service import _findings_block
+    result = StepResult(1, "triage", "agent", "ok", says="Draw 2 keys.",
+                        payload={"cls": "pose_snap", "keys_suggested": 2,
+                                 "brief": "Place a breakdown at the overshoot.",
+                                 "withheld": "keys_suggested and the brief"})
+    block = _findings_block([result])
+    assert "cls=pose_snap" in block
+    assert "brief=" not in block
+    assert "withheld=" not in block
+
+
+# --- the verifier, wired into synthesis --------------------------------------
+
+_REJECTING_PLAN = ('{"steps": [{"target": "image_edit", "kind": "tool", '
+                   '"args": {"index": 9}}]}')
+# Tool-only: `say_ask_fn` is ALSO the specialists' `ask_fn`, so a plan with an
+# agent step makes triage call it too and "how many times was the director
+# asked" stops being answerable by counting.
+_TOOL_ONLY_PLAN = ('{"steps": [{"target": "open_board", "kind": "tool", '
+                   '"args": {"index": 0}}]}')
+
+
+def _synthesis_prompts(prompts):
+    return [p for p in prompts if "AGENT FINDINGS THIS TURN" in p]
+
+
+def test_a_clean_reply_costs_no_second_call():
+    """The check is free when nothing is wrong. If it re-asked every turn it
+    would double the latency of the whole feature to catch a rare defect."""
+    calls = []
+
+    def say(prompt):
+        calls.append(prompt)
+        return '{"say": "The board is ready to open at pair 0.", "tool": null}'
+
+    run_goal(_state(), "g", [], plan_ask_fn=lambda p: _TOOL_ONLY_PLAN, say_ask_fn=say)
+    assert len(_synthesis_prompts(calls)) == 1
+
+
+def test_a_promised_artefact_that_does_not_exist_is_rewritten_once():
+    """The defect class that has bitten three times, now caught by a machine."""
+    replies = ['{"say": "I marked it up for you in pair_9_annotated.png.", "tool": null}',
+               '{"say": "That pair was refused, so there is no marked frame.", '
+               '"tool": null}']
+    prompts = []
+
+    def say(prompt):
+        prompts.append(prompt)
+        return replies[min(len(prompts) - 1, len(replies) - 1)]
+
+    out = run_goal(_state(), "show me the marked frame", [],
+                   plan_ask_fn=lambda p: _TOOL_ONLY_PLAN, say_ask_fn=say)
+    assert len(_synthesis_prompts(prompts)) == 2, "the director was never asked to fix it"
+    assert "REJECTED BY A CHECK" in prompts[1]
+    assert "pair_9_annotated.png" in prompts[1]
+    assert out["say"] == "That pair was refused, so there is no marked frame."
+
+
+def test_a_reply_that_stays_wrong_is_downgraded_to_the_plain_summary():
+    """`_fallback_say` is blunt, and it is always true. A second wrong answer is
+    worse than a plain one."""
+    def say(prompt):
+        return '{"say": "I marked it up in pair_9_annotated.png.", "tool": null}'
+
+    out = run_goal(_state(), "show me the marked frame", [],
+                   plan_ask_fn=lambda p: _TOOL_ONLY_PLAN, say_ask_fn=say)
+    assert "pair_9_annotated.png" not in out["say"]
+    assert "LLM director offline" in out["say"] or "open_board" in out["say"]
+
+
+def test_a_soft_violation_buys_a_rewrite_but_never_a_downgrade():
+    """Rule C is the one that can cry wolf. It may ask for a better answer; it
+    may not throw one away — a false alarm must not cost the artist the reply."""
+    prompts = []
+
+    def say(prompt):
+        prompts.append(prompt)
+        return '{"say": "The gap measured 0.9999, well over the line.", "tool": null}'
+
+    out = run_goal(_state(), "g", [], plan_ask_fn=lambda p: _TOOL_ONLY_PLAN,
+                   say_ask_fn=say)
+    assert len(_synthesis_prompts(prompts)) == 2   # it did ask for a rewrite
+    assert "0.9999" in out["say"]                  # and kept the answer anyway
+
+
+def test_the_check_writes_itself_into_the_transcript():
+    """A mechanism nobody can see is a mechanism nobody can trust."""
+    entries = []
+
+    def say(prompt):
+        return '{"say": "I marked it up in pair_9_annotated.png.", "tool": null}'
+
+    run_goal(_state(), "show me the marked frame", [],
+             plan_ask_fn=lambda p: _TOOL_ONLY_PLAN, say_ask_fn=say,
+             on_entry=entries.append)
+    checks = [e for e in entries if e.frm == "verifier"]
+    assert len(checks) == 1, [e.frm for e in entries]
+    assert "pair_9_annotated.png" in checks[0].text
+
+
+def test_a_refusal_re_enters_the_planner_for_the_tail_end_to_end():
+    """The whole loop: plan, a specialist refuses, the planner is asked again with
+    what happened, and the replacement runs. `plan_ask_fn` is the seam, so the
+    re-entry is visible as a second call carrying the refusal."""
+    prompts = []
+    first = ('{"steps": [{"target": "triage", "kind": "agent", "args": {"index": 5}},'
+             ' {"target": "open_board", "kind": "tool", "args": {"index": 0}}]}')
+    second = '{"steps": [{"target": "open_board", "kind": "tool", "args": {"index": 1}}]}'
+
+    def plan(prompt):
+        prompts.append(prompt)
+        return second if "ALREADY HAPPENED THIS TURN" in prompt else first
+
+    out = run_goal(_state(), "explain pair 5 then open it", [], plan_ask_fn=plan,
+                   say_ask_fn=lambda p: '{"say": "ok", "tool": null}')
+    assert len(prompts) == 2, "the planner was never asked to reconsider"
+    assert "STILL QUEUED: open_board" in prompts[1]
+    assert [s["target"] for s in out["steps"]] == ["triage", "open_board"]
+    # the REPLANNED arguments, not the ones the dead plan carried
+    assert out["steps"][1]["status"] == "ok"
+
+
 def test_a_rejected_AGENT_step_carries_an_agent_specific_note_not_the_tool_one():
     """dispatch.py builds StepResult(..., "agent", "rejected") whenever an
     AGENT step's late-binding reference fails to resolve — newly reachable on

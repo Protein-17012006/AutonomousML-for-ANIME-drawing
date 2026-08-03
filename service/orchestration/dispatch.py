@@ -173,12 +173,44 @@ def _handoff_refusal(result, is_born: bool, handed_to: set, planned: int) -> str
     return ""
 
 
-def run_plan(ctx, plan):
+def _replanned_tail(replan, result, queue, allowed_tools, budget_left):
+    """The tail the planner wants instead, or None to keep what is queued.
+
+    Constraints live HERE rather than in the planner's prompt, because a prompt
+    is a request and this is a rule:
+
+      * a replan may not introduce a TOOL the original plan never proposed. That
+        is the rule handoff already enforces, for the same reason — a tool step
+        queues a button the artist never saw in the plan they were shown.
+      * it cannot outspend the turn's remaining budget.
+      * an unusable answer keeps the original tail. "I could not re-plan" and
+        "do less" are different answers and only one of them is safe to assume;
+        silently deleting planned work is exactly the silent drop the rest of
+        this module goes to trouble to avoid.
+    """
+    situation = (f"The step '{result.target}' was REFUSED and its answer is: "
+                 f"{result.says}")
+    remaining = tuple(step for step, _, _ in queue)
+    try:
+        steps = replan(situation, remaining)
+    except Exception:                   # noqa: BLE001 — a port must not break the turn
+        return None
+    if not steps:
+        return None
+    kept = [s for s in steps
+            if s.kind != "tool" or s.target in allowed_tools][:max(budget_left, 0)]
+    return kept or None
+
+
+def run_plan(ctx, plan, replan=None):
     """Generator: yields (entries, result) for each step actually run, in order.
 
-    Owns the work queue, late binding and handoff. A handoff-born step spends the
-    SAME budget as a planned one — there is no separate allowance — and it is
-    addressed by the agent that authored it, not by the orchestrator. Never raises."""
+    Owns the work queue, late binding, handoff and — once per turn — the replan.
+    A handoff-born step spends the SAME budget as a planned one; there is no
+    separate allowance. Never raises.
+
+    `replan` is an injected port, `(situation, remaining_steps) -> steps | None`,
+    so this module keeps knowing nothing about the planner or its LLM."""
     if not plan.is_actionable():
         return
     seq = Seq()
@@ -186,6 +218,8 @@ def run_plan(ctx, plan):
     sources: dict = {}
     handed_to: set = set()
     ran = 0
+    replanned = False
+    planned_tools = {step.target for step in plan.steps if step.kind == "tool"}
     next_id = max((step.id for step in plan.steps), default=0)
 
     while queue and ran < MAX_PLAN_STEPS:
@@ -218,6 +252,30 @@ def run_plan(ctx, plan):
                                    args=dict(handoff.get("args") or {})),
                               step.target, True))
 
+        # Observe, then re-plan — once. `refusal is None` means the agent offered
+        # no handoff; when it DID offer one, its own choice of who to ask next
+        # wins and this stays out of the way. Two adaptation mechanisms in one
+        # turn are hard to reason about and harder to test.
+        if (replan is not None and not replanned and queue
+                and result.status == "refused" and refusal is None):
+            replanned = True
+            tail = _replanned_tail(replan, result, queue, planned_tools,
+                                   MAX_PLAN_STEPS - ran)
+            if tail is not None:
+                dropped = len(queue)
+                for i, new_step in enumerate(tail):
+                    next_id += 1
+                    tail[i] = replace(new_step, id=next_id)
+                queue = [(s, ORCHESTRATOR, False) for s in tail]
+                sources = dict(sources)     # a replanned step may not name a
+                                            # step from the plan it replaced
+                entries.append(_entry(
+                    seq, ORCHESTRATOR, ORCHESTRATOR, "replan",
+                    f"{result.target} refused, so the {dropped} remaining step(s) "
+                    f"were replaced by {len(tail)}: "
+                    f"{', '.join(s.target for s in tail)}",
+                    data={"status": "replanned", "dropped": dropped}))
+
         if ran >= MAX_PLAN_STEPS and queue:
             # The cap just closed the loop with work still queued (planned steps
             # beyond MAX_PLAN_STEPS, or a handoff accepted too late to run). The
@@ -233,11 +291,11 @@ def run_plan(ctx, plan):
         yield entries, result
 
 
-def dispatch(ctx, plan, on_entry=None) -> list:
+def dispatch(ctx, plan, on_entry=None, replan=None) -> list:
     """Execute `plan` against `ctx`. Returns one StepResult per step, in order.
     Never raises: a handler that explodes becomes an `error` and the plan carries on."""
     results: list = []
-    for entries, result in run_plan(ctx, plan):
+    for entries, result in run_plan(ctx, plan, replan=replan):
         if on_entry is not None:
             for entry in entries:
                 on_entry(entry)

@@ -17,6 +17,10 @@ const SPEAKER: Record<string, string> = {
   triage: "Triage",
   perception: "Perception",
   qa_csq: "QA",
+  // Not an agent: the check that reads the finished reply back against what the
+  // steps actually reported. It speaks only when it caught something, and what
+  // it caught is the artist's business.
+  verifier: "Check",
 };
 
 function speaker(name: string): string {
