@@ -173,6 +173,14 @@ export function ReviewWorkbench({
     setFilledFilter(
       passed.some((pair) => pair.index === repairPair.index) ? "pass" : "abstain",
     );
+    // THREE pieces of state, and every one of them is load-bearing. The paint
+    // surface lives inside the `reconOpen` branch below, so setting outTab alone
+    // selects a tab on a panel that is not on screen: the artist confirmed
+    // "Repair a frame", the chat said "Opened the paint surface", the board
+    // focused the right pair — and there was no paint surface anywhere.
+    // Selecting a leaf without opening its container is the same defect as
+    // focusing a pair the filter hides, one level up.
+    setReconOpen(true);
     setOutTab("repair");
   }
 
