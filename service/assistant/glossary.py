@@ -18,7 +18,7 @@ abstain: CSQ is NOT confident either way — the pair goes to human review; abst
 flag: CSQ believes something is wrong; flagged pairs enter a bounded correction loop.
 correction loop: LLM-directed retry on a flagged pair (region refill / engine escalation / ask for a key), bounded in rounds.
 window: the 16-frame context the vision model looks at around a pair when judging it.
-cadence: the shooting rate of the output — 24, 12, or 8 fps of unique drawings.
+cadence: the declared key rate — 24 (on-1s), 12 (on-2s), 8 (on-3s). TIMING METADATA only: it sets playback fps (cadence x smoothness) and the report. Changing it redraws NOTHING; every in-between returns identical.
 smoothness: display depth — x1 keeps cadence as-is, x2 doubles the in-between density (x4 does not exist).
 needs_key: the gate refused to interpolate this pair; a drawn key is requested instead.
 genga: the key drawing defining a pose. The co-pilot's input is a sequence of genga.

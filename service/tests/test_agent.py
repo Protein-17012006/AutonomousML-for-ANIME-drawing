@@ -358,7 +358,17 @@ def test_user_message_is_capped():
     # three exist because one live answer said the gate "saw a pose snap" — a
     # residual bucket reported as a cause — and returned that same text for two
     # different questions.
-    assert len(empty["p"]) < 6_250, "static prompt has ballooned"
+    # 2026-08-03 (later): 6_250 -> 6_400. One purchase, ~205, after an artist
+    # confirmed a cadence-only re-run, waited out a full re-render and said
+    # "nothing changed". Nothing HAD: cadence never reaches run_copilot — the
+    # runner maps only tau_gate and tau_soft into CopilotCfg — so it sets the
+    # recon video's fps and the report header and leaves every drawing identical.
+    # The agent had promised "24 unique drawings", faithfully repeating the old
+    # glossary line "24, 12, or 8 fps of unique drawings". Bought: a glossary
+    # entry saying cadence is timing metadata that redraws nothing, and one
+    # clause on the rerun_session line forbidding the claim. A first draft cost
+    # ~600 and was cut to ~205 by removing what the smoothness entry already says.
+    assert len(empty["p"]) < 6_400, "static prompt has ballooned"
 
 
 def test_agent_route_keeps_history_server_side(monkeypatch):

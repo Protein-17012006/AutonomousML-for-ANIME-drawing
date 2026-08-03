@@ -205,7 +205,9 @@ def _prompt(ctx: str, hist: str, q: str, memories: list[MemoryItem] | None = Non
         '  export_bundle args {}\n'
         '  rerun_session args {"cadence": 24|12|8|null, "smoothness": 1|2|null, '
         '"interpolator": "rife"|"gimm"|null}  (interpolator is the frame-generation '
-        'model — use it when the artist is unhappy with the generated motion itself)\n'
+        'model — use it when the artist is unhappy with the generated motion itself. '
+        'A cadence-only change returns IDENTICAL drawings: never say it redraws or '
+        'adds drawings)\n'
         '  image_edit    args {"index": int}   (opens the paint surface over that '
         "pair's generated frame so the ARTIST marks the wrong region; you never "
         'choose the region and you never repair anything yourself. Only pairs that '
@@ -275,6 +277,28 @@ def _specialist_ask(state: dict, doc: dict) -> dict | None:
     return {"name": name, "index": ask["index"]}
 
 
+def _unwrap_envelope(say: str) -> str:
+    """Undo a double-encoded reply: a `say` that is itself the JSON envelope.
+
+    Seen live 2026-08-03 — the artist's chat bubble rendered the whole
+    `{"say": ..., "tool": null, ...}` document as prose. The model answered with
+    an envelope whose `say` held a stringified copy of that same envelope, and
+    nothing here asked whether `say` was prose at all.
+
+    Unwraps ONCE and only when the inner object carries a `say` key, so a JSON
+    snippet the artist legitimately asked to see is left as written.
+    """
+    if not say.lstrip().startswith("{"):
+        return say
+    try:
+        inner = json.loads(say)
+    except (ValueError, TypeError):
+        return say
+    if not isinstance(inner, dict) or "say" not in inner:
+        return say
+    return str(inner.get("say") or "").strip()
+
+
 def _decide_from_raw(state: dict, raw: str, ctx: str) -> dict:
     """Parse + whitelist one raw LLM reply into the response dict. Never raises.
     Shared by the blocking route and the SSE stream's final decision."""
@@ -285,7 +309,7 @@ def _decide_from_raw(state: dict, raw: str, ctx: str) -> dict:
         doc = first_json_object(raw)
         if doc is None:
             raise ValueError("model reply contains no JSON object")
-        say  = str(doc.get("say") or "").strip()
+        say  = _unwrap_envelope(str(doc.get("say") or "").strip())
         tool = doc.get("tool")
         args = doc.get("args") or {}
     except (ValueError, TypeError):
@@ -294,6 +318,18 @@ def _decide_from_raw(state: dict, raw: str, ctx: str) -> dict:
 
     fups = _followups(doc)
     asked = _specialist_ask(state, doc)
+    # A specialist named in `tool` is a MISROUTE, not a bad request. Live
+    # 2026-08-03: asked for the marked image of a gate-refused pair, the agent
+    # correctly offered `triage` — the ONLY route to that pair's diagnosis
+    # (ADR-0015) — put it in `tool`, and the artist was told "the server would
+    # not accept it. Try asking a different way." A dead end on exactly the case
+    # the specialist exists for. Route it instead: `_specialist_ask` applies the
+    # same whitelist and the same per-pair check either way, and a specialist's
+    # answer is data the director reports, never an artist-facing action.
+    if asked is None and isinstance(tool, str) and tool in SPECIALISTS:
+        asked = _specialist_ask(state, {"ask": {"name": tool, **args}})
+        if asked is not None:
+            tool, args = None, {}
     spec = TOOLS.get(tool)
     n_pairs = len(state["result"].pairs)
     # Validators take the whole state, not just cfg. This signature has now been
