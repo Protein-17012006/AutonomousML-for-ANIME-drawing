@@ -1091,6 +1091,21 @@ export default function App() {
                 setResult(r);
                 setLiveSid(sidFromResult(r));
               },
+              // The re-run publishes a new revision of THIS saved session, so the
+              // sidebar row is stale the moment it lands: its counts and time now
+              // describe frames that no longer exist. Without this the artist saw
+              // the old summary until they reloaded the page.
+              onPublish: (published) => {
+                if (published.published && published.pid) {
+                  setDurablePid(published.pid);
+                  void loadHistory();
+                  return;
+                }
+                setBanner(
+                  published.error ??
+                    "The re-run finished, but saving it to your history needs a retry.",
+                );
+              },
               onError: (m) => setBanner(m),
             },
           );

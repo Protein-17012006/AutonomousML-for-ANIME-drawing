@@ -129,10 +129,18 @@ class RunSession:
         *,
         history_pid: str | None = None,
         workspace_input: dict | None = None,
+        update_complete: bool = False,
     ) -> dict:
+        # `update_complete` names the status the target entry is expected to be in:
+        # False completes a DRAFT (the first run of a session the artist created),
+        # True revises an entry that is already complete (a re-run of a finished
+        # cut). The publisher guards the write with that condition, so getting it
+        # wrong does not raise — it returns published=False and the revision is
+        # silently dropped.
         return self.adapters.publish_session(
             sid, session_dir, outcome,
             owner_sub=self.repository.owner_for(sid),
             pid=history_pid,
             workspace_input=workspace_input,
+            update_complete=update_complete,
         ) or {}

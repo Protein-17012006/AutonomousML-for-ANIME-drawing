@@ -57,6 +57,7 @@ def stream_session(key_arrays: list[np.ndarray], engines: str, *,
                    smoothness: int = 2, sampling: dict = None, show: str = None,
                    owner_sub: str | None = None,
                    history_pid: str | None = None,
+                   history_pid_is_complete: bool = False,
                    workspace_input: dict | None = None,
                    source_video: bytes | None = None,
                    active_workspace=None,
@@ -190,6 +191,7 @@ def stream_session(key_arrays: list[np.ndarray], engines: str, *,
                     outcome,
                     history_pid=history_pid,
                     workspace_input=workspace_input,
+                    update_complete=history_pid_is_complete,
                 )
                 if published.get("published"):
                     published_pid = published.get("pid")

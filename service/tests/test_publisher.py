@@ -145,8 +145,9 @@ def test_app_worker_calls_publisher(tmp_path, monkeypatch):
     monkeypatch.setattr(
         composition_mod,
         "publish_session",
-        lambda sid, sdir, outcome, *, owner_sub=None, pid=None, workspace_input=None: calls.append(
-            (sid, sdir, outcome, owner_sub, pid, workspace_input)
+        lambda sid, sdir, outcome, *, owner_sub=None, pid=None, workspace_input=None,
+        update_complete=False: calls.append(
+            (sid, sdir, outcome, owner_sub, pid, workspace_input, update_complete)
         ),
     )
     old_runtime = appmod.app.state.session_http_runtime
@@ -163,7 +164,10 @@ def test_app_worker_calls_publisher(tmp_path, monkeypatch):
         appmod.app.state.session_http_runtime = old_runtime
     assert r.status_code == 200 and "event: result" in r.text
     assert len(calls) == 1
-    sid, sdir, outcome, owner_sub, pid, workspace_input = calls[0]
+    sid, sdir, outcome, owner_sub, pid, workspace_input, update_complete = calls[0]
     assert isinstance(sid, int) and outcome.result.pairs
     assert owner_sub is None
     assert pid is None and workspace_input["mode"] == "frames"
+    # A first run either creates the entry or completes a draft; only a re-run
+    # revises an entry that is already complete.
+    assert update_complete is False

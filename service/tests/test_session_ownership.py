@@ -160,7 +160,8 @@ def test_history_pid_is_owned_and_reaches_publisher(monkeypatch, token_is_sub_ve
     monkeypatch.setattr(
         composition_mod,
         "publish_session",
-        lambda sid, sdir, outcome, *, owner_sub=None, pid=None, workspace_input=None: calls.append(
+        lambda sid, sdir, outcome, *, owner_sub=None, pid=None, workspace_input=None,
+        update_complete=False: calls.append(
             (owner_sub, pid, workspace_input)
         ),
     )

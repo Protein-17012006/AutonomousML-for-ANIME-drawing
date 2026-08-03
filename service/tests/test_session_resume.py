@@ -233,6 +233,34 @@ def test_a_resumed_session_answers_the_routes_that_404d_before(published_runtime
     assert alive["verdicts"] == 422, alive
 
 
+def test_rerun_republishes_into_the_parent_history_entry(published_runtime):
+    """A re-run is a new REVISION of the cut, not a second cut.
+
+    `/session/{sid}/rerun` mints a new runtime sid on purpose — a run owns its own
+    session dir — but the durable entry must stay the one already in History.
+    Every other in-session mutation (`/keys`, `/feedback/batch`, the repair route)
+    republishes into `state["published_pid"]`; rerun was the only one publishing
+    with `pid=None`, and `publish_session` turns that into a fresh uuid. The artist
+    confirmed one re-run and found a second "Untitled session" after reloading.
+    """
+    owner = _login("user-a")
+    sid, pid, _ = _run(owner)
+    assert [item["pid"] for item in
+            owner.get("/sessions", headers={"Origin": ORIGIN}).json()["items"]] == [pid]
+
+    response = owner.post(f"/session/{sid}/rerun", data={"smoothness": "1"},
+                          headers={"Origin": ORIGIN})
+    assert response.status_code == 200, response.text
+    published = [json.loads(block.split("data: ", 1)[1])
+                 for block in response.text.split("\n\n")
+                 if block.startswith("event: publish")]
+    # Pin the pid, not just the count: publishing into a NEW entry and deleting
+    # the old one would keep History at one row while losing the artist's title.
+    assert published and published[-1].get("pid") == pid, response.text
+    assert [item["pid"] for item in
+            owner.get("/sessions", headers={"Origin": ORIGIN}).json()["items"]] == [pid]
+
+
 def test_resume_refuses_another_owners_session(published_runtime):
     owner = _login("user-a")
     sid, pid, _ = _run(owner)
