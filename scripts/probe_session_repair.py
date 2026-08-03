@@ -171,8 +171,14 @@ if __name__ == "__main__":
     ap.add_argument("--url", default="https://inbetween-copilot.click")
     ap.add_argument("--clip", default="f000")
     ap.add_argument("--passes", type=int, default=1)
+    ap.add_argument("--max-keys", type=int, default=0,
+                    help="use only the first N frames as keys, to find the "
+                         "smallest cut that clears MIN_MODEL_FRAMES")
     ap.add_argument("--id-token-file", required=True)
     a = ap.parse_args()
     with open(a.id_token_file, encoding="utf-8") as fh:
         token = fh.read().strip()
-    main(a.url, all_frames(a.clip), token, a.passes)
+    keys = all_frames(a.clip)
+    if a.max_keys:
+        keys = keys[:a.max_keys]
+    main(a.url, keys, token, a.passes)
