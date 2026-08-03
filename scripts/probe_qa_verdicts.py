@@ -13,9 +13,12 @@ This talks HTTP to the deployed service on purpose: it therefore measures the
 tau the process ACTUALLY booted with, which is the exact thing a file on disk
 failed to tell us on 2026-08-02.
 
-Usage:
-    python scripts/probe_qa_verdicts.py --url http://127.0.0.1:8000 --clip f000
-    python scripts/probe_qa_verdicts.py --keys path/to/cut/*.png
+Usage — run as a MODULE from the repo root, not as a path. `python scripts/x.py`
+puts `scripts/` on sys.path instead of the repo root and cannot import
+`inbetween_copilot`:
+
+    python -m scripts.probe_qa_verdicts --url http://127.0.0.1:8000 --clip f000
+    python -m scripts.probe_qa_verdicts --keys path/to/cut/*.png
 """
 from __future__ import annotations
 
@@ -140,16 +143,39 @@ def internals(keys: list[str]) -> None:
               f"(fires above {TAU_STILL}, zeroed below total motion {TAU_MOTION})")
 
 
-def run(url: str, keys: list[str], tau_motion: float) -> None:
+def _authenticate(client, url: str, id_token: str) -> None:
+    """Trade a Cognito ID token for the session cookie the app routes require.
+
+    `authenticate_request` reads the COOKIE (or the ALB header), never a bare
+    bearer, so POST /auth/session is a required hop rather than a convenience.
+    The cookie is `Secure` in production, which is why this only works against
+    an https:// origin. `Origin` is mandatory once a cookie is present
+    (auth.py:331) and must equal scheme://host exactly.
+    """
+    origin = url.rstrip("/")
+    r = client.post(f"{url}/auth/session",
+                    headers={"Authorization": f"Bearer {id_token}", "Origin": origin})
+    if r.status_code != 204:
+        raise SystemExit(f"POST /auth/session -> {r.status_code}: {r.text[:300]}")
+    me = client.get(f"{url}/auth/me", headers={"Origin": origin})
+    if me.status_code != 200:
+        raise SystemExit(f"GET /auth/me -> {me.status_code}: {me.text[:300]}")
+    print(f"[probe] authenticated as sub={me.json().get('user_sub')}")
+
+
+def run(url: str, keys: list[str], tau_motion: float, id_token: str | None = None) -> None:
     import httpx
 
+    origin = url.rstrip("/")
     print(f"[probe] posting {len(keys)} keys -> {url}/session (engines=box)")
     files = [("keys", (os.path.basename(p), open(p, "rb"), "image/png")) for p in keys]
     pairs: list[dict] = []
     result = None
-    with httpx.Client(timeout=900.0) as client:
+    with httpx.Client(timeout=900.0, follow_redirects=False) as client:
+        if id_token:
+            _authenticate(client, url, id_token)
         with client.stream("POST", f"{url}/session", data={"engines": "box"},
-                           files=files) as r:
+                           headers={"Origin": origin}, files=files) as r:
             r.raise_for_status()
             for line in r.iter_lines():
                 if not line.startswith("data: "):
@@ -194,10 +220,18 @@ if __name__ == "__main__":
     ap.add_argument("--tau-motion", type=float, default=TAU_SRC_MOTION)
     ap.add_argument("--internals", action="store_true",
                     help="also read the guards' own inputs, in-process")
+    ap.add_argument("--id-token-file", default=None,
+                    help="file holding a Cognito ID token; required against a "
+                         "deployment with COPILOT_AUTH_REQUIRED=1. Never pass the "
+                         "token on the command line — it is a credential.")
     a = ap.parse_args()
     if not a.clip and not a.keys:
         raise SystemExit("give --clip or --keys")
     key_paths = a.keys if a.keys else clip_keys(a.clip)
     if a.internals:
         internals(key_paths)
-    run(a.url, key_paths, a.tau_motion)
+    token = None
+    if a.id_token_file:
+        with open(a.id_token_file, encoding="utf-8") as fh:
+            token = fh.read().strip()
+    run(a.url, key_paths, a.tau_motion, token)
