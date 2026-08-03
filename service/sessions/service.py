@@ -93,6 +93,13 @@ class RunSession:
             # "where in the image?", triage answered "there is nothing to point
             # at" while pair_1_keys.png sat in this very directory.
             "pair_keys": dict(metadata.pair_keys or {}),
+            # The rendered in-between for each FILLED pair, and the same trap one
+            # line up: it was returned to the client and never persisted, so
+            # `_valid_repairable` — which reads state["pair_mids"], and whose only
+            # other source `PairResult.mid_url` does not exist as a field — was
+            # False for every pair of every session. `image_edit` could be
+            # proposed by the agent and was refused by the server, always.
+            "pair_mids": dict(metadata.pair_mids or {}),
             "qa_degraded": metadata.qa_degraded,
             "sampling": persisted_sampling,
             # per-gap real GT (video flow; None for PNG uploads) — the compare

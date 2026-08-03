@@ -185,6 +185,9 @@ class ResumeSession:
                 # Published with the result event, so a reopened session can
                 # still point the artist at where the drawing travels.
                 "pair_keys": dict(result_event.get("pair_keys") or {}),
+                # Likewise published with the result event: without it a reopened
+                # session cannot offer to repair a frame it is still showing.
+                "pair_mids": dict(result_event.get("pair_mids") or {}),
                 "qa_degraded": bool(result_event.get("qa_degraded")),
                 "sampling": dict(result_event.get("sampling") or {}),
                 # Per-gap ground truth is not published (it would mean storing
